@@ -2,7 +2,7 @@
 
 ## 主目标
 
-- 在 `feature/minimal-skeleton` 分支完成 `CMP` 首个最小可运行工程骨架。
+- 在 `feature/minimal-skeleton-pr` 分支完成 `CMP` 首个最小可运行工程骨架。
 - 本批次只建立后端、前端、本地编排、仓库级验证入口和范围边界验收。
 - 本批次不得提前实现身份、组织、权限、Agent、集成、合同、文档、流程等业务对象。
 
@@ -25,8 +25,8 @@
 ## 当前阶段
 
 - 阶段：首个最小可运行工程骨架编码实现与最终验收。
-- 分支：`feature/minimal-skeleton`。
-- 隔离工作区：`.worktrees/minimal-skeleton`。
+- 分支：`feature/minimal-skeleton-pr`。
+- 隔离工作区：`.worktrees/minimal-skeleton-pr`。
 - 规格：[`101-minimal-runnable-skeleton-design.md`](../superpowers/specs/101-minimal-runnable-skeleton-design.md)。
 - 计划：[`101-minimal-runnable-skeleton-implementation-plan.md`](../superpowers/plans/101-minimal-runnable-skeleton-implementation-plan.md)。
 
@@ -57,7 +57,7 @@
 - [✓] 本地 `Docker Compose` 编排完成，前端服务就绪问题已修复为静态资源服务与健康门禁。
 - [✓] 仓库级验证脚本完成。
 - [✓] 最终质量验收通过。
-- [✓] 分支名已从范围过窄的 `feature/minimal-skeleton-backend` 收口为 `feature/minimal-skeleton`。
+- [✓] 分支名已从范围过窄的 `feature/minimal-skeleton-backend` 收口为 `feature/minimal-skeleton-pr`。
 
 ## 当前阻塞
 
@@ -67,7 +67,7 @@
 
 ## 活跃支线
 
-- [✓] 分支命名纠偏：已重命名为 `feature/minimal-skeleton`，隔离工作区目录已重命名为 `.worktrees/minimal-skeleton`。
+- [✓] 分支命名纠偏：已重命名为 `feature/minimal-skeleton-pr`，隔离工作区目录已重命名为 `.worktrees/minimal-skeleton-pr`。
 - [✓] planning 真相纠偏：已将文档阶段历史迁入 `history.md`，避免当前批次真相混入历史任务。
 
 ## 下一步唯一动作
@@ -77,6 +77,6 @@
 ## 恢复提示
 
 - 恢复时先读本文件、[`history.md`](./history.md)、[`decisions.md`](./decisions.md)。
-- 当前编码分支为 `feature/minimal-skeleton`，工作区为 `.worktrees/minimal-skeleton`。
+- 当前编码分支为 `feature/minimal-skeleton-pr`，工作区为 `.worktrees/minimal-skeleton-pr`。
 - 本批次正式执行依据为 [`101-minimal-runnable-skeleton-design.md`](../superpowers/specs/101-minimal-runnable-skeleton-design.md) 与 [`101-minimal-runnable-skeleton-implementation-plan.md`](../superpowers/plans/101-minimal-runnable-skeleton-implementation-plan.md)。
 - 不要把已归档的文档阶段长列表写回 `current.md`；历史批次只在 `history.md` 维护。
