@@ -1,0 +1,564 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<svg
+   width="1600"
+   height="1060"
+   viewBox="0 0 1600 1060"
+   role="img"
+   aria-labelledby="title desc"
+   version="1.1"
+   id="svg68"
+   sodipodi:docname="encrypted-document-architecture.svg"
+   inkscape:version="1.3 (0e150ed, 2023-07-21)"
+   xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
+   xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
+   xmlns="http://www.w3.org/2000/svg"
+   xmlns:svg="http://www.w3.org/2000/svg">
+  <sodipodi:namedview
+     id="namedview68"
+     pagecolor="#ffffff"
+     bordercolor="#000000"
+     borderopacity="0.25"
+     inkscape:showpageshadow="2"
+     inkscape:pageopacity="0.0"
+     inkscape:pagecheckerboard="0"
+     inkscape:deskcolor="#d1d1d1"
+     inkscape:zoom="0.80698561"
+     inkscape:cx="644.37332"
+     inkscape:cy="348.82902"
+     inkscape:window-width="2048"
+     inkscape:window-height="1024"
+     inkscape:window-x="0"
+     inkscape:window-y="25"
+     inkscape:window-maximized="1"
+     inkscape:current-layer="svg68" />
+  <title
+     id="title">加密文档子模块架构图</title>
+  <desc
+     id="desc">展示文档中心写入自动加密、平台内按权限自动解密使用、管理端按部门人员授权解密下载、导出明文可脱离CMP使用、审计链路以及与签章归档搜索AI的关系。</desc>
+  <defs
+     id="defs3">
+    <style
+       id="style1">&#10;      .bg { fill: #f7f8fc; }&#10;      .panel { fill: #ffffff; stroke: #d8deeb; stroke-width: 2; rx: 18; ry: 18; }&#10;      .cmp { fill: #eef4ff; stroke: #7aa2ff; stroke-width: 2; rx: 20; ry: 20; }&#10;      .module { fill: #f6f8fb; stroke: #96a3b8; stroke-width: 2; rx: 16; ry: 16; }&#10;      .focus { fill: #fff5e8; stroke: #f0a44b; stroke-width: 2.5; rx: 16; ry: 16; }&#10;      .audit { fill: #eefcf4; stroke: #56b67a; stroke-width: 2; rx: 16; ry: 16; }&#10;      .export { fill: #fff0f0; stroke: #de6d6d; stroke-width: 2; rx: 16; ry: 16; }&#10;      .title { font: 700 28px -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif; fill: #1f2937; }&#10;      .h2 { font: 700 21px -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif; fill: #1f2937; }&#10;      .h3 { font: 700 18px -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif; fill: #243042; }&#10;      .text { font: 15px -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif; fill: #334155; }&#10;      .small { font: 14px -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif; fill: #475569; }&#10;      .label { font: 700 14px -apple-system, BlinkMacSystemFont, &quot;Segoe UI&quot;, sans-serif; fill: #1e293b; }&#10;      .arrow { stroke: #53657d; stroke-width: 2.4; fill: none; marker-end: url(#arrow); }&#10;      .soft { stroke: #7c8da5; stroke-width: 2; fill: none; marker-end: url(#arrow); }&#10;      .audit-line { stroke: #2d9c5a; stroke-width: 2.2; fill: none; marker-end: url(#arrow-green); }&#10;      .export-line { stroke: #cc5c5c; stroke-width: 2.2; fill: none; marker-end: url(#arrow-red); }&#10;      .dash { stroke-dasharray: 8 7; }&#10;    </style>
+    <marker
+       id="arrow"
+       markerWidth="10"
+       markerHeight="10"
+       refX="8"
+       refY="5"
+       orient="auto">
+      <path
+         d="M0,0 L10,5 L0,10 z"
+         fill="#53657d"
+         id="path1" />
+    </marker>
+    <marker
+       id="arrow-green"
+       markerWidth="10"
+       markerHeight="10"
+       refX="8"
+       refY="5"
+       orient="auto">
+      <path
+         d="M0,0 L10,5 L0,10 z"
+         fill="#2d9c5a"
+         id="path2" />
+    </marker>
+    <marker
+       id="arrow-red"
+       markerWidth="10"
+       markerHeight="10"
+       refX="8"
+       refY="5"
+       orient="auto">
+      <path
+         d="M0,0 L10,5 L0,10 z"
+         fill="#cc5c5c"
+         id="path3" />
+    </marker>
+  </defs>
+  <rect
+     class="bg"
+     x="0"
+     y="0"
+     width="1600"
+     height="1060"
+     id="rect3" />
+  <text
+     class="title"
+     x="52"
+     y="56"
+     id="text3">CMP 加密文档子模块 Architecture Overview</text>
+  <rect
+     class="cmp"
+     x="40"
+     y="88"
+     width="1520"
+     height="900"
+     id="rect4" />
+  <text
+     class="h2"
+     x="64"
+     y="124"
+     id="text4">CMP 平台内协同关系</text>
+  <rect
+     class="module"
+     x="80"
+     y="170"
+     width="270"
+     height="110"
+     id="rect5" />
+  <text
+     class="h3"
+     x="168"
+     y="204"
+     id="text5"
+     style="font-style:normal;font-variant:normal;font-weight:700;font-stretch:normal;font-size:18px;line-height:normal;font-family:'-apple-system', BlinkMacSystemFont, 'Segoe UI', sans-serif">合同主档</text>
+  <text
+     class="text"
+     x="108"
+     y="238"
+     id="text6">业务真相源</text>
+  <text
+     class="text"
+     x="108"
+     y="262"
+     id="text7">提供 contract_id 与业务上下文</text>
+  <rect
+     class="module"
+     x="80"
+     y="338"
+     width="300"
+     height="150"
+     id="rect7" />
+  <text
+     class="h3"
+     x="176"
+     y="374"
+     id="text8"
+     style="font-style:normal;font-variant:normal;font-weight:700;font-stretch:normal;font-size:18px;line-height:normal;font-family:'-apple-system', BlinkMacSystemFont, 'Segoe UI', sans-serif">文档中心</text>
+  <text
+     class="text"
+     x="108"
+     y="408"
+     id="text9">文件真相源</text>
+  <text
+     class="text"
+     x="108"
+     y="432"
+     id="text10">写入: 正文 / 附件 / 签章稿 / 归档稿</text>
+  <text
+     class="text"
+     x="108"
+     y="456"
+     id="text11">读取: 预览 / 下载 / 平台内部消费</text>
+  <rect
+     class="focus"
+     x="470"
+     y="170"
+     width="420"
+     height="530"
+     id="rect11" />
+  <text
+     class="h2"
+     x="606"
+     y="208"
+     id="text12"
+     style="font-style:normal;font-variant:normal;font-weight:700;font-stretch:normal;font-size:21px;line-height:normal;font-family:'-apple-system', BlinkMacSystemFont, 'Segoe UI', sans-serif">加密文档子模块</text>
+  <rect
+     class="panel"
+     x="500"
+     y="236"
+     width="360"
+     height="86"
+     id="rect12" />
+  <text
+     class="h3"
+     x="526"
+     y="274"
+     id="text13"
+     style="font-style:normal;font-variant:normal;font-weight:700;font-stretch:normal;font-size:18px;line-height:normal;font-family:'-apple-system', BlinkMacSystemFont, 'Segoe UI', sans-serif">Encryption Ingress Adapter</text>
+  <text
+     class="text"
+     x="546"
+     y="300"
+     id="text14"
+     style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:15px;line-height:normal;font-family:'-apple-system', BlinkMacSystemFont, 'Segoe UI', sans-serif">文档中心写入后自动加密</text>
+  <rect
+     class="panel"
+     x="500"
+     y="344"
+     width="360"
+     height="86"
+     id="rect14" />
+  <text
+     class="h3"
+     x="526"
+     y="382"
+     id="text15"
+     style="font-style:normal;font-variant:normal;font-weight:700;font-stretch:normal;font-size:18px;line-height:normal;font-family:'-apple-system', BlinkMacSystemFont, 'Segoe UI', sans-serif">Protected Read Gateway</text>
+  <text
+     class="text"
+     x="530"
+     y="408"
+     id="text16"
+     style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:15px;line-height:normal;font-family:'-apple-system', BlinkMacSystemFont, 'Segoe UI', sans-serif">平台内按权限自动解密使用</text>
+  <rect
+     class="panel"
+     x="500"
+     y="452"
+     width="360"
+     height="98"
+     id="rect16" />
+  <text
+     class="h3"
+     x="526"
+     y="486"
+     id="text17">Authorization Policy Adapter</text>
+  <text
+     class="text"
+     x="526"
+     y="512"
+     id="text18">接收管理端对部门 / 人员的授权结果</text>
+  <text
+     class="text"
+     x="526"
+     y="536"
+     id="text19">解释受控解密下载策略</text>
+  <rect
+     class="panel"
+     x="500"
+     y="572"
+     width="360"
+     height="98"
+     id="rect19" />
+  <text
+     class="h3"
+     x="526"
+     y="606"
+     id="text20">Decrypt Download Control</text>
+  <text
+     class="text"
+     x="526"
+     y="632"
+     id="text21">命中授权后生成受控明文导出结果</text>
+  <text
+     class="text"
+     x="526"
+     y="656"
+     id="text22">默认密文不可脱离 CMP 使用</text>
+  <rect
+     class="module"
+     x="960"
+     y="170"
+     width="280"
+     height="120"
+     id="rect22" />
+  <text
+     class="h3"
+     x="1022"
+     y="192"
+     id="text23"
+     style="font-style:normal;font-variant:normal;font-weight:700;font-stretch:normal;font-size:18px;line-height:normal;font-family:'-apple-system', BlinkMacSystemFont, 'Segoe UI', sans-serif">管理端授权模块</text>
+  <text
+     class="text"
+     x="996"
+     y="252"
+     id="text24"
+     style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:15px;line-height:normal;font-family:'-apple-system', BlinkMacSystemFont, 'Segoe UI', sans-serif">按部门 / 人员配置</text>
+  <text
+     class="text"
+     x="988"
+     y="272"
+     id="text25"
+     style="font-style:normal;font-variant:normal;font-weight:normal;font-stretch:normal;font-size:15px;line-height:normal;font-family:'-apple-system', BlinkMacSystemFont, 'Segoe UI', sans-serif">解密下载受控例外授权</text>
+  <rect
+     class="audit"
+     x="960"
+     y="328"
+     width="280"
+     height="210"
+     id="rect25" />
+  <text
+     class="h3"
+     x="988"
+     y="368"
+     id="text26">审计与回写链路</text>
+  <text
+     class="text"
+     x="988"
+     y="402"
+     id="text27">记录:</text>
+  <text
+     class="text"
+     x="1020"
+     y="430"
+     id="text28">加密入库</text>
+  <text
+     class="text"
+     x="1020"
+     y="456"
+     id="text29">平台内解密使用</text>
+  <text
+     class="text"
+     x="1020"
+     y="482"
+     id="text30">授权命中 / 拒绝</text>
+  <text
+     class="text"
+     x="1020"
+     y="508"
+     id="text31">解密下载 / 导出结果</text>
+  <rect
+     class="export"
+     x="960"
+     y="580"
+     width="280"
+     height="120"
+     id="rect31" />
+  <text
+     class="h3"
+     x="988"
+     y="620"
+     id="text32">导出明文文件</text>
+  <text
+     class="text"
+     x="988"
+     y="650"
+     id="text33">命中授权后可脱离 CMP 使用</text>
+  <text
+     class="text"
+     x="988"
+     y="674"
+     id="text34">但不改写平台默认主规则</text>
+  <rect
+     class="module"
+     x="1290"
+     y="170"
+     width="220"
+     height="110"
+     id="rect34" />
+  <text
+     class="h3"
+     x="1366"
+     y="206"
+     id="text35"
+     style="font-style:normal;font-variant:normal;font-weight:700;font-stretch:normal;font-size:18px;line-height:normal;font-family:'-apple-system', BlinkMacSystemFont, 'Segoe UI', sans-serif">电子签章</text>
+  <text
+     class="text"
+     x="1320"
+     y="238"
+     id="text36">消费受控文件</text>
+  <text
+     class="text"
+     x="1320"
+     y="262"
+     id="text37">结果稿回到文档中心</text>
+  <rect
+     class="module"
+     x="1290"
+     y="314"
+     width="220"
+     height="110"
+     id="rect37" />
+  <text
+     class="h3"
+     x="1376"
+     y="344"
+     id="text38"
+     style="font-style:normal;font-variant:normal;font-weight:700;font-stretch:normal;font-size:18px;line-height:normal;font-family:'-apple-system', BlinkMacSystemFont, 'Segoe UI', sans-serif">归档</text>
+  <text
+     class="text"
+     x="1320"
+     y="382"
+     id="text39">消费正式文件</text>
+  <text
+     class="text"
+     x="1320"
+     y="406"
+     id="text40">归档稿继续受加密治理</text>
+  <rect
+     class="module"
+     x="1290"
+     y="458"
+     width="220"
+     height="110"
+     id="rect40" />
+  <text
+     class="h3"
+     x="1384"
+     y="480"
+     id="text41"
+     style="font-style:normal;font-variant:normal;font-weight:700;font-stretch:normal;font-size:18px;line-height:normal;font-family:'-apple-system', BlinkMacSystemFont, 'Segoe UI', sans-serif;-inkscape-font-specification:'-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif, Bold';font-variant-ligatures:normal;font-variant-caps:normal;font-variant-numeric:normal;font-variant-east-asian:normal;fill:#243042">搜索</text>
+  <text
+     class="text"
+     x="1320"
+     y="526"
+     id="text42">消费受控文本或摘要</text>
+  <text
+     class="text"
+     x="1320"
+     y="550"
+     id="text43">不持有文件真相</text>
+  <rect
+     class="module"
+     x="1290"
+     y="602"
+     width="220"
+     height="110"
+     id="rect43" />
+  <text
+     class="h3"
+     x="1386"
+     y="626"
+     id="text44"
+     style="font-style:normal;font-variant:normal;font-weight:700;font-stretch:normal;font-size:18px;line-height:normal;font-family:'-apple-system', BlinkMacSystemFont, 'Segoe UI', sans-serif">AI</text>
+  <text
+     class="text"
+     x="1320"
+     y="670"
+     id="text45">消费加密正式文件或</text>
+  <text
+     class="text"
+     x="1320"
+     y="694"
+     id="text46">解密后的受控结果</text>
+  <rect
+     class="panel"
+     x="120"
+     y="786"
+     width="1320"
+     height="148"
+     id="rect46" />
+  <text
+     class="h3"
+     x="150"
+     y="824"
+     id="text47">主规则与例外</text>
+  <text
+     class="text"
+     x="150"
+     y="856"
+     id="text48">默认规则: 文件进入文档中心后自动加密，密文文档不可脱离 CMP 使用。</text>
+  <text
+     class="text"
+     x="150"
+     y="884"
+     id="text49">平台内例外: 合同详情、签章、归档、搜索、AI 等模块可在权限命中后自动解密使用。</text>
+  <text
+     class="text"
+     x="150"
+     y="912"
+     id="text50">平台外受控例外: 仅管理端按部门 / 人员授权的解密下载，可导出可脱离 CMP 使用的明文文件。</text>
+  <path
+     class="arrow"
+     d="M350 412 L500 279"
+     id="path50" />
+  <text
+     class="label"
+     x="374"
+     y="324"
+     id="text51">写入文档中心</text>
+  <path
+     class="arrow"
+     d="M350 412 L500 387"
+     id="path51" />
+  <text
+     class="label"
+     x="394"
+     y="392"
+     id="text52">读取请求</text>
+  <path
+     class="soft dash"
+     d="M350 226 L470 226"
+     id="path52" />
+  <text
+     class="label"
+     x="372"
+     y="214"
+     id="text53">业务上下文</text>
+  <path
+     class="arrow"
+     d="M1240 230 L860 501"
+     id="path53" />
+  <text
+     class="label"
+     x="950"
+     y="296"
+     id="text54">部门 / 人员授权</text>
+  <path
+     class="arrow"
+     d="M680 550 L680 572"
+     id="path54" />
+  <path
+     class="export-line"
+     d="M860 621 L960 640"
+     id="path55" />
+  <text
+     class="label"
+     x="850"
+     y="600"
+     id="text55">命中授权后解密下载</text>
+  <path
+     class="audit-line"
+     d="M860 279 L960 382"
+     id="path56" />
+  <path
+     class="audit-line"
+     d="M860 387 L960 430"
+     id="path57" />
+  <path
+     class="audit-line"
+     d="M860 501 L960 478"
+     id="path58" />
+  <path
+     class="audit-line"
+     d="M860 621 L960 526"
+     id="path59" />
+  <path
+     class="arrow"
+     d="M860 387 L1290 225"
+     id="path60" />
+  <path
+     class="arrow"
+     d="M860 387 L1290 369"
+     id="path61" />
+  <path
+     class="arrow"
+     d="M860 387 L1290 513"
+     id="path62" />
+  <path
+     class="arrow"
+     d="M860 387 L1290 657"
+     id="path63" />
+  <text
+     class="label"
+     x="998"
+     y="226"
+     id="text63"
+     style="font-style:normal;font-variant:normal;font-weight:700;font-stretch:normal;font-size:14px;line-height:normal;font-family:'-apple-system', BlinkMacSystemFont, 'Segoe UI', sans-serif">平台内按权限自动解密使用</text>
+  <path
+     class="audit-line"
+     d="M1510 225 L1240 402"
+     id="path64" />
+  <path
+     class="audit-line"
+     d="M1510 369 L1240 430"
+     id="path65" />
+  <path
+     class="audit-line"
+     d="M1510 513 L1240 458"
+     id="path66" />
+  <path
+     class="audit-line"
+     d="M1510 657 L1240 486"
+     id="path67" />
+  <path
+     class="export-line"
+     d="M1240 640 L1290 640"
+     id="path68" />
+  <text
+     class="label"
+     x="1260"
+     y="620"
+     id="text68">可脱离 CMP 使用</text>
+</svg>

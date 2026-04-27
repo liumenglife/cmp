@@ -1,0 +1,167 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1120" viewBox="0 0 1600 1120" role="img" aria-labelledby="title desc">
+  <title id="title">检索 OCR AI 业务应用主线架构图</title>
+  <desc id="desc">展示合同主档作为业务真相源、文档中心作为文件真相源，OCR、搜索、Agent OS 与 AI 业务应用之间的数据流、结果流与回写流，以及条款库、模板库、摘要、问答、风险识别、比对提取的协作关系。</desc>
+  <defs>
+    <style>
+      .bg { fill: #f7f9fc; }
+      .panel { fill: #ffffff; stroke: #c7d2e3; stroke-width: 2; rx: 18; ry: 18; }
+      .truthBusiness { fill: #e8f1ff; stroke: #2563eb; stroke-width: 3; rx: 22; ry: 22; }
+      .truthFile { fill: #ecfdf3; stroke: #16a34a; stroke-width: 3; rx: 22; ry: 22; }
+      .runtime { fill: #f3ecff; stroke: #7c3aed; stroke-width: 3; rx: 22; ry: 22; }
+      .app { fill: #fff6e8; stroke: #d97706; stroke-width: 3; rx: 22; ry: 22; }
+      .support { fill: #fff1f2; stroke: #e11d48; stroke-width: 2.5; rx: 18; ry: 18; }
+      .legend { fill: #ffffff; stroke: #d0d7e2; stroke-width: 1.5; rx: 12; ry: 12; }
+      .title { font: 700 26px Arial, "PingFang SC", "Microsoft YaHei", sans-serif; fill: #1f2937; }
+      .subtitle { font: 600 18px Arial, "PingFang SC", "Microsoft YaHei", sans-serif; fill: #334155; }
+      .text { font: 500 16px Arial, "PingFang SC", "Microsoft YaHei", sans-serif; fill: #334155; }
+      .small { font: 500 14px Arial, "PingFang SC", "Microsoft YaHei", sans-serif; fill: #475569; }
+      .mono { font: 600 14px Arial, "PingFang SC", "Microsoft YaHei", sans-serif; fill: #0f172a; }
+      .line-data { stroke: #2563eb; stroke-width: 3; fill: none; }
+      .line-result { stroke: #d97706; stroke-width: 3; fill: none; }
+      .line-writeback { stroke: #dc2626; stroke-width: 3; fill: none; }
+      .line-runtime { stroke: #7c3aed; stroke-width: 3; fill: none; }
+      .dashed { stroke-dasharray: 8 6; }
+    </style>
+    <marker id="arrowBlue" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M 0 0 L 12 6 L 0 12 z" fill="#2563eb" />
+    </marker>
+    <marker id="arrowOrange" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M 0 0 L 12 6 L 0 12 z" fill="#d97706" />
+    </marker>
+    <marker id="arrowRed" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M 0 0 L 12 6 L 0 12 z" fill="#dc2626" />
+    </marker>
+    <marker id="arrowPurple" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M 0 0 L 12 6 L 0 12 z" fill="#7c3aed" />
+    </marker>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1600" height="1120" />
+  <text class="title" x="800" y="42" text-anchor="middle">检索 / OCR / AI 业务应用主线架构关系</text>
+  <text class="small" x="800" y="70" text-anchor="middle">业务真相源、文件真相源、数据流、结果流、回写流与 AI 运行时协同</text>
+
+  <rect class="truthBusiness" x="40" y="110" width="320" height="180" />
+  <text class="subtitle" x="200" y="148" text-anchor="middle">合同主档</text>
+  <text class="text" x="200" y="178" text-anchor="middle">业务真相源</text>
+  <text class="small" x="200" y="210" text-anchor="middle">contract_id / 生命周期 / 业务归属</text>
+  <text class="small" x="200" y="236" text-anchor="middle">摘要、风险、提取结果回写锚点</text>
+
+  <rect class="truthFile" x="40" y="340" width="320" height="240" />
+  <text class="subtitle" x="200" y="378" text-anchor="middle">文档中心</text>
+  <text class="text" x="200" y="408" text-anchor="middle">文件真相源</text>
+  <text class="small" x="200" y="440" text-anchor="middle">正文、附件、扫描件、版本链</text>
+  <text class="small" x="200" y="466" text-anchor="middle">OCR / 搜索 / AI 应用统一输入源</text>
+  <text class="small" x="200" y="492" text-anchor="middle">不允许各模块私建文件真相源</text>
+
+  <rect class="support" x="40" y="640" width="320" height="220" />
+  <text class="subtitle" x="200" y="678" text-anchor="middle">条款库 / 模板库</text>
+  <text class="small" x="200" y="712" text-anchor="middle">合同 AI 重要底座</text>
+  <text class="small" x="200" y="738" text-anchor="middle">标准条款、模板结构、语义参照</text>
+  <text class="small" x="200" y="764" text-anchor="middle">支持问答、风险识别、比对提取</text>
+  <text class="small" x="200" y="790" text-anchor="middle">多语言术语与结构背景</text>
+
+  <rect class="panel" x="430" y="110" width="340" height="190" />
+  <text class="subtitle" x="600" y="148" text-anchor="middle">OCR</text>
+  <text class="text" x="600" y="178" text-anchor="middle">文件理解入口</text>
+  <text class="small" x="600" y="210" text-anchor="middle">文本结果 / 结构化结果 / 版面片段</text>
+  <text class="small" x="600" y="236" text-anchor="middle">输入来自文档中心受控版本</text>
+  <text class="small" x="600" y="262" text-anchor="middle">结果回指原始文件，不改写文件真相</text>
+
+  <rect class="panel" x="430" y="350" width="340" height="230" />
+  <text class="subtitle" x="600" y="388" text-anchor="middle">搜索</text>
+  <text class="text" x="600" y="418" text-anchor="middle">稳定检索结果层</text>
+  <text class="small" x="600" y="450" text-anchor="middle">索引、检索、筛选、排序、召回</text>
+  <text class="small" x="600" y="476" text-anchor="middle">合同级 / 文档级 / 条款级结果</text>
+  <text class="small" x="600" y="502" text-anchor="middle">多语言处理与结果聚合</text>
+  <text class="small" x="600" y="528" text-anchor="middle">读模型，不是业务真相源</text>
+
+  <rect class="runtime" x="860" y="110" width="320" height="220" />
+  <text class="subtitle" x="1020" y="148" text-anchor="middle">Agent OS</text>
+  <text class="text" x="1020" y="178" text-anchor="middle">AI 能力底座 / 运行时操作系统</text>
+  <text class="small" x="1020" y="210" text-anchor="middle">模型 / Provider 抽象</text>
+  <text class="small" x="1020" y="236" text-anchor="middle">工具调用 / 审计 / 人工确认</text>
+  <text class="small" x="1020" y="262" text-anchor="middle">不把单一模型写死成唯一方案</text>
+
+  <rect class="app" x="860" y="390" width="700" height="360" />
+  <text class="subtitle" x="1210" y="430" text-anchor="middle">AI 业务应用层</text>
+  <text class="text" x="1210" y="460" text-anchor="middle">消费合同主档、文档中心、OCR、搜索与 Agent OS 的受控结果</text>
+
+  <rect class="panel" x="900" y="500" width="150" height="90" />
+  <text class="text" x="975" y="536" text-anchor="middle">摘要</text>
+  <text class="small" x="975" y="564" text-anchor="middle">合同概览</text>
+
+  <rect class="panel" x="1080" y="500" width="150" height="90" />
+  <text class="text" x="1155" y="536" text-anchor="middle">问答</text>
+  <text class="small" x="1155" y="564" text-anchor="middle">引用问答</text>
+
+  <rect class="panel" x="1260" y="500" width="150" height="90" />
+  <text class="text" x="1335" y="536" text-anchor="middle">风险识别</text>
+  <text class="small" x="1335" y="564" text-anchor="middle">证据化结果</text>
+
+  <rect class="panel" x="1440" y="500" width="90" height="90" />
+  <text class="small" x="1485" y="536" text-anchor="middle">比对</text>
+  <text class="small" x="1485" y="562" text-anchor="middle">提取</text>
+
+  <rect class="support" x="900" y="620" width="630" height="90" />
+  <text class="small" x="1215" y="656" text-anchor="middle">共享支撑层：语言识别、术语归一、结果审计、质量评估、人工校验入口</text>
+  <text class="small" x="1215" y="684" text-anchor="middle">多语言是正式能力，检索与 AI 应用都必须处理语言边界</text>
+
+  <rect class="panel" x="1180" y="110" width="380" height="220" />
+  <text class="subtitle" x="1370" y="148" text-anchor="middle">结果回写目的地</text>
+  <text class="small" x="1370" y="182" text-anchor="middle">不直接改写原始真相，只回写受控业务结果</text>
+  <rect class="panel" x="1210" y="210" width="150" height="80" />
+  <text class="small" x="1285" y="242" text-anchor="middle">合同主档摘要区</text>
+  <text class="small" x="1285" y="268" text-anchor="middle">风险 / 提取结果</text>
+  <rect class="panel" x="1380" y="210" width="150" height="80" />
+  <text class="small" x="1455" y="242" text-anchor="middle">审计 / 应用记录</text>
+  <text class="small" x="1455" y="268" text-anchor="middle">引用与可追溯链路</text>
+
+  <path class="line-data" marker-end="url(#arrowBlue)" d="M 360 430 C 390 430, 400 200, 430 200" />
+  <text class="small" x="402" y="290" text-anchor="middle">文件输入 / 数据流</text>
+
+  <path class="line-result" marker-end="url(#arrowOrange)" d="M 600 300 L 600 350" />
+  <text class="small" x="646" y="332">识别结果流</text>
+
+  <path class="line-data" marker-end="url(#arrowBlue)" d="M 360 210 C 500 210, 700 210, 860 540" />
+  <text class="small" x="594" y="190" text-anchor="middle">业务上下文输入</text>
+
+  <path class="line-data" marker-end="url(#arrowBlue)" d="M 360 470 C 540 470, 690 470, 860 540" />
+  <text class="small" x="620" y="456" text-anchor="middle">文档引用 / 数据流</text>
+
+  <path class="line-data" marker-end="url(#arrowBlue)" d="M 360 740 C 520 740, 700 610, 860 610" />
+  <text class="small" x="612" y="706" text-anchor="middle">条款 / 模板语义输入</text>
+
+  <path class="line-data" marker-end="url(#arrowBlue)" d="M 770 465 C 810 465, 820 465, 860 465" />
+  <text class="small" x="814" y="452" text-anchor="middle">检索候选流</text>
+
+  <path class="line-runtime" marker-end="url(#arrowPurple)" d="M 1020 330 L 1020 390" />
+  <text class="small" x="1084" y="366">运行时编排</text>
+
+  <path class="line-result" marker-end="url(#arrowOrange)" d="M 770 200 C 860 200, 860 430, 900 430" />
+  <text class="small" x="858" y="250" text-anchor="middle">OCR 结果供给</text>
+
+  <path class="line-writeback" marker-end="url(#arrowRed)" d="M 1210 390 C 1210 330, 1285 330, 1285 290" />
+  <text class="small" x="1250" y="344" text-anchor="middle">回写流</text>
+
+  <path class="line-writeback" marker-end="url(#arrowRed)" d="M 1320 390 C 1320 330, 1455 330, 1455 290" />
+  <text class="small" x="1402" y="346" text-anchor="middle">审计回写流</text>
+
+  <path class="line-runtime dashed" marker-end="url(#arrowPurple)" d="M 1180 620 C 1100 840, 520 900, 360 820" />
+  <text class="small" x="880" y="908" text-anchor="middle">结果引用继续回指正式来源，不反向生成新的真相源</text>
+
+  <rect class="legend" x="40" y="920" width="1520" height="150" />
+  <text class="subtitle" x="120" y="958">图例与边界</text>
+  <line x1="80" y1="996" x2="170" y2="996" class="line-data" marker-end="url(#arrowBlue)" />
+  <text class="small" x="190" y="1002">数据流：合同、文档、条款、OCR、搜索等受控输入进入应用层</text>
+  <line x1="80" y1="1034" x2="170" y2="1034" class="line-result" marker-end="url(#arrowOrange)" />
+  <text class="small" x="190" y="1040">结果流：OCR 结果、检索候选、AI 应用结果在主线内流转</text>
+  <line x1="80" y1="1072" x2="170" y2="1072" class="line-writeback" marker-end="url(#arrowRed)" />
+  <text class="small" x="190" y="1078">回写流：摘要、风险、提取结果与审计记录回写正式业务视图</text>
+
+  <text class="mono" x="830" y="958">硬性约束</text>
+  <text class="small" x="830" y="988">1. 合同主档仍是业务真相源，文档中心仍是文件真相源</text>
+  <text class="small" x="830" y="1014">2. OCR 负责识别结果，搜索负责稳定召回，Agent OS 负责 AI 运行时</text>
+  <text class="small" x="830" y="1040">3. AI 业务应用只能消费受控结果，不能长出第二份合同或文件真相源</text>
+  <text class="small" x="830" y="1066">4. 多语言是正式能力，检索与 AI 应用都必须处理语言边界</text>
+  <text class="small" x="830" y="1092">5. 不把某个模型或 Provider 写死为唯一方案</text>
+</svg>

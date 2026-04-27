@@ -1,0 +1,14 @@
+.DS_Store
+gotchas.md
+AGENTS.md
+CLAUDE.md
+PRINCIPLE.md
+.gstack/
+.worktrees/
+docs/AccessKey.csv
+backend/target/
+frontend/node_modules/
+frontend/dist/
+frontend/*.tsbuildinfo
+frontend/vite.config.js
+frontend/vite.config.d.ts
