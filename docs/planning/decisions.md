@@ -164,9 +164,9 @@
 
 ### 决策 26：实现阶段以 Superpowers 执行规格与五批计划作为开发执行基准
 
-- 决策：在 `docs/technicals/` 正式技术文档与 `docs/technicals/implementation-batch-plan.md` 已完成的前提下，新增 1 份 Superpowers 执行规格与 5 份批次执行计划，作为进入实现阶段时的开发执行基准。统一执行规格为 `docs/superpowers/specs/2026-04-26-cmp-implementation-execution-spec.md`；五批计划分别对应底座主线、合同核心主链路、依赖主链路真相源的业务能力、智能与增强能力、综合联调验收与上线准备。
+- 决策：在 `docs/technicals/` 正式技术文档与 `docs/technicals/implementation-batch-plan.md` 已完成的前提下，新增 1 份 Superpowers 执行规格与 5 份批次执行计划，作为进入实现阶段时的开发执行基准。统一执行规格为 `docs/superpowers/specs/102-cmp-implementation-execution-spec.md`；五批计划分别对应底座主线、合同核心主链路、依赖主链路真相源的业务能力、智能与增强能力、综合联调验收与上线准备。
 - 原因：`docs/technicals/` 负责正式技术设计与排期矩阵，但实现阶段仍需要面向 Agent 执行的任务拆分、SubAgent 协作协议、启动门禁、验证闭环与质量审查要求；直接让实现 Agent 只读技术文档会造成执行边界不稳定。
-- 影响：后续开发执行时，应先读取 Superpowers 执行规格，再按批次读取对应计划；第一批正式入口为 `docs/superpowers/plans/2026-04-26-batch-1-foundations-implementation-plan.md`。Superpowers 文档不得替代 `docs/technicals/` 正式技术基线，只承接“如何执行、如何派发、如何验证”。
+- 影响：后续开发执行时，应先读取 Superpowers 执行规格，再按批次读取对应计划；第一批正式入口为 `docs/superpowers/plans/102-01-batch-1-foundations-implementation-plan.md`。Superpowers 文档不得替代 `docs/technicals/` 正式技术基线，只承接“如何执行、如何派发、如何验证”。
 
 ### 决策 27：编码阶段固定采用测试驱动开发与独立质量审查闭环
 

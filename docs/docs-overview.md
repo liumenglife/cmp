@@ -121,8 +121,8 @@
 
 以下文件用于开发执行阶段，承接正式技术文档并转化为 Agent 可执行的规格、批次计划、门禁与验证闭环：
 
-1. [docs/superpowers/specs/2026-04-26-cmp-implementation-execution-spec.md](./superpowers/specs/2026-04-26-cmp-implementation-execution-spec.md)
-2. [docs/superpowers/plans/2026-04-26-batch-1-foundations-implementation-plan.md](./superpowers/plans/2026-04-26-batch-1-foundations-implementation-plan.md)
+1. [docs/superpowers/specs/102-cmp-implementation-execution-spec.md](./superpowers/specs/102-cmp-implementation-execution-spec.md)
+2. [docs/superpowers/plans/102-01-batch-1-foundations-implementation-plan.md](./superpowers/plans/102-01-batch-1-foundations-implementation-plan.md)
 3. [docs/superpowers/plans/2026-04-26-batch-2-core-chain-implementation-plan.md](./superpowers/plans/2026-04-26-batch-2-core-chain-implementation-plan.md)
 4. [docs/superpowers/plans/2026-04-26-batch-3-dependent-business-capabilities-implementation-plan.md](./superpowers/plans/2026-04-26-batch-3-dependent-business-capabilities-implementation-plan.md)
 5. [docs/superpowers/plans/2026-04-26-batch-4-intelligent-applications-implementation-plan.md](./superpowers/plans/2026-04-26-batch-4-intelligent-applications-implementation-plan.md)
@@ -176,8 +176,8 @@
 4. [docs/technicals/detailed-design.md](./technicals/detailed-design.md)
 5. [docs/technicals/implementation-plan.md](./technicals/implementation-plan.md)
 6. 再进入所属底座主线 / 应用级模块的完整链路
-7. [docs/superpowers/specs/2026-04-26-cmp-implementation-execution-spec.md](./superpowers/specs/2026-04-26-cmp-implementation-execution-spec.md)
-8. 按当前批次读取对应 Superpowers 执行计划；第一批入口为 [docs/superpowers/plans/2026-04-26-batch-1-foundations-implementation-plan.md](./superpowers/plans/2026-04-26-batch-1-foundations-implementation-plan.md)
+7. [docs/superpowers/specs/102-cmp-implementation-execution-spec.md](./superpowers/specs/102-cmp-implementation-execution-spec.md)
+8. 按当前批次读取对应 Superpowers 执行计划；第一批入口为 [docs/superpowers/plans/102-01-batch-1-foundations-implementation-plan.md](./superpowers/plans/102-01-batch-1-foundations-implementation-plan.md)
 9. [docs/planning/current.md](./planning/current.md)
 10. [docs/planning/decisions.md](./planning/decisions.md)
 
@@ -245,8 +245,8 @@
 | planning 真相文件 | [docs/planning/current.md](./planning/current.md) | 当前批次真相 | 已存在 |
 | planning 真相文件 | [docs/planning/decisions.md](./planning/decisions.md) | 关键决策记录 | 已存在 |
 | planning 真相文件 | [docs/planning/history.md](./planning/history.md) | 历史批次归档 | 已存在 |
-| Superpowers 正式执行基准 | [docs/superpowers/specs/2026-04-26-cmp-implementation-execution-spec.md](./superpowers/specs/2026-04-26-cmp-implementation-execution-spec.md) | 实现阶段统一执行规格 | 已存在 |
-| Superpowers 正式执行基准 | [docs/superpowers/plans/2026-04-26-batch-1-foundations-implementation-plan.md](./superpowers/plans/2026-04-26-batch-1-foundations-implementation-plan.md) | 第一批底座主线执行计划 | 已存在 |
+| Superpowers 正式执行基准 | [docs/superpowers/specs/102-cmp-implementation-execution-spec.md](./superpowers/specs/102-cmp-implementation-execution-spec.md) | 实现阶段统一执行规格 | 已存在 |
+| Superpowers 正式执行基准 | [docs/superpowers/plans/102-01-batch-1-foundations-implementation-plan.md](./superpowers/plans/102-01-batch-1-foundations-implementation-plan.md) | 第一批底座主线执行计划 | 已存在 |
 | Superpowers 正式执行基准 | [docs/superpowers/plans/2026-04-26-batch-2-core-chain-implementation-plan.md](./superpowers/plans/2026-04-26-batch-2-core-chain-implementation-plan.md) | 第二批合同核心主链路执行计划 | 已存在 |
 | Superpowers 正式执行基准 | [docs/superpowers/plans/2026-04-26-batch-3-dependent-business-capabilities-implementation-plan.md](./superpowers/plans/2026-04-26-batch-3-dependent-business-capabilities-implementation-plan.md) | 第三批依赖型业务能力执行计划 | 已存在 |
 | Superpowers 正式执行基准 | [docs/superpowers/plans/2026-04-26-batch-4-intelligent-applications-implementation-plan.md](./superpowers/plans/2026-04-26-batch-4-intelligent-applications-implementation-plan.md) | 第四批智能与增强能力执行计划 | 已存在 |

@@ -48,3 +48,23 @@
 
 - 上述批次不再写入 `current.md`。
 - 如需恢复文档阶段背景，只读取本节；当前执行状态以 `current.md` 的编码阶段任务清单为准。
+
+## 2026-04-27 最小可运行工程骨架批次归档
+
+### 归档原因
+
+- `101` 最小可运行工程骨架已经完成、推送 PR 并合并到 `main`。
+- 当前开发主线切换到 `102` 第一批底座主线实现，`current.md` 只保留当前批次真相。
+
+### 已归档任务批次
+
+- [✓] 后端最小工程与健康检查：已按测试驱动开发完成，独立质量审查修复后通过，提交 `6a56fe5`。
+- [✓] 前端最小工程与渲染测试：已按测试驱动开发完成，独立质量审查修复后通过，提交 `e8142fe`。
+- [✓] 本地编排与容器健康验证：已按测试驱动开发完成，独立质量审查修复后通过，提交 `f61e391`。
+- [✓] 仓库级验证脚本：已按测试驱动开发完成，独立质量审查通过，提交 `4baf1f0`。
+- [✓] 范围边界与最终质量验收：独立最终质量验收通过，`scripts/verify-all.sh` 通过。
+
+### 迁移说明
+
+- `101` 批次不再写入 `current.md`。
+- 如需恢复最小工程骨架背景，读取 [`101-minimal-runnable-skeleton-design.md`](../superpowers/specs/101-minimal-runnable-skeleton-design.md) 与 [`101-minimal-runnable-skeleton-implementation-plan.md`](../superpowers/plans/101-minimal-runnable-skeleton-implementation-plan.md)。

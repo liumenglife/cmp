@@ -18,7 +18,7 @@
 - [`docs/planning/current.md`](../../planning/current.md)
 - [`docs/planning/decisions.md`](../../planning/decisions.md)
 - [`docs/technicals/implementation-batch-plan.md`](../../technicals/implementation-batch-plan.md)
-- [`docs/superpowers/specs/2026-04-26-cmp-implementation-execution-spec.md`](../specs/2026-04-26-cmp-implementation-execution-spec.md)
+- [`docs/superpowers/specs/102-cmp-implementation-execution-spec.md`](../specs/102-cmp-implementation-execution-spec.md)
 
 ### 1.2 `identity-access` 输入
 
@@ -86,7 +86,7 @@
 ### Task 1: 第一批启动门禁核对
 
 **Files:**
-- Read: `docs/superpowers/specs/2026-04-26-cmp-implementation-execution-spec.md`
+- Read: `docs/superpowers/specs/102-cmp-implementation-execution-spec.md`
 - Read: `docs/technicals/implementation-batch-plan.md`
 - Read: 三条主线正式 4 件套与专项设计
 - Modify: 不修改代码，仅产出批次启动检查记录到主 Agent 指定报告位置
