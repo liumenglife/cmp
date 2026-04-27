@@ -57,7 +57,7 @@
 - [✓] 本地 `Docker Compose` 编排完成，前端服务就绪问题已修复为静态资源服务与健康门禁。
 - [✓] 仓库级验证脚本完成。
 - [✓] 最终质量验收通过。
-- [✓] 分支名已从范围过窄的 `feature/minimal-skeleton-backend` 收口为 `feature/minimal-skeleton-pr`。
+- [✓] 当前 PR 分支为 `feature/minimal-skeleton-pr`。
 
 ## 当前阻塞
 
@@ -67,7 +67,7 @@
 
 ## 活跃支线
 
-- [✓] 分支命名纠偏：已重命名为 `feature/minimal-skeleton-pr`，隔离工作区目录已重命名为 `.worktrees/minimal-skeleton-pr`。
+- [✓] 当前 PR 分支为 `feature/minimal-skeleton-pr`，隔离工作区为 `.worktrees/minimal-skeleton-pr`。
 - [✓] planning 真相纠偏：已将文档阶段历史迁入 `history.md`，避免当前批次真相混入历史任务。
 
 ## 下一步唯一动作
