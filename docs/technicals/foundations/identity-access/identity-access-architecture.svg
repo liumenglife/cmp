@@ -1,0 +1,153 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1100" viewBox="0 0 1600 1100" role="img" aria-labelledby="title desc">
+  <title id="title">组织架构 / 权限 / 统一认证主线架构图</title>
+  <desc id="desc">展示用户、组织、角色、权限、统一认证映射，以及对流程引擎、合同主档、文档中心、加密下载授权、通知、审计、集成主线的支撑关系，并标出身份流、授权流、审计流。</desc>
+  <defs>
+    <marker id="arrowBlue" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#2563eb" />
+    </marker>
+    <marker id="arrowGreen" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#16a34a" />
+    </marker>
+    <marker id="arrowOrange" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#ea580c" />
+    </marker>
+    <style>
+      .title { font: 700 28px Arial, sans-serif; fill: #0f172a; }
+      .section { font: 700 18px Arial, sans-serif; fill: #0f172a; }
+      .label { font: 600 15px Arial, sans-serif; fill: #0f172a; }
+      .text { font: 14px Arial, sans-serif; fill: #334155; }
+      .small { font: 12px Arial, sans-serif; fill: #475569; }
+      .lineLabel { font: 700 14px Arial, sans-serif; }
+      .frame { fill: #f8fafc; stroke: #cbd5e1; stroke-width: 2; rx: 18; ry: 18; }
+      .boxBlue { fill: #dbeafe; stroke: #60a5fa; stroke-width: 2; rx: 14; ry: 14; }
+      .boxGreen { fill: #dcfce7; stroke: #4ade80; stroke-width: 2; rx: 14; ry: 14; }
+      .boxPurple { fill: #ede9fe; stroke: #a78bfa; stroke-width: 2; rx: 14; ry: 14; }
+      .boxOrange { fill: #ffedd5; stroke: #fb923c; stroke-width: 2; rx: 14; ry: 14; }
+      .boxGray { fill: #e2e8f0; stroke: #94a3b8; stroke-width: 2; rx: 14; ry: 14; }
+      .arrowBlue { fill: none; stroke: #2563eb; stroke-width: 4; marker-end: url(#arrowBlue); }
+      .arrowGreen { fill: none; stroke: #16a34a; stroke-width: 4; marker-end: url(#arrowGreen); }
+      .arrowOrange { fill: none; stroke: #ea580c; stroke-width: 4; marker-end: url(#arrowOrange); }
+      .dash { stroke-dasharray: 9 7; }
+    </style>
+  </defs>
+
+  <rect x="20" y="20" width="1560" height="1060" class="frame" />
+  <text x="800" y="60" text-anchor="middle" class="title">组织架构 / 权限 / 统一认证主线架构图</text>
+
+  <rect x="60" y="110" width="320" height="300" class="boxBlue" />
+  <text x="220" y="145" text-anchor="middle" class="section">身份入口与映射</text>
+  <rect x="90" y="170" width="120" height="56" class="boxGray" />
+  <text x="150" y="203" text-anchor="middle" class="label">统一认证 / SSO</text>
+  <rect x="230" y="170" width="120" height="56" class="boxGray" />
+  <text x="290" y="203" text-anchor="middle" class="label">LDAP</text>
+  <rect x="90" y="245" width="120" height="56" class="boxGray" />
+  <text x="150" y="278" text-anchor="middle" class="label">企业微信</text>
+  <rect x="230" y="245" width="120" height="56" class="boxGray" />
+  <text x="290" y="278" text-anchor="middle" class="label">本地账号</text>
+  <rect x="90" y="325" width="260" height="60" class="boxBlue" />
+  <text x="220" y="353" text-anchor="middle" class="label">身份映射与主体归一</text>
+  <text x="220" y="373" text-anchor="middle" class="small">统一用户主体 / 外部身份绑定 / 冲突归并</text>
+
+  <rect x="450" y="110" width="700" height="520" class="boxGreen" />
+  <text x="800" y="145" text-anchor="middle" class="section">组织架构 / 权限 / 统一认证主线</text>
+
+  <rect x="490" y="180" width="180" height="90" class="boxGreen" />
+  <text x="580" y="214" text-anchor="middle" class="label">用户</text>
+  <text x="580" y="238" text-anchor="middle" class="text">统一主体</text>
+  <text x="580" y="258" text-anchor="middle" class="text">多组织归属</text>
+
+  <rect x="710" y="180" width="180" height="90" class="boxGreen" />
+  <text x="800" y="214" text-anchor="middle" class="label">部门</text>
+  <text x="800" y="238" text-anchor="middle" class="text">组织树</text>
+  <text x="800" y="258" text-anchor="middle" class="text">组织规则</text>
+
+  <rect x="930" y="180" width="180" height="90" class="boxGreen" />
+  <text x="1020" y="214" text-anchor="middle" class="label">角色</text>
+  <text x="1020" y="238" text-anchor="middle" class="text">授权聚合</text>
+  <text x="1020" y="258" text-anchor="middle" class="text">职责边界</text>
+
+  <rect x="490" y="310" width="180" height="90" class="boxPurple" />
+  <text x="580" y="344" text-anchor="middle" class="label">菜单权限</text>
+  <text x="580" y="368" text-anchor="middle" class="text">入口可见</text>
+
+  <rect x="710" y="310" width="180" height="90" class="boxPurple" />
+  <text x="800" y="344" text-anchor="middle" class="label">功能权限</text>
+  <text x="800" y="368" text-anchor="middle" class="text">动作可执行</text>
+
+  <rect x="930" y="310" width="180" height="90" class="boxPurple" />
+  <text x="1020" y="344" text-anchor="middle" class="label">数据权限</text>
+  <text x="1020" y="368" text-anchor="middle" class="text">范围可见</text>
+
+  <rect x="530" y="455" width="540" height="120" class="boxOrange" />
+  <text x="800" y="490" text-anchor="middle" class="label">统一授权与组织解析</text>
+  <text x="800" y="516" text-anchor="middle" class="text">审批节点绑定部门 / 人员 / 组织规则</text>
+  <text x="800" y="540" text-anchor="middle" class="text">解密下载授权按部门 / 人员命中</text>
+  <text x="800" y="564" text-anchor="middle" class="text">业务模块统一消费身份、组织与授权边界</text>
+
+  <rect x="1220" y="110" width="300" height="520" class="boxBlue" />
+  <text x="1370" y="145" text-anchor="middle" class="section">受支撑主线 / 模块</text>
+
+  <rect x="1250" y="180" width="240" height="62" class="boxGray" />
+  <text x="1370" y="217" text-anchor="middle" class="label">流程引擎</text>
+  <text x="1370" y="236" text-anchor="middle" class="small">审批节点绑定组织主数据</text>
+
+  <rect x="1250" y="260" width="240" height="62" class="boxGray" />
+  <text x="1370" y="297" text-anchor="middle" class="label">合同主档</text>
+  <text x="1370" y="316" text-anchor="middle" class="small">统一主体与数据可见边界</text>
+
+  <rect x="1250" y="340" width="240" height="62" class="boxGray" />
+  <text x="1370" y="377" text-anchor="middle" class="label">文档中心</text>
+  <text x="1370" y="396" text-anchor="middle" class="small">文档访问与协作授权</text>
+
+  <rect x="1250" y="420" width="240" height="62" class="boxGray" />
+  <text x="1370" y="457" text-anchor="middle" class="label">加密下载授权</text>
+  <text x="1370" y="476" text-anchor="middle" class="small">按部门 / 人员授权</text>
+
+  <rect x="1250" y="500" width="240" height="62" class="boxGray" />
+  <text x="1370" y="531" text-anchor="middle" class="label">通知主线 / 集成主线</text>
+  <text x="1370" y="550" text-anchor="middle" class="small">统一触达对象与外部身份入口</text>
+
+  <rect x="240" y="720" width="1120" height="250" class="boxBlue" />
+  <text x="800" y="760" text-anchor="middle" class="section">审计与治理闭环</text>
+
+  <rect x="290" y="800" width="240" height="110" class="boxGray" />
+  <text x="410" y="835" text-anchor="middle" class="label">身份事件</text>
+  <text x="410" y="860" text-anchor="middle" class="text">登录成功 / 失败</text>
+  <text x="410" y="882" text-anchor="middle" class="text">映射冲突 / 主体归并</text>
+
+  <rect x="680" y="800" width="240" height="110" class="boxGray" />
+  <text x="800" y="835" text-anchor="middle" class="label">授权事件</text>
+  <text x="800" y="860" text-anchor="middle" class="text">角色变更 / 权限命中</text>
+  <text x="800" y="882" text-anchor="middle" class="text">数据范围判定 / 高敏授权</text>
+
+  <rect x="1070" y="800" width="240" height="110" class="boxGray" />
+  <text x="1190" y="835" text-anchor="middle" class="label">审计主线</text>
+  <text x="1190" y="860" text-anchor="middle" class="text">统一留痕 / 追溯 / 告警</text>
+  <text x="1190" y="882" text-anchor="middle" class="text">支撑通知与运营治理</text>
+
+  <path d="M 350 355 C 430 355, 450 355, 490 355" class="arrowBlue" />
+  <text x="420" y="340" class="lineLabel" fill="#2563eb">身份流</text>
+
+  <path d="M 1110 355 C 1180 355, 1200 355, 1250 355" class="arrowGreen" />
+  <text x="1160" y="340" class="lineLabel" fill="#16a34a">授权流</text>
+
+  <path d="M 800 575 C 800 640, 800 690, 800 800" class="arrowOrange dash" />
+  <text x="820" y="690" class="lineLabel" fill="#ea580c">审计流</text>
+
+  <path d="M 580 270 L 580 310" class="arrowGreen" />
+  <path d="M 800 270 L 800 310" class="arrowGreen" />
+  <path d="M 1020 270 L 1020 310" class="arrowGreen" />
+  <path d="M 580 400 C 580 430, 640 450, 690 455" class="arrowGreen" />
+  <path d="M 800 400 L 800 455" class="arrowGreen" />
+  <path d="M 1020 400 C 1020 430, 960 450, 910 455" class="arrowGreen" />
+
+  <path d="M 1370 242 L 1370 260" class="arrowGreen" />
+  <path d="M 1370 322 L 1370 340" class="arrowGreen" />
+  <path d="M 1370 402 L 1370 420" class="arrowGreen" />
+  <path d="M 1370 482 L 1370 500" class="arrowGreen" />
+
+  <path d="M 410 910 C 410 960, 1120 960, 1120 910" class="arrowOrange dash" />
+  <path d="M 800 910 L 1070 910" class="arrowOrange dash" />
+
+  <text x="90" y="1030" class="small">说明：组织权限主线不拥有合同、文件、流程真相；它为各主线提供统一身份、组织与授权边界。</text>
+</svg>

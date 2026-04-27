@@ -1,0 +1,149 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1680" height="1180" viewBox="0 0 1680 1180" role="img" aria-labelledby="title desc">
+  <title id="title">合同后续业务组架构图</title>
+  <desc id="desc">展示合同主档作为业务真相源，签章完成后进入履约阶段，变更、终止、归档围绕同一 contract_id 主链运行，并与文档中心、流程引擎、搜索、AI、审计、通知之间的业务流、状态流、数据回写流关系。</desc>
+  <defs>
+    <style>
+      text { font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif; fill: #1f2937; }
+      .title { font-size: 30px; font-weight: 700; }
+      .section { font-size: 18px; font-weight: 700; }
+      .label { font-size: 16px; font-weight: 600; }
+      .body { font-size: 14px; }
+      .small { font-size: 13px; }
+      .box { rx: 18; ry: 18; stroke-width: 2.5; }
+      .core { stroke: #1d4ed8; fill: #dbeafe; }
+      .business-group { stroke: #0f766e; fill: #ccfbf1; }
+      .stage { stroke: #7c3aed; fill: #ede9fe; }
+      .support { stroke: #475569; fill: #ffffff; }
+      .flow { fill: none; stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; }
+      .business { stroke: #2563eb; }
+      .state { stroke: #ea580c; stroke-dasharray: 10 8; }
+      .writeback { stroke: #16a34a; stroke-dasharray: 4 7; }
+      .legend-line { stroke-width: 4; stroke-linecap: round; }
+    </style>
+    <marker id="arrow-blue" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M0,0 L12,6 L0,12 Z" fill="#2563eb" />
+    </marker>
+    <marker id="arrow-orange" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M0,0 L12,6 L0,12 Z" fill="#ea580c" />
+    </marker>
+    <marker id="arrow-green" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M0,0 L12,6 L0,12 Z" fill="#16a34a" />
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1680" height="1180" fill="#f8fafc" />
+
+  <text x="840" y="54" text-anchor="middle" class="title">合同后续业务组架构图</text>
+  <text x="840" y="84" text-anchor="middle" class="body">合同主档是业务真相源；签章结果回写后进入履约，变更、终止、归档围绕同一 contract_id 主链推进</text>
+
+  <text x="435" y="132" class="label" fill="#2563eb">业务流</text>
+  <line x1="495" y1="127" x2="585" y2="127" class="legend-line business" marker-end="url(#arrow-blue)" />
+  <text x="675" y="132" class="label" fill="#ea580c">状态流</text>
+  <line x1="735" y1="127" x2="825" y2="127" class="legend-line state" marker-end="url(#arrow-orange)" />
+  <text x="915" y="132" class="label" fill="#16a34a">数据回写流</text>
+  <line x1="1035" y1="127" x2="1145" y2="127" class="legend-line writeback" marker-end="url(#arrow-green)" />
+
+  <rect x="620" y="170" width="440" height="170" class="box core" />
+  <text x="840" y="210" text-anchor="middle" class="section">合同主档 / Contract Master</text>
+  <text x="840" y="242" text-anchor="middle" class="label">业务真相源</text>
+  <text x="840" y="272" text-anchor="middle" class="body">统一 contract_id、生命周期主状态、一级业务身份</text>
+  <text x="840" y="298" text-anchor="middle" class="body">聚合签章、生效、履约、变更、终止、归档摘要与时间线</text>
+  <text x="840" y="324" text-anchor="middle" class="body">任何后续业务能力都不能长出第二份合同真相源</text>
+
+  <rect x="110" y="180" width="300" height="110" class="box support" />
+  <text x="260" y="220" text-anchor="middle" class="section">签章结果</text>
+  <text x="260" y="248" text-anchor="middle" class="body">签章完成后回写合同主档</text>
+  <text x="260" y="274" text-anchor="middle" class="body">触发生效判断与履约启动</text>
+
+  <rect x="1200" y="170" width="320" height="120" class="box support" />
+  <text x="1360" y="208" text-anchor="middle" class="section">文档中心</text>
+  <text x="1360" y="238" text-anchor="middle" class="label">文件真相源</text>
+  <text x="1360" y="266" text-anchor="middle" class="body">履约凭证、补充协议、终止材料、归档稿与版本链</text>
+
+  <rect x="1200" y="330" width="320" height="120" class="box support" />
+  <text x="1360" y="368" text-anchor="middle" class="section">流程引擎</text>
+  <text x="1360" y="398" text-anchor="middle" class="body">通过 contract_id 绑定合同</text>
+  <text x="1360" y="424" text-anchor="middle" class="body">运行变更 / 终止 / 归档等审批流程</text>
+
+  <rect x="570" y="390" width="540" height="110" class="box business-group" />
+  <text x="840" y="430" text-anchor="middle" class="section">合同后续业务组 / Contract Lifecycle</text>
+  <text x="840" y="460" text-anchor="middle" class="body">围绕同一 contract_id 运行，承接生效后的履约、变更、终止、归档主链</text>
+  <text x="840" y="486" text-anchor="middle" class="body">共享摘要回写、时间线沉淀、里程碑发布与事件输出能力</text>
+
+  <rect x="120" y="560" width="280" height="120" class="box stage" />
+  <text x="260" y="600" text-anchor="middle" class="section">履约</text>
+  <text x="260" y="628" text-anchor="middle" class="body">计划、节点、执行记录、异常、凭证</text>
+  <text x="260" y="654" text-anchor="middle" class="body">签章完成 -> 生效 -> 履约</text>
+
+  <rect x="460" y="560" width="280" height="120" class="box stage" />
+  <text x="600" y="600" text-anchor="middle" class="section">变更</text>
+  <text x="600" y="628" text-anchor="middle" class="body">原合同主链上的业务调整</text>
+  <text x="600" y="654" text-anchor="middle" class="body">不创建新的合同主档</text>
+
+  <rect x="800" y="560" width="280" height="120" class="box stage" />
+  <text x="940" y="600" text-anchor="middle" class="section">终止</text>
+  <text x="940" y="628" text-anchor="middle" class="body">终止申请、依据材料、审批与善后</text>
+  <text x="940" y="654" text-anchor="middle" class="body">仍围绕同一 contract_id 运行</text>
+
+  <rect x="1140" y="560" width="280" height="120" class="box stage" />
+  <text x="1280" y="600" text-anchor="middle" class="section">归档</text>
+  <text x="1280" y="628" text-anchor="middle" class="body">归档记录真相归归档模块</text>
+  <text x="1280" y="654" text-anchor="middle" class="body">但不能替代合同主档业务真相</text>
+
+  <rect x="140" y="760" width="250" height="100" class="box support" />
+  <text x="265" y="798" text-anchor="middle" class="section">搜索</text>
+  <text x="265" y="826" text-anchor="middle" class="body">消费稳定摘要与里程碑</text>
+
+  <rect x="460" y="760" width="250" height="100" class="box support" />
+  <text x="585" y="798" text-anchor="middle" class="section">AI</text>
+  <text x="585" y="826" text-anchor="middle" class="body">消费摘要与正式文件上下文</text>
+
+  <rect x="780" y="760" width="250" height="100" class="box support" />
+  <text x="905" y="798" text-anchor="middle" class="section">审计</text>
+  <text x="905" y="826" text-anchor="middle" class="body">沉淀动作留痕与证据链</text>
+
+  <rect x="1100" y="760" width="250" height="100" class="box support" />
+  <text x="1225" y="798" text-anchor="middle" class="section">通知</text>
+  <text x="1225" y="826" text-anchor="middle" class="body">消费待办、里程碑与状态事件</text>
+
+  <rect x="430" y="930" width="820" height="170" class="box support" />
+  <text x="840" y="972" text-anchor="middle" class="section">统一原则</text>
+  <text x="840" y="1004" text-anchor="middle" class="body">1. 合同主档是业务真相源，文档中心是文件真相源，流程引擎只通过 contract_id 绑定合同</text>
+  <text x="840" y="1032" text-anchor="middle" class="body">2. 签章结果回写后进入履约；变更、终止只是在原合同主链上推进新阶段，不创建新主档</text>
+  <text x="840" y="1060" text-anchor="middle" class="body">3. 归档记录属于归档模块真相；搜索、AI、审计、通知只消费稳定摘要、时间线与里程碑</text>
+
+  <path d="M410 236 C500 236, 540 236, 620 250" class="flow business" marker-end="url(#arrow-blue)" />
+  <path d="M1060 250 C1130 230, 1160 222, 1200 225" class="flow business" marker-end="url(#arrow-blue)" />
+  <path d="M1060 285 C1130 330, 1160 350, 1200 382" class="flow business" marker-end="url(#arrow-blue)" />
+  <path d="M840 340 C840 360, 840 370, 840 390" class="flow business" marker-end="url(#arrow-blue)" />
+  <path d="M840 500 C760 540, 680 552, 260 560" class="flow business" marker-end="url(#arrow-blue)" />
+  <path d="M840 500 C840 530, 760 545, 600 560" class="flow business" marker-end="url(#arrow-blue)" />
+  <path d="M840 500 C900 530, 920 540, 940 560" class="flow business" marker-end="url(#arrow-blue)" />
+  <path d="M840 500 C1020 530, 1120 540, 1280 560" class="flow business" marker-end="url(#arrow-blue)" />
+
+  <path d="M260 680 C360 710, 440 700, 600 620" class="flow business" marker-end="url(#arrow-blue)" />
+  <path d="M600 680 C700 710, 780 700, 940 620" class="flow business" marker-end="url(#arrow-blue)" />
+  <path d="M940 680 C1040 710, 1130 705, 1280 620" class="flow business" marker-end="url(#arrow-blue)" />
+
+  <path d="M1360 450 C1340 510, 1310 530, 1280 560" class="flow state" marker-end="url(#arrow-orange)" />
+  <path d="M1360 450 C1250 520, 1180 540, 940 560" class="flow state" marker-end="url(#arrow-orange)" />
+  <path d="M1360 450 C1180 520, 1080 545, 600 560" class="flow state" marker-end="url(#arrow-orange)" />
+  <path d="M260 290 C260 360, 420 390, 760 390" class="flow state" marker-end="url(#arrow-orange)" />
+  <path d="M260 290 C260 380, 240 450, 260 560" class="flow state" marker-end="url(#arrow-orange)" />
+
+  <path d="M260 560 C320 450, 460 370, 700 320" class="flow writeback" marker-end="url(#arrow-green)" />
+  <path d="M600 560 C650 470, 720 400, 790 326" class="flow writeback" marker-end="url(#arrow-green)" />
+  <path d="M940 560 C930 470, 900 400, 885 326" class="flow writeback" marker-end="url(#arrow-green)" />
+  <path d="M1280 560 C1220 470, 1140 390, 975 326" class="flow writeback" marker-end="url(#arrow-green)" />
+  <path d="M1200 230 C1120 210, 1080 208, 1060 220" class="flow writeback" marker-end="url(#arrow-green)" />
+
+  <path d="M260 680 C250 720, 250 732, 255 760" class="flow business" marker-end="url(#arrow-blue)" />
+  <path d="M600 680 C590 720, 585 732, 580 760" class="flow business" marker-end="url(#arrow-blue)" />
+  <path d="M940 680 C930 720, 915 732, 900 760" class="flow business" marker-end="url(#arrow-blue)" />
+  <path d="M1280 680 C1270 720, 1245 732, 1225 760" class="flow business" marker-end="url(#arrow-blue)" />
+
+  <path d="M265 860 C330 900, 430 920, 620 930" class="flow writeback" marker-end="url(#arrow-green)" />
+  <path d="M585 860 C630 900, 690 918, 760 930" class="flow writeback" marker-end="url(#arrow-green)" />
+  <path d="M905 860 C950 900, 990 918, 1030 930" class="flow writeback" marker-end="url(#arrow-green)" />
+  <path d="M1225 860 C1180 900, 1120 918, 1060 930" class="flow writeback" marker-end="url(#arrow-green)" />
+</svg>

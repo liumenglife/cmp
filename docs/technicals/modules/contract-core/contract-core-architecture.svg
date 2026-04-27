@@ -1,0 +1,136 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1120" viewBox="0 0 1600 1120" role="img" aria-labelledby="title desc">
+  <title id="title">合同管理本体子模块架构图</title>
+  <desc id="desc">展示合同主档作为业务真相源，与模板库、条款库、起草入口、文档中心、流程引擎、签章、履约、归档、搜索、Agent OS 的关系，以及业务流、状态流、数据回写流。</desc>
+  <defs>
+    <style>
+      text { font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif; fill: #1f2937; }
+      .title { font-size: 28px; font-weight: 700; }
+      .section { font-size: 18px; font-weight: 700; }
+      .label { font-size: 16px; font-weight: 600; }
+      .body { font-size: 14px; }
+      .small { font-size: 13px; }
+      .box { rx: 18; ry: 18; stroke-width: 2.5; }
+      .solid { stroke: #475569; fill: #ffffff; }
+      .core { stroke: #1d4ed8; fill: #dbeafe; }
+      .upstream { stroke: #0f766e; fill: #ccfbf1; }
+      .support { stroke: #7c3aed; fill: #ede9fe; }
+      .flow { fill: none; stroke-width: 4; stroke-linecap: round; stroke-linejoin: round; }
+      .business { stroke: #2563eb; }
+      .state { stroke: #ea580c; stroke-dasharray: 10 8; }
+      .writeback { stroke: #16a34a; stroke-dasharray: 4 7; }
+      .legend-line { stroke-width: 4; stroke-linecap: round; }
+    </style>
+    <marker id="arrow-blue" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M0,0 L12,6 L0,12 Z" fill="#2563eb" />
+    </marker>
+    <marker id="arrow-orange" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M0,0 L12,6 L0,12 Z" fill="#ea580c" />
+    </marker>
+    <marker id="arrow-green" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M0,0 L12,6 L0,12 Z" fill="#16a34a" />
+    </marker>
+  </defs>
+
+  <rect x="0" y="0" width="1600" height="1120" fill="#f8fafc" />
+
+  <text x="800" y="52" text-anchor="middle" class="title">合同管理本体子模块架构图</text>
+  <text x="800" y="82" text-anchor="middle" class="body">合同主档是业务真相源，文档中心是文件真相源，周边能力围绕同一 contract 主链路运行</text>
+
+  <rect x="610" y="180" width="380" height="190" class="box core" />
+  <text x="800" y="218" text-anchor="middle" class="section">合同主档 / Contract Master</text>
+  <text x="800" y="250" text-anchor="middle" class="label">业务真相源</text>
+  <text x="800" y="282" text-anchor="middle" class="body">统一 contract_id、生命周期状态、业务身份</text>
+  <text x="800" y="308" text-anchor="middle" class="body">聚合审批、签署、履约、变更、终止、归档摘要</text>
+  <text x="800" y="334" text-anchor="middle" class="body">驱动台账视图、详情视图、时间线视图</text>
+
+  <rect x="130" y="170" width="300" height="120" class="box upstream" />
+  <text x="280" y="210" text-anchor="middle" class="section">模板库 / 条款库</text>
+  <text x="280" y="240" text-anchor="middle" class="body">标准模板、标准条款、多语言内容底座</text>
+  <text x="280" y="266" text-anchor="middle" class="body">后续合同 AI 的重要基础语义层</text>
+
+  <rect x="130" y="340" width="300" height="110" class="box upstream" />
+  <text x="280" y="380" text-anchor="middle" class="section">起草入口</text>
+  <text x="280" y="410" text-anchor="middle" class="body">模板起草 / 条款拼装 / 空白起草</text>
+  <text x="280" y="436" text-anchor="middle" class="body">创建合同主档并写入正文与附件</text>
+
+  <rect x="600" y="420" width="190" height="88" class="box solid" />
+  <text x="695" y="455" text-anchor="middle" class="label">合同台账视图</text>
+  <text x="695" y="482" text-anchor="middle" class="small">列表、筛选、统计读模型</text>
+
+  <rect x="810" y="420" width="190" height="88" class="box solid" />
+  <text x="905" y="455" text-anchor="middle" class="label">合同详情视图</text>
+  <text x="905" y="482" text-anchor="middle" class="small">聚合文档、流程、时间线与动作</text>
+
+  <rect x="610" y="560" width="380" height="120" class="box solid" />
+  <text x="800" y="598" text-anchor="middle" class="section">生命周期状态</text>
+  <text x="800" y="628" text-anchor="middle" class="body">起草中 -> 审批中 -> 签署中 / 已生效 -> 履约中</text>
+  <text x="800" y="654" text-anchor="middle" class="body">-> 变更中 / 终止中 -> 归档中 / 已归档</text>
+
+  <rect x="1120" y="150" width="300" height="120" class="box support" />
+  <text x="1270" y="188" text-anchor="middle" class="section">文档中心</text>
+  <text x="1270" y="218" text-anchor="middle" class="label">文件真相源</text>
+  <text x="1270" y="246" text-anchor="middle" class="body">正文、附件、版本链、预览、签章稿、归档稿</text>
+
+  <rect x="1120" y="320" width="300" height="130" class="box support" />
+  <text x="1270" y="358" text-anchor="middle" class="section">流程引擎</text>
+  <text x="1270" y="388" text-anchor="middle" class="body">通过 contract_id 绑定合同</text>
+  <text x="1270" y="414" text-anchor="middle" class="body">默认主审批优先走 OA</text>
+  <text x="1270" y="440" text-anchor="middle" class="body">平台流程引擎是一期正式能力</text>
+
+  <rect x="1140" y="520" width="260" height="90" class="box support" />
+  <text x="1270" y="556" text-anchor="middle" class="label">签章</text>
+  <text x="1270" y="582" text-anchor="middle" class="body">消费合同上下文与签署输入稿</text>
+
+  <rect x="1140" y="640" width="260" height="90" class="box support" />
+  <text x="1270" y="676" text-anchor="middle" class="label">履约</text>
+  <text x="1270" y="702" text-anchor="middle" class="body">围绕同一 contract_id 跟踪节点与异常</text>
+
+  <rect x="1140" y="760" width="260" height="90" class="box support" />
+  <text x="1270" y="796" text-anchor="middle" class="label">变更 / 终止 / 归档</text>
+  <text x="1270" y="822" text-anchor="middle" class="body">过程治理各归其模块，结果回写合同主档</text>
+
+  <rect x="180" y="610" width="260" height="95" class="box support" />
+  <text x="310" y="648" text-anchor="middle" class="label">搜索</text>
+  <text x="310" y="674" text-anchor="middle" class="body">合同台账与详情的读模型入口</text>
+
+  <rect x="180" y="755" width="260" height="110" class="box support" />
+  <text x="310" y="792" text-anchor="middle" class="section">Agent OS / 合同 AI</text>
+  <text x="310" y="820" text-anchor="middle" class="body">消费合同主档、条款库、文档中心上下文</text>
+  <text x="310" y="846" text-anchor="middle" class="body">输出建议、比对、问答与辅助结论</text>
+
+  <rect x="520" y="860" width="560" height="170" class="box solid" />
+  <text x="800" y="900" text-anchor="middle" class="section">统一原则</text>
+  <text x="800" y="934" text-anchor="middle" class="body">1. 合同主档是业务真相源，不允许各模块各自维护合同一级主档</text>
+  <text x="800" y="962" text-anchor="middle" class="body">2. 文档中心是文件真相源，流程引擎只通过 contract_id 绑定合同</text>
+  <text x="800" y="990" text-anchor="middle" class="body">3. 模板库、条款库、起草、审批、签章、履约、变更、终止、归档围绕同一主链路收口</text>
+
+  <path d="M430 230 C500 230, 540 230, 610 240" class="flow business" marker-end="url(#arrow-blue)" />
+  <path d="M430 390 C500 390, 540 320, 610 300" class="flow business" marker-end="url(#arrow-blue)" />
+  <path d="M990 250 C1060 230, 1080 220, 1120 210" class="flow business" marker-end="url(#arrow-blue)" />
+  <path d="M990 290 C1060 315, 1080 340, 1120 372" class="flow business" marker-end="url(#arrow-blue)" />
+  <path d="M990 320 C1080 430, 1100 500, 1140 548" class="flow business" marker-end="url(#arrow-blue)" />
+  <path d="M990 330 C1070 520, 1090 620, 1140 686" class="flow business" marker-end="url(#arrow-blue)" />
+  <path d="M990 338 C1090 620, 1100 760, 1140 804" class="flow business" marker-end="url(#arrow-blue)" />
+  <path d="M600 465 C520 470, 470 500, 440 620" class="flow business" marker-end="url(#arrow-blue)" />
+  <path d="M620 350 C500 460, 430 620, 330 755" class="flow business" marker-end="url(#arrow-blue)" />
+
+  <path d="M1270 450 C1260 500, 1210 520, 1000 585" class="flow state" marker-end="url(#arrow-orange)" />
+  <path d="M1270 610 C1250 620, 1170 630, 1000 630" class="flow state" marker-end="url(#arrow-orange)" />
+  <path d="M1270 730 C1240 715, 1160 700, 1000 648" class="flow state" marker-end="url(#arrow-orange)" />
+  <path d="M1270 850 C1210 790, 1120 740, 980 664" class="flow state" marker-end="url(#arrow-orange)" />
+
+  <path d="M1180 240 C1070 180, 1030 170, 980 210" class="flow writeback" marker-end="url(#arrow-green)" />
+  <path d="M1165 392 C1070 360, 1030 350, 980 260" class="flow writeback" marker-end="url(#arrow-green)" />
+  <path d="M1140 566 C1080 530, 1030 500, 980 286" class="flow writeback" marker-end="url(#arrow-green)" />
+  <path d="M1140 686 C1070 640, 1030 610, 980 300" class="flow writeback" marker-end="url(#arrow-green)" />
+  <path d="M1140 804 C1060 730, 1020 660, 980 314" class="flow writeback" marker-end="url(#arrow-green)" />
+  <path d="M440 658 C530 620, 560 600, 610 606" class="flow writeback" marker-end="url(#arrow-green)" />
+  <path d="M440 808 C550 760, 585 700, 640 650" class="flow writeback" marker-end="url(#arrow-green)" />
+
+  <text x="460" y="140" class="label" fill="#2563eb">业务流</text>
+  <line x1="520" y1="135" x2="610" y2="135" class="legend-line business" marker-end="url(#arrow-blue)" />
+  <text x="700" y="140" class="label" fill="#ea580c">状态流</text>
+  <line x1="760" y1="135" x2="850" y2="135" class="legend-line state" marker-end="url(#arrow-orange)" />
+  <text x="940" y="140" class="label" fill="#16a34a">数据回写流</text>
+  <line x1="1060" y1="135" x2="1160" y2="135" class="legend-line writeback" marker-end="url(#arrow-green)" />
+</svg>

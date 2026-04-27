@@ -1,0 +1,170 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1080" viewBox="0 0 1600 1080" role="img" aria-labelledby="title desc">
+  <title id="title">文档中心与文档协作架构图</title>
+  <desc id="desc">展示文档中心作为文件真相源、文档协作建立其上，以及与合同主档、流程引擎、OCR、搜索、签章、加密、归档之间的数据流、版本流和状态回写流关系。</desc>
+  <defs>
+    <style>
+      .bg { fill: #f7f9fc; }
+      .panel { fill: #ffffff; stroke: #c7d2e3; stroke-width: 2; rx: 18; ry: 18; }
+      .core { fill: #e7f0ff; stroke: #3b82f6; stroke-width: 3; rx: 22; ry: 22; }
+      .child { fill: #eefbf3; stroke: #16a34a; stroke-width: 3; rx: 18; ry: 18; }
+      .service { fill: #fff7e8; stroke: #d97706; stroke-width: 2.5; rx: 16; ry: 16; }
+      .security { fill: #fff0f0; stroke: #dc2626; stroke-width: 3; rx: 18; ry: 18; }
+      .admin { fill: #f4f1ff; stroke: #7c3aed; stroke-width: 2.5; rx: 16; ry: 16; }
+      .legend { fill: #ffffff; stroke: #d0d7e2; stroke-width: 1.5; rx: 12; ry: 12; }
+      .title { font: 700 26px Arial, "PingFang SC", "Microsoft YaHei", sans-serif; fill: #1f2937; }
+      .subtitle { font: 600 18px Arial, "PingFang SC", "Microsoft YaHei", sans-serif; fill: #334155; }
+      .text { font: 500 16px Arial, "PingFang SC", "Microsoft YaHei", sans-serif; fill: #334155; }
+      .small { font: 500 14px Arial, "PingFang SC", "Microsoft YaHei", sans-serif; fill: #475569; }
+      .mono { font: 600 14px Arial, "PingFang SC", "Microsoft YaHei", sans-serif; fill: #0f172a; }
+      .dashed { stroke-dasharray: 8 6; }
+      .line-data { stroke: #2563eb; stroke-width: 3; fill: none; }
+      .line-version { stroke: #16a34a; stroke-width: 3; fill: none; }
+      .line-state { stroke: #dc2626; stroke-width: 3; fill: none; }
+      .line-read { stroke: #7c3aed; stroke-width: 3; fill: none; }
+    </style>
+    <marker id="arrowBlue" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M 0 0 L 12 6 L 0 12 z" fill="#2563eb" />
+    </marker>
+    <marker id="arrowGreen" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M 0 0 L 12 6 L 0 12 z" fill="#16a34a" />
+    </marker>
+    <marker id="arrowRed" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M 0 0 L 12 6 L 0 12 z" fill="#dc2626" />
+    </marker>
+    <marker id="arrowPurple" markerWidth="12" markerHeight="12" refX="10" refY="6" orient="auto">
+      <path d="M 0 0 L 12 6 L 0 12 z" fill="#7c3aed" />
+    </marker>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1600" height="1080" />
+  <text class="title" x="800" y="42" text-anchor="middle">文档中心与文档协作架构关系</text>
+  <text class="small" x="800" y="70" text-anchor="middle">文件真相源、版本流、数据流、状态回写流与受控解密下载例外</text>
+
+  <rect class="panel" x="40" y="100" width="320" height="250" />
+  <text class="subtitle" x="200" y="135" text-anchor="middle">业务主链入口</text>
+  <rect class="service" x="70" y="160" width="260" height="64" />
+  <text class="text" x="200" y="188" text-anchor="middle">合同主档</text>
+  <text class="small" x="200" y="210" text-anchor="middle">业务身份、生命周期、详情绑定</text>
+  <rect class="service" x="70" y="242" width="260" height="64" />
+  <text class="text" x="200" y="270" text-anchor="middle">流程引擎 / 审批协同</text>
+  <text class="small" x="200" y="292" text-anchor="middle">审批过程引用文档，不持有文件真相</text>
+
+  <rect class="core" x="410" y="100" width="500" height="420" />
+  <text class="subtitle" x="660" y="138" text-anchor="middle">文档中心</text>
+  <text class="text" x="660" y="168" text-anchor="middle">平台底座级能力 / 文件对象真相源</text>
+
+  <rect class="panel" x="445" y="190" width="430" height="92" />
+  <text class="text" x="660" y="220" text-anchor="middle">统一管理内容</text>
+  <text class="small" x="660" y="246" text-anchor="middle">合同正文、附件、预览入口、批注锚点、修订关系</text>
+  <text class="small" x="660" y="268" text-anchor="middle">OCR / 搜索 / 签章 / 加密 / 归档输入源</text>
+
+  <rect class="panel" x="445" y="300" width="205" height="180" />
+  <text class="text" x="547" y="332" text-anchor="middle">文件对象主记录</text>
+  <text class="small" x="547" y="360" text-anchor="middle">DocumentAsset</text>
+  <text class="small" x="547" y="386" text-anchor="middle">业务绑定</text>
+  <text class="small" x="547" y="412" text-anchor="middle">主版本引用</text>
+  <text class="small" x="547" y="438" text-anchor="middle">统一预览入口</text>
+
+  <rect class="panel" x="670" y="300" width="205" height="180" />
+  <text class="text" x="772" y="332" text-anchor="middle">版本链治理</text>
+  <text class="small" x="772" y="360" text-anchor="middle">DocumentVersionChain</text>
+  <text class="small" x="772" y="386" text-anchor="middle">版本追加 / 切换</text>
+  <text class="small" x="772" y="412" text-anchor="middle">修订关系</text>
+  <text class="small" x="772" y="438" text-anchor="middle">派生产物引用</text>
+
+  <rect class="child" x="410" y="560" width="500" height="170" />
+  <text class="subtitle" x="660" y="602" text-anchor="middle">文档协作</text>
+  <text class="text" x="660" y="632" text-anchor="middle">建立在文档中心之上的正式子模块</text>
+  <text class="small" x="660" y="664" text-anchor="middle">批注、修订、评论、版本比对、协同处理</text>
+  <text class="small" x="660" y="690" text-anchor="middle">只基于文档中心文件真相工作，不自建第二套文件体系</text>
+
+  <rect class="security" x="980" y="100" width="320" height="250" />
+  <text class="subtitle" x="1140" y="136" text-anchor="middle">加密模块</text>
+  <text class="text" x="1140" y="166" text-anchor="middle">挂在文档中心写入 / 读取路径上</text>
+  <rect class="panel" x="1012" y="188" width="256" height="64" />
+  <text class="small" x="1140" y="214" text-anchor="middle">写入：入库校验 + 自动加密</text>
+  <text class="small" x="1140" y="236" text-anchor="middle">读取：平台内受控自动解密</text>
+  <rect class="admin" x="1012" y="268" width="256" height="54" />
+  <text class="small" x="1140" y="290" text-anchor="middle">默认不可脱离平台使用</text>
+  <text class="small" x="1140" y="310" text-anchor="middle">管理端可按部门、人员授权解密下载</text>
+
+  <rect class="panel" x="980" y="392" width="520" height="338" />
+  <text class="subtitle" x="1240" y="430" text-anchor="middle">稳定挂接能力</text>
+
+  <rect class="service" x="1010" y="458" width="220" height="82" />
+  <text class="text" x="1120" y="490" text-anchor="middle">OCR</text>
+  <text class="small" x="1120" y="516" text-anchor="middle">读取受控版本</text>
+
+  <rect class="service" x="1250" y="458" width="220" height="82" />
+  <text class="text" x="1360" y="490" text-anchor="middle">搜索</text>
+  <text class="small" x="1360" y="516" text-anchor="middle">构建索引读模型</text>
+
+  <rect class="service" x="1010" y="566" width="220" height="82" />
+  <text class="text" x="1120" y="598" text-anchor="middle">电子签章</text>
+  <text class="small" x="1120" y="624" text-anchor="middle">读取签章输入稿 / 回收签章结果稿</text>
+
+  <rect class="service" x="1250" y="566" width="220" height="82" />
+  <text class="text" x="1360" y="598" text-anchor="middle">归档</text>
+  <text class="small" x="1360" y="624" text-anchor="middle">读取归档输入集 / 回收归档稿</text>
+
+  <rect class="panel" x="980" y="770" width="520" height="180" />
+  <text class="subtitle" x="1240" y="808" text-anchor="middle">回写目的地</text>
+  <text class="small" x="1240" y="836" text-anchor="middle">签章、归档、流程等结果最终回写平台主链</text>
+  <rect class="service" x="1010" y="858" width="220" height="56" />
+  <text class="small" x="1120" y="892" text-anchor="middle">合同主档 / 时间线</text>
+  <rect class="service" x="1250" y="858" width="220" height="56" />
+  <text class="small" x="1360" y="892" text-anchor="middle">流程摘要 / 审计 / 检索刷新</text>
+
+  <path class="line-data" marker-end="url(#arrowBlue)" d="M 330 192 C 370 192, 390 192, 410 192" />
+  <text class="small" x="370" y="180" text-anchor="middle">合同绑定 / 数据流</text>
+
+  <path class="line-data" marker-end="url(#arrowBlue)" d="M 330 274 C 370 274, 390 274, 410 274" />
+  <text class="small" x="366" y="262" text-anchor="middle">审批引用 / 数据流</text>
+
+  <path class="line-version" marker-end="url(#arrowGreen)" d="M 660 520 L 660 560" />
+  <text class="small" x="694" y="545">版本流 / 锚点附着</text>
+
+  <path class="line-data" marker-end="url(#arrowBlue)" d="M 910 220 C 945 220, 955 220, 980 220" />
+  <text class="small" x="946" y="206" text-anchor="middle">写入 / 读取挂接</text>
+
+  <path class="line-data" marker-end="url(#arrowBlue)" d="M 910 458 C 960 458, 960 499, 1010 499" />
+  <text class="small" x="958" y="448" text-anchor="middle">数据流</text>
+
+  <path class="line-data" marker-end="url(#arrowBlue)" d="M 910 458 C 1010 458, 1130 499, 1250 499" />
+  <text class="small" x="1125" y="446" text-anchor="middle">索引输入流</text>
+
+  <path class="line-version" marker-end="url(#arrowGreen)" d="M 910 620 C 960 620, 960 607, 1010 607" />
+  <text class="small" x="955" y="607" text-anchor="middle">版本流</text>
+
+  <path class="line-version" marker-end="url(#arrowGreen)" d="M 910 650 C 1030 650, 1130 607, 1250 607" />
+  <text class="small" x="1118" y="682" text-anchor="middle">归档版本流</text>
+
+  <path class="line-state" marker-end="url(#arrowRed)" d="M 1120 648 C 1120 760, 1120 760, 1120 858" />
+  <text class="small" x="1168" y="752">状态回写流</text>
+
+  <path class="line-state" marker-end="url(#arrowRed)" d="M 1360 648 C 1360 760, 1360 760, 1360 858" />
+  <text class="small" x="1418" y="752">状态回写流</text>
+
+  <path class="line-read" marker-end="url(#arrowPurple)" d="M 1140 322 C 1140 350, 1140 360, 1140 392" />
+  <text class="small" x="1208" y="366">受控读取</text>
+
+  <path class="line-read dashed" marker-end="url(#arrowPurple)" d="M 1300 295 C 1370 295, 1440 295, 1500 295 L 1500 770" />
+  <text class="small" x="1410" y="282" text-anchor="middle">管理端授权解密下载例外</text>
+  <text class="small" x="1500" y="790" text-anchor="end">下载结果与审计回写</text>
+
+  <rect class="legend" x="40" y="810" width="870" height="180" />
+  <text class="subtitle" x="110" y="848">图例与约束</text>
+  <line x1="80" y1="888" x2="170" y2="888" class="line-data" marker-end="url(#arrowBlue)" />
+  <text class="small" x="190" y="894">数据流：业务模块或能力模块读取 / 写入文档中心对象</text>
+  <line x1="80" y1="928" x2="170" y2="928" class="line-version" marker-end="url(#arrowGreen)" />
+  <text class="small" x="190" y="934">版本流：签章稿、归档稿、修订稿等进入同一版本链</text>
+  <line x1="80" y1="968" x2="170" y2="968" class="line-state" marker-end="url(#arrowRed)" />
+  <text class="small" x="190" y="974">状态回写流：流程、签章、归档结果回写合同主档、审计与索引刷新</text>
+
+  <text class="mono" x="520" y="848">硬性边界</text>
+  <text class="small" x="520" y="878">1. 文档中心是平台底座级能力，不是附件上传组件</text>
+  <text class="small" x="520" y="904">2. 文档协作建立在文档中心之上，是正式子模块</text>
+  <text class="small" x="520" y="930">3. 其他模块不得各自长出文件真相源或私有版本链</text>
+  <text class="small" x="520" y="956">4. 加密默认保障平台内受控使用，授权解密下载是受控例外</text>
+  <text class="small" x="520" y="982">5. OCR / 搜索 / 签章 / 归档均通过稳定挂接关系消费同一文档对象</text>
+</svg>

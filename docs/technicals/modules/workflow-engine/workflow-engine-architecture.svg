@@ -1,0 +1,138 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="1040" viewBox="0 0 1600 1040" role="img" aria-labelledby="title desc">
+  <title id="title">流程引擎子模块架构图</title>
+  <desc id="desc">展示 OA 主审批路径、平台流程引擎承接路径、流程定义发布、组织架构绑定、合同主档绑定，以及审计、通知、任务中心之间的数据流与状态回写流。</desc>
+  <defs>
+    <style>
+      .bg { fill: #f7f9fc; }
+      .panel { fill: #ffffff; stroke: #d7deea; stroke-width: 2; rx: 16; ry: 16; }
+      .box { fill: #ffffff; stroke: #5b6b8a; stroke-width: 2; rx: 12; ry: 12; }
+      .boxBlue { fill: #eef4ff; stroke: #4776e6; stroke-width: 2; rx: 12; ry: 12; }
+      .boxGreen { fill: #ecfbf3; stroke: #2f8f5b; stroke-width: 2; rx: 12; ry: 12; }
+      .boxOrange { fill: #fff5e8; stroke: #d9822b; stroke-width: 2; rx: 12; ry: 12; }
+      .boxPurple { fill: #f4efff; stroke: #7a56c1; stroke-width: 2; rx: 12; ry: 12; }
+      .title { font: 700 28px 'PingFang SC', 'Microsoft YaHei', sans-serif; fill: #1f2a44; }
+      .subtitle { font: 700 20px 'PingFang SC', 'Microsoft YaHei', sans-serif; fill: #23314f; }
+      .text { font: 16px 'PingFang SC', 'Microsoft YaHei', sans-serif; fill: #23314f; }
+      .small { font: 14px 'PingFang SC', 'Microsoft YaHei', sans-serif; fill: #42526e; }
+      .label { font: 700 14px 'PingFang SC', 'Microsoft YaHei', sans-serif; fill: #42526e; }
+      .lineMain { stroke: #2f8f5b; stroke-width: 3.5; fill: none; }
+      .lineAlt { stroke: #4776e6; stroke-width: 3.5; fill: none; }
+      .lineData { stroke: #7a56c1; stroke-width: 3; fill: none; }
+      .lineState { stroke: #d9822b; stroke-width: 3; fill: none; }
+      .dash { stroke-dasharray: 8 8; }
+    </style>
+    <marker id="arrowGreen" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#2f8f5b" />
+    </marker>
+    <marker id="arrowBlue" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#4776e6" />
+    </marker>
+    <marker id="arrowPurple" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#7a56c1" />
+    </marker>
+    <marker id="arrowOrange" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#d9822b" />
+    </marker>
+  </defs>
+
+  <rect class="bg" x="0" y="0" width="1600" height="1040" />
+  <text class="title" x="64" y="60">流程引擎子模块架构图</text>
+  <text class="small" x="64" y="92">默认主审批路径优先走 OA；当 OA 不满足时，由平台流程引擎正式承接。</text>
+
+  <rect class="panel" x="48" y="120" width="1504" height="220" />
+  <text class="subtitle" x="72" y="158">设计时与治理面</text>
+
+  <rect class="boxBlue" x="80" y="190" width="260" height="96" />
+  <text class="text" x="108" y="228">可视化流程配置</text>
+  <text class="small" x="108" y="254">Workflow Design Studio</text>
+  <text class="small" x="108" y="276">节点、路由、组织绑定配置</text>
+
+  <rect class="boxBlue" x="400" y="190" width="300" height="96" />
+  <text class="text" x="430" y="228">流程定义 / 版本 / 发布</text>
+  <text class="small" x="430" y="254">Workflow Definition Registry</text>
+  <text class="small" x="430" y="276">草稿、发布、停用、切换</text>
+
+  <rect class="boxPurple" x="760" y="190" width="300" height="96" />
+  <text class="text" x="790" y="228">组织架构绑定</text>
+  <text class="small" x="790" y="254">部门 / 人员 / 组织规则</text>
+  <text class="small" x="790" y="276">Org Binding Resolver 输入源</text>
+
+  <rect class="boxOrange" x="1120" y="190" width="360" height="96" />
+  <text class="text" x="1150" y="228">平台治理约束</text>
+  <text class="small" x="1150" y="254">统一权限、统一审计、统一通知、统一任务</text>
+  <text class="small" x="1150" y="276">流程引擎是正式子模块，不是 OA 回调壳层</text>
+
+  <path class="lineAlt" d="M340 238 L400 238" marker-end="url(#arrowBlue)" />
+  <path class="lineData" d="M700 238 L760 238" marker-end="url(#arrowPurple)" />
+  <path class="lineState" d="M1060 238 L1120 238" marker-end="url(#arrowOrange)" />
+
+  <rect class="panel" x="48" y="372" width="1504" height="420" />
+  <text class="subtitle" x="72" y="410">运行时主链路</text>
+
+  <rect class="boxGreen" x="88" y="454" width="300" height="120" />
+  <text class="text" x="118" y="492">OA 主审批路径</text>
+  <text class="small" x="118" y="520">默认主路径</text>
+  <text class="small" x="118" y="544">发起 OA 审批、同步状态、接收回传</text>
+
+  <rect class="boxBlue" x="470" y="430" width="360" height="168" />
+  <text class="text" x="500" y="468">平台流程引擎承接路径</text>
+  <text class="small" x="500" y="496">Workflow Runtime Orchestrator</text>
+  <text class="small" x="500" y="520">串行 / 并行 / 会签 / 转办</text>
+  <text class="small" x="500" y="544">条件路由 / 时限控制 / 催办 / 异常处理</text>
+  <text class="small" x="500" y="568">流程实例 / 审批任务 / 审批动作</text>
+
+  <rect class="boxPurple" x="910" y="454" width="270" height="120" />
+  <text class="text" x="940" y="492">组织解析</text>
+  <text class="small" x="940" y="520">解析部门、人员、组织规则</text>
+  <text class="small" x="940" y="544">输出可执行审批参与人</text>
+
+  <rect class="boxOrange" x="1240" y="454" width="250" height="120" />
+  <text class="text" x="1270" y="492">合同主档绑定</text>
+  <text class="small" x="1270" y="520">通过 contract_id 绑定业务对象</text>
+  <text class="small" x="1270" y="544">流程不拥有合同主档</text>
+
+  <rect class="box" x="220" y="652" width="240" height="92" />
+  <text class="text" x="248" y="688">审计日志</text>
+  <text class="small" x="248" y="714">发布、审批动作、异常留痕</text>
+
+  <rect class="box" x="520" y="652" width="240" height="92" />
+  <text class="text" x="548" y="688">通知中心</text>
+  <text class="small" x="548" y="714">待办、催办、超时、异常通知</text>
+
+  <rect class="box" x="820" y="652" width="240" height="92" />
+  <text class="text" x="848" y="688">任务中心</text>
+  <text class="small" x="848" y="714">待办承载、扫描、重试、恢复</text>
+
+  <rect class="box" x="1120" y="652" width="280" height="92" />
+  <text class="text" x="1148" y="688">状态回写</text>
+  <text class="small" x="1148" y="714">回写合同状态与合同时间线</text>
+
+  <path class="lineMain" d="M388 514 L470 514" marker-end="url(#arrowGreen)" />
+  <text class="label" x="402" y="500">OA 不满足时切换承接</text>
+
+  <path class="lineData" d="M830 514 L910 514" marker-end="url(#arrowPurple)" />
+  <path class="lineData" d="M1180 514 L1240 514" marker-end="url(#arrowPurple)" />
+
+  <path class="lineState dash" d="M650 598 L650 652" marker-end="url(#arrowOrange)" />
+  <path class="lineState dash" d="M650 598 L340 652" marker-end="url(#arrowOrange)" />
+  <path class="lineState dash" d="M650 598 L940 652" marker-end="url(#arrowOrange)" />
+  <path class="lineState" d="M830 698 L1120 698" marker-end="url(#arrowOrange)" />
+  <path class="lineState" d="M1390 744 L1390 810 L650 810 L650 598" marker-end="url(#arrowOrange)" />
+  <text class="label" x="1160" y="790">状态回写流</text>
+
+  <path class="lineMain" d="M238 574 L238 630" marker-end="url(#arrowGreen)" />
+  <path class="lineAlt" d="M650 430 L650 286" marker-end="url(#arrowBlue)" />
+  <text class="label" x="670" y="352">发布定义供运行时加载</text>
+
+  <rect class="panel" x="48" y="830" width="1504" height="160" />
+  <text class="subtitle" x="72" y="870">图例</text>
+  <line class="lineMain" x1="88" y1="912" x2="158" y2="912" marker-end="url(#arrowGreen)" />
+  <text class="small" x="176" y="918">绿色：默认 OA 主审批路径 / 执行流</text>
+  <line class="lineAlt" x1="520" y1="912" x2="590" y2="912" marker-end="url(#arrowBlue)" />
+  <text class="small" x="608" y="918">蓝色：平台流程引擎承接与定义加载流</text>
+  <line class="lineData" x1="88" y1="952" x2="158" y2="952" marker-end="url(#arrowPurple)" />
+  <text class="small" x="176" y="958">紫色：组织绑定 / 合同绑定等数据流</text>
+  <line class="lineState" x1="520" y1="952" x2="590" y2="952" marker-end="url(#arrowOrange)" />
+  <text class="small" x="608" y="958">橙色：审计、通知、任务协作与状态回写流</text>
+  <text class="small" x="88" y="988">图中同时体现：OA 主审批路径、平台流程引擎承接路径、流程定义/发布、流程实例/任务、组织架构绑定、合同主档绑定、审计/通知/任务中心协作、数据流与状态回写流。</text>
+</svg>
