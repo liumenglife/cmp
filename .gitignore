@@ -5,7 +5,6 @@ CLAUDE.md
 PRINCIPLE.md
 .gstack/
 .worktrees/
-docs/AccessKey.csv
 backend/target/
 frontend/node_modules/
 frontend/dist/
