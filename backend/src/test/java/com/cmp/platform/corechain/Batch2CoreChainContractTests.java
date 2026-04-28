@@ -279,6 +279,193 @@ class Batch2CoreChainContractTests {
     }
 
     @Test
+    void workflowDefinitionPublishesVersionOnlyWhenApprovalNodesHaveOrganizationBinding() throws Exception {
+        String definition = mockMvc.perform(post("/api/approval-engine/process-definitions")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"process_code":"CONTRACT_APPROVAL_BOUND","process_name":"合同审批流程","business_type":"CONTRACT","approval_mode":"CMP","operator_user_id":"u-workflow-admin","organization_binding_required":true,"definition_payload":{"nodes":[{"node_key":"start","node_name":"开始","node_type":"START"},{"node_key":"dept-review","node_name":"部门审批","node_type":"APPROVAL","participant_mode":"SINGLE","bindings":[{"binding_type":"USER","binding_object_id":"u-approver-1","binding_object_name":"审批人一"}]},{"node_key":"end","node_name":"结束","node_type":"END"}]}}
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.definition_id").isNotEmpty())
+                .andExpect(jsonPath("$.process_code").value("CONTRACT_APPROVAL_BOUND"))
+                .andExpect(jsonPath("$.definition_status").value("DRAFTING"))
+                .andExpect(jsonPath("$.current_draft_version.version_status").value("DRAFT"))
+                .andExpect(jsonPath("$.organization_binding_required").value(true))
+                .andReturn().getResponse().getContentAsString();
+        String definitionId = jsonString(definition, "definition_id");
+
+        mockMvc.perform(post("/api/approval-engine/process-definitions/{definition_id}/publish", definitionId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"version_note":"首个可运行版本","publish_comment":"组织绑定已校验","operator_user_id":"u-workflow-admin","trace_id":"trace-workflow-publish"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.definition_id").value(definitionId))
+                .andExpect(jsonPath("$.definition_status").value("PUBLISHED"))
+                .andExpect(jsonPath("$.latest_published_version.version_no").value(1))
+                .andExpect(jsonPath("$.latest_published_version.version_status").value("PUBLISHED"))
+                .andExpect(jsonPath("$.latest_published_version.version_snapshot.nodes[?(@.node_key == 'dept-review')].bindings[0].binding_object_id").value("u-approver-1"))
+                .andExpect(jsonPath("$.audit_record[?(@.event_type == 'PROCESS_VERSION_PUBLISHED')].trace_id").value("trace-workflow-publish"));
+
+        mockMvc.perform(post("/api/approval-engine/process-definitions/{definition_id}/disable", definitionId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"operator_user_id":"u-workflow-admin","trace_id":"trace-workflow-disable"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.definition_status").value("DISABLED"))
+                .andExpect(jsonPath("$.latest_published_version.version_status").value("DISABLED"))
+                .andExpect(jsonPath("$.audit_record[?(@.event_type == 'PROCESS_VERSION_DISABLED')].trace_id").value("trace-workflow-disable"));
+
+        String unboundDefinition = mockMvc.perform(post("/api/approval-engine/process-definitions")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"process_code":"CONTRACT_APPROVAL_UNBOUND","process_name":"未绑定审批流程","business_type":"CONTRACT","approval_mode":"CMP","operator_user_id":"u-workflow-admin","organization_binding_required":true,"definition_payload":{"nodes":[{"node_key":"review","node_name":"无组织审批","node_type":"APPROVAL","participant_mode":"SINGLE"}]}}
+                                """))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        String unboundDefinitionId = jsonString(unboundDefinition, "definition_id");
+
+        mockMvc.perform(post("/api/approval-engine/process-definitions/{definition_id}/publish", unboundDefinitionId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"version_note":"缺少绑定版本","operator_user_id":"u-workflow-admin","trace_id":"trace-workflow-publish-failed"}
+                                """))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.error_code").value("WORKFLOW_NODE_BINDING_REQUIRED"))
+                .andExpect(jsonPath("$.validation_errors[0].node_key").value("review"));
+    }
+
+    @Test
+    void workflowRuntimeStartsPublishedProcessAndAdvancesSerialParallelCountersignRejectAndTerminatePaths() throws Exception {
+        String serialVersionId = publishWorkflowDefinition("CONTRACT_APPROVAL_SERIAL", "serial-review", "SINGLE",
+                "[{\"binding_type\":\"USER\",\"binding_object_id\":\"u-serial-1\",\"binding_object_name\":\"串行一审\"},{\"binding_type\":\"USER\",\"binding_object_id\":\"u-serial-2\",\"binding_object_name\":\"串行二审\"}]");
+        String serialProcess = mockMvc.perform(post("/api/approval-engine/processes")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"contract_id":"ctr-workflow-serial","version_id":"%s","approval_mode":"CMP","starter_user_id":"u-starter","business_context":{"business_title":"串行审批合同"},"trace_id":"trace-runtime-serial-start"}
+                                """.formatted(serialVersionId)))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.process_id").isNotEmpty())
+                .andExpect(jsonPath("$.instance_status").value("RUNNING"))
+                .andExpect(jsonPath("$.task_center_items[0].assignee_user_id").value("u-serial-1"))
+                .andExpect(jsonPath("$.approval_summary.summary_status").value("RUNNING"))
+                .andReturn().getResponse().getContentAsString();
+        String serialProcessId = jsonString(serialProcess, "process_id");
+        String firstSerialTaskId = jsonString(serialProcess, "task_id");
+
+        String firstApproval = mockMvc.perform(post("/api/approval-engine/processes/{process_id}/actions", serialProcessId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"task_id":"%s","action_type":"APPROVE","operator_user_id":"u-serial-1","comment":"一审通过","trace_id":"trace-runtime-serial-approve-1"}
+                                """.formatted(firstSerialTaskId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.instance_status").value("RUNNING"))
+                .andExpect(jsonPath("$.next_tasks[0].assignee_user_id").value("u-serial-2"))
+                .andReturn().getResponse().getContentAsString();
+        String secondSerialTaskId = jsonString(firstApproval, "task_id");
+
+        mockMvc.perform(post("/api/approval-engine/processes/{process_id}/actions", serialProcessId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"task_id":"%s","action_type":"APPROVE","operator_user_id":"u-serial-2","comment":"二审通过","trace_id":"trace-runtime-serial-approve-2"}
+                                """.formatted(secondSerialTaskId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.instance_status").value("COMPLETED"))
+                .andExpect(jsonPath("$.approval_summary.summary_status").value("COMPLETED"))
+                .andExpect(jsonPath("$.approval_summary.latest_action.action_type").value("APPROVE"));
+
+        String rejectVersionId = publishWorkflowDefinition("CONTRACT_APPROVAL_REJECT", "reject-review", "SINGLE",
+                "[{\"binding_type\":\"USER\",\"binding_object_id\":\"u-reject-1\",\"binding_object_name\":\"驳回审批人\"}]");
+        String rejectProcess = startWorkflowProcess("ctr-workflow-reject", rejectVersionId, "trace-runtime-reject-start");
+        String rejectProcessId = jsonString(rejectProcess, "process_id");
+        String rejectTaskId = jsonString(rejectProcess, "task_id");
+
+        mockMvc.perform(post("/api/approval-engine/processes/{process_id}/actions", rejectProcessId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"task_id":"%s","action_type":"REJECT","operator_user_id":"u-reject-1","comment":"资料不完整","trace_id":"trace-runtime-reject"}
+                                """.formatted(rejectTaskId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.instance_status").value("REJECTED"))
+                .andExpect(jsonPath("$.approval_summary.summary_status").value("REJECTED"));
+
+        String terminateProcess = startWorkflowProcess("ctr-workflow-terminate", rejectVersionId, "trace-runtime-terminate-start");
+        String terminateProcessId = jsonString(terminateProcess, "process_id");
+        String terminateTaskId = jsonString(terminateProcess, "task_id");
+
+        mockMvc.perform(post("/api/approval-engine/processes/{process_id}/actions", terminateProcessId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"task_id":"%s","action_type":"TERMINATE","operator_user_id":"u-admin","comment":"管理员终止","trace_id":"trace-runtime-terminate"}
+                                """.formatted(terminateTaskId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.instance_status").value("TERMINATED"))
+                .andExpect(jsonPath("$.approval_summary.summary_status").value("TERMINATED"));
+
+        String parallelVersionId = publishWorkflowDefinition("CONTRACT_APPROVAL_PARALLEL", "parallel-review", "PARALLEL",
+                "[{\"binding_type\":\"USER\",\"binding_object_id\":\"u-parallel-1\",\"binding_object_name\":\"并行一审\"},{\"binding_type\":\"USER\",\"binding_object_id\":\"u-parallel-2\",\"binding_object_name\":\"并行二审\"}]");
+        String parallelProcess = startWorkflowProcess("ctr-workflow-parallel", parallelVersionId, "trace-runtime-parallel-start");
+        String parallelProcessId = jsonString(parallelProcess, "process_id");
+
+        mockMvc.perform(get("/api/approval-engine/tasks")
+                        .param("process_id", parallelProcessId)
+                        .param("task_status", "PENDING_ACTION"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.total").value(2))
+                .andExpect(jsonPath("$.items[?(@.assignee_user_id == 'u-parallel-1')]").isNotEmpty())
+                .andExpect(jsonPath("$.items[?(@.assignee_user_id == 'u-parallel-2')]").isNotEmpty());
+        String firstParallelTaskId = jsonString(parallelProcess, "task_id");
+
+        mockMvc.perform(post("/api/approval-engine/processes/{process_id}/actions", parallelProcessId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"task_id":"%s","action_type":"APPROVE","operator_user_id":"u-parallel-1","trace_id":"trace-runtime-parallel-approve-1"}
+                                """.formatted(firstParallelTaskId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.instance_status").value("RUNNING"));
+        String secondParallelTaskId = jsonString(mockMvc.perform(get("/api/approval-engine/tasks")
+                        .param("process_id", parallelProcessId)
+                        .param("task_status", "PENDING_ACTION"))
+                .andReturn().getResponse().getContentAsString(), "task_id");
+
+        mockMvc.perform(post("/api/approval-engine/processes/{process_id}/actions", parallelProcessId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"task_id":"%s","action_type":"APPROVE","operator_user_id":"u-parallel-2","trace_id":"trace-runtime-parallel-approve-2"}
+                                """.formatted(secondParallelTaskId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.instance_status").value("COMPLETED"));
+
+        String countersignVersionId = publishWorkflowDefinition("CONTRACT_APPROVAL_COUNTERSIGN", "countersign-review", "COUNTERSIGN",
+                "[{\"binding_type\":\"USER\",\"binding_object_id\":\"u-countersign-1\",\"binding_object_name\":\"会签一审\"},{\"binding_type\":\"USER\",\"binding_object_id\":\"u-countersign-2\",\"binding_object_name\":\"会签二审\"}]");
+        String countersignProcess = startWorkflowProcess("ctr-workflow-countersign", countersignVersionId, "trace-runtime-countersign-start");
+        String countersignProcessId = jsonString(countersignProcess, "process_id");
+        String firstCountersignTaskId = jsonString(countersignProcess, "task_id");
+
+        mockMvc.perform(post("/api/approval-engine/processes/{process_id}/actions", countersignProcessId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"task_id":"%s","action_type":"COUNTERSIGN_PASS","operator_user_id":"u-countersign-1","trace_id":"trace-runtime-countersign-pass-1"}
+                                """.formatted(firstCountersignTaskId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.instance_status").value("RUNNING"));
+        String secondCountersignTaskId = jsonString(mockMvc.perform(get("/api/approval-engine/tasks")
+                        .param("process_id", countersignProcessId)
+                        .param("task_status", "PENDING_ACTION"))
+                .andReturn().getResponse().getContentAsString(), "task_id");
+
+        mockMvc.perform(post("/api/approval-engine/processes/{process_id}/actions", countersignProcessId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"task_id":"%s","action_type":"COUNTERSIGN_PASS","operator_user_id":"u-countersign-2","trace_id":"trace-runtime-countersign-pass-2"}
+                                """.formatted(secondCountersignTaskId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.instance_status").value("COMPLETED"))
+                .andExpect(jsonPath("$.approval_actions[?(@.action_type == 'COUNTERSIGN_PASS')]").isNotEmpty());
+    }
+
+    @Test
     void createdContractBindsDocumentThenApprovalConsumesReferencesAndWritesBackStatus() throws Exception {
         String contract = mockMvc.perform(post("/api/contracts")
                         .contentType(MediaType.APPLICATION_JSON)
@@ -350,6 +537,36 @@ class Batch2CoreChainContractTests {
                 .andExpect(jsonPath("$.approval_summary.result").value("APPROVED"))
                 .andExpect(jsonPath("$.timeline_event[?(@.event_type == 'APPROVAL_APPROVED')]").isNotEmpty())
                 .andExpect(jsonPath("$.timeline_event[?(@.event_type == 'APPROVAL_APPROVED')].summary").value("审批通过并回写合同状态"));
+    }
+
+    private String publishWorkflowDefinition(String processCode, String nodeKey, String participantMode, String bindingsJson) throws Exception {
+        String definition = mockMvc.perform(post("/api/approval-engine/process-definitions")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"process_code":"%s","process_name":"运行时流程","business_type":"CONTRACT","approval_mode":"CMP","operator_user_id":"u-workflow-admin","organization_binding_required":true,"definition_payload":{"nodes":[{"node_key":"%s","node_name":"审批节点","node_type":"APPROVAL","participant_mode":"%s","bindings":%s}]}}
+                                """.formatted(processCode, nodeKey, participantMode, bindingsJson)))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        String definitionId = jsonString(definition, "definition_id");
+
+        String published = mockMvc.perform(post("/api/approval-engine/process-definitions/{definition_id}/publish", definitionId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"version_note":"运行时测试版本","operator_user_id":"u-workflow-admin","trace_id":"trace-runtime-publish"}
+                                """))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        return jsonString(published, "version_id");
+    }
+
+    private String startWorkflowProcess(String contractId, String versionId, String traceId) throws Exception {
+        return mockMvc.perform(post("/api/approval-engine/processes")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"contract_id":"%s","version_id":"%s","approval_mode":"CMP","starter_user_id":"u-starter","business_context":{"business_title":"运行时审批合同"},"trace_id":"%s"}
+                                """.formatted(contractId, versionId, traceId)))
+                .andExpect(status().isAccepted())
+                .andReturn().getResponse().getContentAsString();
     }
 
     private String jsonString(String json, String fieldName) {

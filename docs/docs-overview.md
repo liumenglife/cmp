@@ -138,6 +138,7 @@
 4. [第二批合同核心主链路接口冻结清单](./reports/verification/102-11-batch2-contract-interface-freeze.md)
 5. [第二批合同主档与编辑基础能力实现验证报告](./reports/verification/102-12-contract-core-master-edit-implementation.md)
 6. [第二批文档中心文档主档与版本链基础能力实现验证报告](./reports/verification/102-13-document-center-asset-version-implementation.md)
+7. [第二批流程引擎审批定义与平台运行时基础能力验证报告](./reports/verification/102-14-workflow-engine-runtime-implementation.md)
 
 ## 七、上游来源材料
 
@@ -262,6 +263,7 @@
 | 过程报告 | [第二批合同核心主链路接口冻结清单](./reports/verification/102-11-batch2-contract-interface-freeze.md) | 第二批合同、文档、审批共享字段与最小状态集合冻结清单 | 已存在 |
 | 过程报告 | [第二批合同主档与编辑基础能力实现验证报告](./reports/verification/102-12-contract-core-master-edit-implementation.md) | 第二批合同主档创建、编辑、台账与详情基础能力实现验证报告 | 已存在 |
 | 过程报告 | [第二批文档中心文档主档与版本链基础能力实现验证报告](./reports/verification/102-13-document-center-asset-version-implementation.md) | 第二批文档中心文档主档创建、合同绑定、版本追加与主版本切换实现验证报告 | 已存在 |
+| 过程报告 | [第二批流程引擎审批定义与平台运行时基础能力验证报告](./reports/verification/102-14-workflow-engine-runtime-implementation.md) | 第二批流程定义发布、组织绑定校验、平台审批实例与任务推进实现验证报告 | 已存在 |
 | 上游来源材料 | [docs/specifications/湖南星邦智能装备股份有限公司合同管理平台招标技术要求.pdf](./specifications/%E6%B9%96%E5%8D%97%E6%98%9F%E9%82%A6%E6%99%BA%E8%83%BD%E8%A3%85%E5%A4%87%E8%82%A1%E4%BB%BD%E6%9C%89%E9%99%90%E5%85%AC%E5%8F%B8%E5%90%88%E5%90%8C%E7%AE%A1%E7%90%86%E5%B9%B3%E5%8F%B0%E6%8B%9B%E6%A0%87%E6%8A%80%E6%9C%AF%E8%A6%81%E6%B1%82.pdf) | 正式上游来源材料 | 已存在 |
 
 ## 十、维护规则
