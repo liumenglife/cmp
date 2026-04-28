@@ -59,6 +59,39 @@ class CoreChainController {
         return ResponseEntity.status(HttpStatus.CREATED).body(service.createDocumentAsset(request));
     }
 
+    @GetMapping("/api/document-center/assets/{documentAssetId}")
+    Map<String, Object> documentAsset(@PathVariable String documentAssetId) {
+        return service.documentAsset(documentAssetId);
+    }
+
+    @GetMapping("/api/document-center/assets")
+    Map<String, Object> documentAssets(@RequestParam(required = false) String owner_type,
+                                       @RequestParam(required = false) String owner_id) {
+        return service.documentAssets(owner_type, owner_id);
+    }
+
+    @PostMapping("/api/document-center/assets/{documentAssetId}/versions")
+    ResponseEntity<Map<String, Object>> appendDocumentVersion(@PathVariable String documentAssetId,
+                                                             @RequestBody Map<String, Object> request) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(service.appendDocumentVersion(documentAssetId, request));
+    }
+
+    @GetMapping("/api/document-center/assets/{documentAssetId}/versions")
+    Map<String, Object> documentVersions(@PathVariable String documentAssetId) {
+        return service.documentVersions(documentAssetId);
+    }
+
+    @GetMapping("/api/document-center/versions/{documentVersionId}")
+    Map<String, Object> documentVersion(@PathVariable String documentVersionId) {
+        return service.documentVersion(documentVersionId);
+    }
+
+    @PostMapping("/api/document-center/versions/{documentVersionId}/activate")
+    Map<String, Object> activateDocumentVersion(@PathVariable String documentVersionId,
+                                                @RequestBody(required = false) Map<String, Object> request) {
+        return service.activateDocumentVersion(documentVersionId, request == null ? Map.of() : request);
+    }
+
     @PostMapping("/api/workflow-engine/processes")
     ResponseEntity<Map<String, Object>> startProcess(@RequestBody Map<String, Object> request) {
         return ResponseEntity.status(HttpStatus.ACCEPTED).body(service.startProcess(request));
@@ -74,6 +107,8 @@ class CoreChainController {
 class CoreChainService {
 
     private final Map<String, ContractState> contracts = new ConcurrentHashMap<>();
+    private final Map<String, DocumentAssetState> documentAssets = new ConcurrentHashMap<>();
+    private final Map<String, DocumentVersionState> documentVersions = new ConcurrentHashMap<>();
     private final Map<String, ProcessState> processes = new ConcurrentHashMap<>();
 
     Map<String, Object> createContract(Map<String, Object> request) {
@@ -107,7 +142,18 @@ class CoreChainService {
     Map<String, Object> createDocumentAsset(Map<String, Object> request) {
         String contractId = text(request, "owner_id", null);
         ContractState contract = requireContract(contractId);
-        DocumentRef document = new DocumentRef("doc-asset-" + UUID.randomUUID(), "doc-ver-" + UUID.randomUUID(), "FIRST_VERSION_WRITTEN");
+        String documentAssetId = "doc-asset-" + UUID.randomUUID();
+        String documentVersionId = "doc-ver-" + UUID.randomUUID();
+        List<Map<String, Object>> auditRecords = new ArrayList<>();
+        auditRecords.add(event("DOCUMENT_ASSET_CREATED", documentAssetId, text(request, "trace_id", null)));
+        DocumentAssetState asset = new DocumentAssetState(documentAssetId, documentVersionId, text(request, "owner_type", "CONTRACT"), contractId,
+                text(request, "document_role", text(request, "document_kind", "MAIN_BODY")),
+                text(request, "document_title", text(request, "document_name", null)), "FIRST_VERSION_WRITTEN", "NOT_REQUIRED", "NOT_GENERATED", 1, auditRecords);
+        documentAssets.put(documentAssetId, asset);
+        documentVersions.put(documentVersionId, new DocumentVersionState(documentVersionId, documentAssetId, 1, null, null,
+                text(request, "version_label", "V1"), "首版写入", "ACTIVE", text(request, "file_upload_token", null), text(request, "source_channel", "MANUAL_UPLOAD")));
+
+        DocumentRef document = new DocumentRef(asset.documentAssetId(), asset.currentVersionId(), "FIRST_VERSION_WRITTEN");
         ContractState updated = new ContractState(contract.contractId(), contract.contractNo(), contract.contractName(), contract.contractStatus(),
                 contract.ownerOrgUnitId(), contract.ownerUserId(), contract.amount(), contract.currency(), document,
                 contract.approvalSummary(), contract.processId(), copyEvents(contract.events()));
@@ -116,10 +162,72 @@ class CoreChainService {
 
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("contract_id", contractId);
-        body.put("document_asset_id", document.documentAssetId());
-        body.put("document_version_id", document.documentVersionId());
-        body.put("document_status", document.documentStatus());
+        body.putAll(documentAssetBody(asset));
+        body.put("document_version_id", asset.currentVersionId());
         return body;
+    }
+
+    Map<String, Object> appendDocumentVersion(String documentAssetId, Map<String, Object> request) {
+        DocumentAssetState asset = requireDocumentAsset(documentAssetId);
+        int versionNo = asset.latestVersionNo() + 1;
+        String versionId = "doc-ver-" + UUID.randomUUID();
+        DocumentVersionState version = new DocumentVersionState(versionId, documentAssetId, versionNo, asset.currentVersionId(), text(request, "base_version_id", null),
+                text(request, "version_label", "V" + versionNo), text(request, "change_reason", null), "ACTIVE",
+                text(request, "file_upload_token", null), text(request, "source_channel", "MANUAL_UPLOAD"));
+        documentVersions.put(versionId, version);
+
+        DocumentAssetState updated = new DocumentAssetState(asset.documentAssetId(), versionId, asset.ownerType(), asset.ownerId(), asset.documentRole(), asset.documentTitle(),
+                asset.documentStatus(), asset.encryptionStatus(), asset.previewStatus(), versionNo, copyEvents(asset.auditRecords()));
+        updated.auditRecords().add(event("DOCUMENT_VERSION_APPENDED", versionId, text(request, "trace_id", null)));
+        documentAssets.put(documentAssetId, updated);
+        refreshContractDocumentRef(updated);
+        return documentVersionBody(version);
+    }
+
+    Map<String, Object> documentAsset(String documentAssetId) {
+        return documentAssetBody(requireDocumentAsset(documentAssetId));
+    }
+
+    Map<String, Object> documentAssets(String ownerType, String ownerId) {
+        List<Map<String, Object>> items = documentAssets.values().stream()
+                .filter(asset -> ownerType == null || ownerType.equals(asset.ownerType()))
+                .filter(asset -> ownerId == null || ownerId.equals(asset.ownerId()))
+                .map(this::documentAssetBody)
+                .toList();
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("items", items);
+        body.put("total", items.size());
+        return body;
+    }
+
+    Map<String, Object> documentVersions(String documentAssetId) {
+        DocumentAssetState asset = requireDocumentAsset(documentAssetId);
+        List<Map<String, Object>> items = documentVersions.values().stream()
+                .filter(version -> documentAssetId.equals(version.documentAssetId()))
+                .sorted((left, right) -> Integer.compare(left.versionNo(), right.versionNo()))
+                .map(this::documentVersionBody)
+                .toList();
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("document_asset_id", asset.documentAssetId());
+        body.put("current_version_id", asset.currentVersionId());
+        body.put("items", items);
+        body.put("total", items.size());
+        return body;
+    }
+
+    Map<String, Object> documentVersion(String documentVersionId) {
+        return documentVersionBody(requireDocumentVersion(documentVersionId));
+    }
+
+    Map<String, Object> activateDocumentVersion(String documentVersionId, Map<String, Object> request) {
+        DocumentVersionState version = requireDocumentVersion(documentVersionId);
+        DocumentAssetState asset = requireDocumentAsset(version.documentAssetId());
+        DocumentAssetState updated = new DocumentAssetState(asset.documentAssetId(), documentVersionId, asset.ownerType(), asset.ownerId(), asset.documentRole(), asset.documentTitle(),
+                asset.documentStatus(), asset.encryptionStatus(), asset.previewStatus(), asset.latestVersionNo(), copyEvents(asset.auditRecords()));
+        updated.auditRecords().add(event("DOCUMENT_VERSION_ACTIVATED", documentVersionId, text(request, "trace_id", null)));
+        documentAssets.put(asset.documentAssetId(), updated);
+        refreshContractDocumentRef(updated);
+        return documentAssetBody(updated);
     }
 
     Map<String, Object> startProcess(Map<String, Object> request) {
@@ -255,6 +363,44 @@ class CoreChainService {
         return body;
     }
 
+    private Map<String, Object> documentAssetBody(DocumentAssetState asset) {
+        Map<String, Object> bindingSummary = new LinkedHashMap<>();
+        bindingSummary.put("owner_type", asset.ownerType());
+        bindingSummary.put("owner_id", asset.ownerId());
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("document_asset_id", asset.documentAssetId());
+        body.put("current_version_id", asset.currentVersionId());
+        body.put("owner_type", asset.ownerType());
+        body.put("owner_id", asset.ownerId());
+        body.put("document_role", asset.documentRole());
+        body.put("document_title", asset.documentTitle());
+        body.put("latest_version_no", asset.latestVersionNo());
+        body.put("document_status", asset.documentStatus());
+        body.put("encryption_status", asset.encryptionStatus());
+        body.put("preview_status", asset.previewStatus());
+        body.put("binding_summary", bindingSummary);
+        body.put("audit_record", asset.auditRecords());
+        return body;
+    }
+
+    private Map<String, Object> documentVersionBody(DocumentVersionState version) {
+        DocumentAssetState asset = requireDocumentAsset(version.documentAssetId());
+        boolean current = version.documentVersionId().equals(asset.currentVersionId());
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("document_version_id", version.documentVersionId());
+        body.put("document_asset_id", version.documentAssetId());
+        body.put("version_no", version.versionNo());
+        body.put("parent_version_id", version.parentVersionId());
+        body.put("base_version_id", version.baseVersionId());
+        body.put("version_label", version.versionLabel());
+        body.put("change_reason", version.changeReason());
+        body.put("version_status", current ? "ACTIVE" : "SUPERSEDED");
+        body.put("is_current_version", current);
+        body.put("preview_generation_status", "NOT_STARTED");
+        return body;
+    }
+
     private Map<String, Object> approvalSummary(String processId, String processStatus, String result) {
         Map<String, Object> summary = new LinkedHashMap<>();
         summary.put("process_id", processId);
@@ -276,7 +422,10 @@ class CoreChainService {
     private String eventSummary(String eventType) {
         return switch (eventType) {
             case "CONTRACT_CREATED" -> "合同主档已创建";
+            case "DOCUMENT_ASSET_CREATED" -> "文档主档已创建并绑定业务对象";
             case "DOCUMENT_BOUND" -> "文档已绑定合同当前主版本";
+            case "DOCUMENT_VERSION_APPENDED" -> "文档版本已追加并刷新当前主版本";
+            case "DOCUMENT_VERSION_ACTIVATED" -> "文档当前主版本已切换";
             case "APPROVAL_STARTED" -> "审批已发起并回写合同状态";
             case "APPROVAL_APPROVED" -> "审批通过并回写合同状态";
             case "APPROVAL_REJECTED" -> "审批驳回并回写合同状态";
@@ -300,6 +449,34 @@ class CoreChainService {
             throw new IllegalArgumentException("contract_id 不存在: " + contractId);
         }
         return contract;
+    }
+
+    private DocumentAssetState requireDocumentAsset(String documentAssetId) {
+        DocumentAssetState asset = documentAssets.get(documentAssetId);
+        if (asset == null) {
+            throw new IllegalArgumentException("document_asset_id 不存在: " + documentAssetId);
+        }
+        return asset;
+    }
+
+    private DocumentVersionState requireDocumentVersion(String documentVersionId) {
+        DocumentVersionState version = documentVersions.get(documentVersionId);
+        if (version == null) {
+            throw new IllegalArgumentException("document_version_id 不存在: " + documentVersionId);
+        }
+        return version;
+    }
+
+    private void refreshContractDocumentRef(DocumentAssetState asset) {
+        if (!"CONTRACT".equals(asset.ownerType())) {
+            return;
+        }
+        ContractState contract = requireContract(asset.ownerId());
+        DocumentRef document = new DocumentRef(asset.documentAssetId(), asset.currentVersionId(), "FIRST_VERSION_WRITTEN");
+        ContractState updated = new ContractState(contract.contractId(), contract.contractNo(), contract.contractName(), contract.contractStatus(),
+                contract.ownerOrgUnitId(), contract.ownerUserId(), contract.amount(), contract.currency(), document,
+                contract.approvalSummary(), contract.processId(), copyEvents(contract.events()));
+        contracts.put(contract.contractId(), updated);
     }
 
     private ProcessState requireProcess(String processId) {
@@ -326,6 +503,16 @@ class CoreChainService {
     }
 
     private record DocumentRef(String documentAssetId, String documentVersionId, String documentStatus) {
+    }
+
+    private record DocumentAssetState(String documentAssetId, String currentVersionId, String ownerType, String ownerId,
+                                      String documentRole, String documentTitle, String documentStatus, String encryptionStatus,
+                                      String previewStatus, int latestVersionNo, List<Map<String, Object>> auditRecords) {
+    }
+
+    private record DocumentVersionState(String documentVersionId, String documentAssetId, int versionNo, String parentVersionId,
+                                        String baseVersionId, String versionLabel, String changeReason, String versionStatus,
+                                        String fileUploadToken, String sourceChannel) {
     }
 
     private record ProcessState(String processId, String contractId, String documentAssetId, String documentVersionId,
