@@ -34,8 +34,8 @@
 - [✓] 第一批启动门禁核对：核对正式输入、范围边界、环境条件与验收样例。
 - [✓] `identity-access` 统一主体与身份协议治理。
 - [✓] `identity-access` 组织、角色、权限与数据权限。
-- [•] `identity-access` 统一授权判定与解密下载授权。
-- [ ] `agent-os` 最小 `QueryEngine / Harness Kernel`。
+- [✓] `identity-access` 统一授权判定与解密下载授权。
+- [•] `agent-os` 最小 `QueryEngine / Harness Kernel`。
 - [ ] `agent-os` 工具契约、沙箱与治理挂点。
 - [ ] `integration-hub` 统一接入与适配基础。
 - [ ] `integration-hub` 入站、出站、回调、补偿与对账。
@@ -58,7 +58,8 @@
 - [✓] 完成第一批启动门禁核对报告与独立 QA 复核。
 - [✓] 完成 `identity-access` 统一主体与身份协议治理实现、首次 QA、修复与二次 QA 复核。
 - [✓] 完成 `identity-access` 组织、角色、权限与数据权限实现、首次 QA、修复与二次 QA 复核。
-- [•] 派发子代理执行 `identity-access` 统一授权判定与解密下载授权。
+- [✓] 完成 `identity-access` 统一授权判定与解密下载授权实现、首次 QA、修复与二次 QA 复核。
+- [•] 派发子代理执行 `agent-os` 最小 `QueryEngine / Harness Kernel`。
 
 ## 已完成里程碑
 
@@ -68,6 +69,7 @@
 - [✓] 第一批启动门禁核对通过，报告为 [`102-01-batch1-startup-gate-check.md`](../reports/verification/102-01-batch1-startup-gate-check.md)。
 - [✓] `identity-access` 统一主体与身份协议治理全绿，验证报告为 [`102-02-identity-access-subject-protocol-implementation.md`](../reports/verification/102-02-identity-access-subject-protocol-implementation.md)。
 - [✓] `identity-access` 组织、角色、权限与数据权限全绿，验证报告为 [`102-03-identity-access-org-role-permission-implementation.md`](../reports/verification/102-03-identity-access-org-role-permission-implementation.md)。
+- [✓] `identity-access` 统一授权判定与解密下载授权全绿，验证报告为 [`102-04-identity-access-authorization-decrypt-implementation.md`](../reports/verification/102-04-identity-access-authorization-decrypt-implementation.md)。
 
 ## 当前阻塞
 
@@ -81,7 +83,7 @@
 
 ## 下一步唯一动作
 
-- 派发子代理执行 `identity-access` 统一授权判定与解密下载授权，并按 TDD / QA 闭环推进。
+- 派发子代理执行 `agent-os` 最小 `QueryEngine / Harness Kernel`，并按 TDD / QA 闭环推进。
 
 ## 恢复提示
 

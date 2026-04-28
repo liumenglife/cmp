@@ -20,6 +20,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
@@ -149,6 +150,36 @@ class IdentityAccessController {
     @PostMapping("/api/org-rule-resolutions")
     Map<String, Object> resolveOrgRule(@RequestBody Map<String, Object> request) {
         return service.resolveOrgRule(request);
+    }
+
+    @PostMapping("/api/authorization/decisions")
+    Map<String, Object> authorizationDecision(@RequestBody Map<String, Object> request) {
+        return service.authorizationDecision(request);
+    }
+
+    @GetMapping("/api/authorization/decisions/{decisionId}")
+    Map<String, Object> authorizationDecisionDetail(@PathVariable String decisionId) {
+        return service.authorizationDecisionDetail(decisionId);
+    }
+
+    @PostMapping("/api/authorization/decrypt-download-grants")
+    ResponseEntity<Map<String, Object>> createDecryptDownloadGrant(@RequestBody Map<String, Object> request) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(service.createDecryptDownloadGrant(request));
+    }
+
+    @PostMapping("/api/authorization/decrypt-download-grants/{permissionGrantId}/revocations")
+    Map<String, Object> revokeDecryptDownloadGrant(@PathVariable String permissionGrantId, @RequestBody Map<String, Object> request) {
+        return service.changeDecryptDownloadGrantStatus(permissionGrantId, "REVOKED", "PERMISSION_REVOKED", request);
+    }
+
+    @PostMapping("/api/authorization/decrypt-download-grants/{permissionGrantId}/recoveries")
+    Map<String, Object> recoverDecryptDownloadGrant(@PathVariable String permissionGrantId, @RequestBody Map<String, Object> request) {
+        return service.changeDecryptDownloadGrantStatus(permissionGrantId, "ACTIVE", "PERMISSION_RECOVERED", request);
+    }
+
+    @PostMapping("/api/authorization/decrypt-download-hits")
+    Map<String, Object> decryptDownloadHit(@RequestBody Map<String, Object> request) {
+        return service.decryptDownloadHit(request);
     }
 }
 
@@ -484,6 +515,122 @@ class IdentityAccessService {
                 """, dataScopeId, text(request, "subject_type", "USER"), text(request, "subject_id", null), text(request, "resource_type", "CONTRACT"),
                 text(request, "scope_type", "SELF"), text(request, "scope_ref", null), "ACTIVE", number(request, "priority_no", 100), text(request, "effect_mode", "ALLOW"), ts(now), ts(now));
         return dataScope(dataScopeId);
+    }
+
+    @Transactional
+    Map<String, Object> createDecryptDownloadGrant(Map<String, Object> request) {
+        Map<String, Object> grantRequest = new LinkedHashMap<>(request);
+        grantRequest.put("permission_type", "SPECIAL");
+        grantRequest.put("permission_code", "DECRYPT_DOWNLOAD");
+        Map<String, Object> grant = grantPermission(grantRequest);
+        if ("DENY".equals(grant.get("effect_mode"))) {
+            audit("PERMISSION_EXPLICIT_DENY", "SUCCESS", text(request, "granted_by", "SYSTEM"), null, grant.get("permission_grant_id").toString(), null, trace(request));
+        }
+        grant.put("cache_invalidated", true);
+        return grant;
+    }
+
+    @Transactional
+    Map<String, Object> changeDecryptDownloadGrantStatus(String permissionGrantId, String status, String eventType, Map<String, Object> request) {
+        jdbcTemplate.update("""
+                update ia_permission_grant
+                set grant_status = ?, updated_at = ?
+                where permission_grant_id = ? and permission_type = 'SPECIAL' and permission_code = 'DECRYPT_DOWNLOAD'
+                """, status, ts(now()), permissionGrantId);
+        Map<String, Object> grant = permissionGrant(permissionGrantId);
+        audit(eventType, "SUCCESS", text(request, "operator_id", "SYSTEM"), null, permissionGrantId, null, trace(request));
+        grant.put("cache_invalidated", true);
+        return grant;
+    }
+
+    @Transactional
+    Map<String, Object> decryptDownloadHit(Map<String, Object> request) {
+        String userId = text(request, "user_id", null);
+        String activeOrgId = text(request, "active_org_id", "ORG-DEFAULT");
+        String activeOrgUnitId = text(request, "active_org_unit_id", null);
+        String resourceType = request.containsKey("contract_id") ? "CONTRACT" : "DOCUMENT";
+        String resourceId = text(request, resourceType.equals("CONTRACT") ? "contract_id" : "document_id", null);
+        String traceId = trace(request);
+        AuthorizationOutcome outcome = evaluateAuthorization(userId, activeOrgId, activeOrgUnitId, "SPECIAL:DECRYPT_DOWNLOAD", resourceType, resourceId, traceId);
+        Map<String, Object> decisionRef = new LinkedHashMap<>();
+        decisionRef.put("decision_id", outcome.decisionId());
+        decisionRef.put("subject_user_id", userId);
+        decisionRef.put("action_code", "SPECIAL:DECRYPT_DOWNLOAD");
+        decisionRef.put("resource_type", resourceType);
+        decisionRef.put("resource_id", resourceId);
+        decisionRef.put("decision_result", outcome.decisionResult());
+        decisionRef.put("expires_at", outcome.expiresAt().toString());
+        decisionRef.put("request_trace_id", traceId);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("hit", "ALLOW".equals(outcome.decisionResult()));
+        body.put("decision_ref", decisionRef);
+        body.put("reason_list", List.of(outcome.reasonCode()));
+        body.put("matched_grant_list", "EXPLICIT_DENY".equals(outcome.reasonCode()) ? outcome.denyGrants() : outcome.allowGrants());
+        body.put("data_scope_hit", outcome.matchingDataScopes());
+        body.put("org_rule_evidence_list", outcome.orgRuleEvidenceList());
+        return body;
+    }
+
+    @Transactional
+    Map<String, Object> authorizationDecision(Map<String, Object> request) {
+        Map<String, Object> subjectRef = objectMap(request.get("subject_ref"));
+        Map<String, Object> resourceRef = objectMap(request.get("resource_ref"));
+        String userId = text(subjectRef, "user_id", text(request, "user_id", null));
+        String activeOrgId = text(subjectRef, "org_id", text(request, "active_org_id", "ORG-DEFAULT"));
+        String activeOrgUnitId = text(subjectRef, "org_unit_id", text(request, "active_org_unit_id", null));
+        String actionCode = text(request, "action_code", null);
+        String resourceType = text(request, "resource_type", null);
+        String resourceId = text(resourceRef, "resource_id", text(request, "resource_id", null));
+        AuthorizationOutcome outcome = evaluateAuthorization(userId, activeOrgId, activeOrgUnitId, actionCode, resourceType, resourceId, trace(request));
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("decision_id", outcome.decisionId());
+        body.put("decision_result", outcome.decisionResult());
+        body.put("reason_list", List.of(outcome.reasonCode()));
+        body.put("subject_ref", Map.of("user_id", userId, "org_id", activeOrgId, "org_unit_id", activeOrgUnitId));
+        body.put("action_code", actionCode);
+        body.put("resource_type", resourceType);
+        body.put("resource_ref", Map.of("resource_id", resourceId));
+        body.put("matched_permission_list", "EXPLICIT_DENY".equals(outcome.reasonCode()) ? outcome.denyGrants() : outcome.allowGrants());
+        body.put("data_scope_hit", outcome.matchingDataScopes());
+        body.put("org_rule_evidence_list", outcome.orgRuleEvidenceList());
+        return body;
+    }
+
+    Map<String, Object> authorizationDecisionDetail(String decisionId) {
+        Map<String, Object> decision = queryOptional("""
+                select decision_id, subject_user_id, subject_org_id, subject_org_unit_id, action_code, resource_type, resource_id, decision_result, decision_reason_code, request_trace_id, evaluated_at
+                from ia_authorization_decision where decision_id = ?
+                """, (rs, rowNum) -> {
+                    Map<String, Object> body = new LinkedHashMap<>();
+                    body.put("decision_id", rs.getString("decision_id"));
+                    body.put("subject_ref", Map.of("user_id", rs.getString("subject_user_id"), "org_id", rs.getString("subject_org_id"), "org_unit_id", rs.getString("subject_org_unit_id")));
+                    body.put("action_code", rs.getString("action_code"));
+                    body.put("resource_type", rs.getString("resource_type"));
+                    body.put("resource_ref", Map.of("resource_id", rs.getString("resource_id")));
+                    body.put("decision_result", rs.getString("decision_result"));
+                    body.put("reason_list", List.of(rs.getString("decision_reason_code")));
+                    body.put("request_trace_id", rs.getString("request_trace_id"));
+                    body.put("evaluated_at", rs.getTimestamp("evaluated_at").toInstant().toString());
+                    return body;
+                }, decisionId).orElseThrow(() -> new IllegalArgumentException("decision_id 不存在: " + decisionId));
+        List<Map<String, Object>> hits = jdbcTemplate.query("""
+                select hit_type, hit_ref_id, frozen_ref_id, resolution_record_id, hit_result, hit_priority_no, evidence_snapshot
+                from ia_authorization_hit_result
+                where decision_id = ?
+                order by hit_priority_no, hit_type, hit_ref_id
+                """, (rs, rowNum) -> {
+                    Map<String, Object> hit = new LinkedHashMap<>();
+                    hit.put("hit_type", rs.getString("hit_type"));
+                    hit.put("hit_ref_id", rs.getString("hit_ref_id"));
+                    hit.put("frozen_ref_id", rs.getString("frozen_ref_id"));
+                    hit.put("resolution_record_id", rs.getString("resolution_record_id"));
+                    hit.put("hit_result", rs.getString("hit_result"));
+                    hit.put("hit_priority_no", rs.getInt("hit_priority_no"));
+                    hit.put("evidence_snapshot", rs.getString("evidence_snapshot"));
+                    return hit;
+                }, decisionId);
+        decision.put("authorization_hit_list", hits);
+        return Map.of("decision_detail", decision);
     }
 
     @Transactional
@@ -944,6 +1091,131 @@ class IdentityAccessService {
                 .toList();
     }
 
+    private List<Map<String, Object>> effectiveDecryptDownloadGrants(String userId, String orgId, String resourceType) {
+        List<Map<String, Object>> grants = new java.util.ArrayList<>(permissionGrants(userId, effectiveRoleIds(userId, orgId), "SPECIAL", "DECRYPT_DOWNLOAD"));
+        grants.addAll(jdbcTemplate.query("""
+                select pg.permission_grant_id, pg.grant_target_type, pg.grant_target_id, pg.permission_type, pg.permission_code, pg.resource_type, pg.grant_status, pg.priority_no, pg.effect_mode
+                from ia_permission_grant pg
+                join ia_org_membership m on m.org_unit_id = pg.grant_target_id
+                where pg.grant_target_type = 'ORG_UNIT'
+                  and pg.permission_type = 'SPECIAL'
+                  and pg.permission_code = 'DECRYPT_DOWNLOAD'
+                  and pg.grant_status = 'ACTIVE'
+                  and (? is null or pg.resource_type is null or pg.resource_type = ?)
+                  and m.user_id = ? and m.membership_status = 'ACTIVE'
+                """, (rs, rowNum) -> permissionGrantBody(rs), resourceType, resourceType, userId));
+        return grants.stream()
+                .filter(grant -> grant.get("resource_type") == null || resourceType.equals(grant.get("resource_type")))
+                .sorted(java.util.Comparator.comparingInt(grant -> ((Number) grant.get("priority_no")).intValue()))
+                .toList();
+    }
+
+    private AuthorizationOutcome evaluateAuthorization(String userId, String activeOrgId, String activeOrgUnitId, String actionCode, String resourceType, String resourceId, String traceId) {
+        boolean decryptDownload = "SPECIAL:DECRYPT_DOWNLOAD".equals(actionCode);
+        List<Map<String, Object>> grants = decryptDownload
+                ? effectiveDecryptDownloadGrants(userId, activeOrgId, resourceType)
+                : effectiveFunctionGrants(userId, activeOrgId, actionCode, resourceType);
+        List<Map<String, Object>> denyGrants = grants.stream().filter(grant -> "DENY".equals(grant.get("effect_mode"))).toList();
+        List<Map<String, Object>> allowGrants = grants.stream().filter(grant -> "ALLOW".equals(grant.get("effect_mode"))).toList();
+        List<Map<String, Object>> matchingDataScopes = matchingDataScopes(userId, activeOrgId, activeOrgUnitId, resourceType, resourceId, traceId);
+        boolean dataScopeDenied = matchingDataScopes.stream().anyMatch(scope -> "DENY".equals(scope.get("effect_mode")));
+        boolean dataScopeAllowed = matchingDataScopes.stream().anyMatch(scope -> "ALLOW".equals(scope.get("effect_mode")));
+        String decisionResult;
+        String reasonCode;
+        if (!denyGrants.isEmpty()) {
+            decisionResult = "DENY";
+            reasonCode = "EXPLICIT_DENY";
+        } else if (allowGrants.isEmpty()) {
+            decisionResult = "DENY";
+            reasonCode = decryptDownload ? "NO_DECRYPT_DOWNLOAD_GRANT" : "NO_PERMISSION_GRANT";
+        } else if (dataScopeDenied || !dataScopeAllowed) {
+            decisionResult = "DENY";
+            reasonCode = "DATA_SCOPE_MISS";
+        } else {
+            decisionResult = "ALLOW";
+            reasonCode = decryptDownload ? "DECRYPT_DOWNLOAD_AUTHORIZED" : "AUTHORIZATION_ALLOWED";
+        }
+        String decisionId = "dec-" + UUID.randomUUID();
+        Instant now = now();
+        Instant expiresAt = now.plus(5, ChronoUnit.MINUTES);
+        String permissionChecksum = "grant-" + grants.size() + "-allow-" + allowGrants.size() + "-deny-" + denyGrants.size();
+        String dataScopeChecksum = "scope-hit-" + matchingDataScopes.size();
+        jdbcTemplate.update("""
+                insert into ia_authorization_decision
+                (decision_id, subject_user_id, subject_org_id, subject_org_unit_id, action_code, resource_type, resource_id, decision_result, decision_reason_code, permission_snapshot_checksum, data_scope_snapshot_checksum, request_trace_id, expires_at, evaluated_at)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, decisionId, userId, activeOrgId, activeOrgUnitId, actionCode, resourceType, resourceId,
+                decisionResult, reasonCode, permissionChecksum, dataScopeChecksum, traceId, ts(expiresAt), ts(now));
+        for (Map<String, Object> grant : grants) {
+            insertAuthorizationHit(decisionId, "PERMISSION_GRANT", grant.get("permission_grant_id"), null, null, grant.get("effect_mode"), grant.get("priority_no"), grant);
+        }
+        List<Map<String, Object>> orgRuleEvidenceList = new java.util.ArrayList<>();
+        for (Map<String, Object> scope : matchingDataScopes) {
+            insertAuthorizationHit(decisionId, "DATA_SCOPE", scope.get("data_scope_id"), null, null, scope.get("effect_mode"), scope.get("priority_no"), scope);
+            if (scope.containsKey("org_rule_evidence")) {
+                Map<String, Object> evidence = objectMap(scope.get("org_rule_evidence"));
+                orgRuleEvidenceList.add(evidence);
+                insertAuthorizationHit(decisionId, "ORG_RULE", scope.get("scope_ref"), evidence.get("frozen_ref_id"), evidence.get("resolution_record_id"), scope.get("effect_mode"), scope.get("priority_no"), evidence);
+            }
+        }
+        audit(decryptDownload ? ("ALLOW".equals(decisionResult) ? "DECRYPT_DOWNLOAD_HIT" : "DECRYPT_DOWNLOAD_DENIED") : ("DENY".equals(decisionResult) ? "AUTHZ_DENIED" : "AUTHORIZATION_DECISION"),
+                "ALLOW".equals(decisionResult) ? "SUCCESS" : "DENIED", userId, userId, decisionId, null, traceId);
+        return new AuthorizationOutcome(decisionId, decisionResult, reasonCode, expiresAt, grants, denyGrants, allowGrants, matchingDataScopes, orgRuleEvidenceList);
+    }
+
+    private List<Map<String, Object>> effectiveFunctionGrants(String userId, String orgId, String actionCode, String resourceType) {
+        return permissionGrants(userId, effectiveRoleIds(userId, orgId), "FUNCTION", actionCode).stream()
+                .filter(grant -> grant.get("resource_type") == null || resourceType.equals(grant.get("resource_type")))
+                .toList();
+    }
+
+    private List<Map<String, Object>> matchingDataScopes(String userId, String orgId, String activeOrgUnitId, String resourceType, String resourceId, String traceId) {
+        List<Map<String, Object>> matches = new java.util.ArrayList<>();
+        for (Map<String, Object> scope : effectiveDataScopes(userId, orgId, resourceType)) {
+            Optional<Map<String, Object>> matched = dataScopeMatch(scope, userId, orgId, activeOrgUnitId, resourceId, traceId);
+            matched.ifPresent(matches::add);
+        }
+        return matches;
+    }
+
+    private Optional<Map<String, Object>> dataScopeMatch(Map<String, Object> scope, String userId, String activeOrgId, String activeOrgUnitId, String resourceId, String traceId) {
+        String scopeType = scope.get("scope_type").toString();
+        String scopeRef = scope.get("scope_ref").toString();
+        boolean matched;
+        Map<String, Object> enriched = new LinkedHashMap<>(scope);
+        if ("USER_LIST".equals(scopeType)) {
+            matched = List.of(scopeRef.split(",")).contains(resourceId);
+        } else if ("ORG".equals(scopeType)) {
+            matched = true;
+        } else if ("SELF".equals(scopeType)) {
+            matched = scopeRef.equals(resourceId);
+        } else if ("RULE".equals(scopeType)) {
+            Map<String, Object> predicate = rulePredicate(scopeRef, userId, activeOrgId, activeOrgUnitId, traceId);
+            @SuppressWarnings("unchecked")
+            List<String> userIds = (List<String>) predicate.get("values");
+            matched = userIds.contains(userId);
+            if (matched) {
+                enriched.put("org_rule_evidence", Map.of(
+                        "hit_type", "ORG_RULE",
+                        "hit_ref_id", scopeRef,
+                        "frozen_ref_id", predicate.get("org_rule_version_id"),
+                        "resolution_record_id", predicate.get("org_rule_resolution_record_id"),
+                        "resolution_status", predicate.get("resolution_status")));
+            }
+        } else {
+            matched = scopeRef.equals(resourceId);
+        }
+        return matched ? Optional.of(enriched) : Optional.empty();
+    }
+
+    private void insertAuthorizationHit(String decisionId, String hitType, Object hitRefId, Object frozenRefId, Object resolutionRecordId, Object hitResult, Object priorityNo, Object evidence) {
+        jdbcTemplate.update("""
+                insert into ia_authorization_hit_result
+                (hit_result_id, decision_id, hit_type, hit_ref_id, frozen_ref_id, resolution_record_id, hit_result, hit_priority_no, evidence_snapshot)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, "hit-" + UUID.randomUUID(), decisionId, hitType, hitRefId, frozenRefId, resolutionRecordId, hitResult, priorityNo, json(evidence));
+    }
+
     private Map<String, Object> dataScope(String dataScopeId) {
         return queryOptional("""
                 select data_scope_id, subject_type, subject_id, resource_type, scope_type, scope_ref, scope_status, priority_no, effect_mode
@@ -1095,6 +1367,14 @@ class IdentityAccessService {
         return ticket.startsWith("trusted:") ? ticket.substring("trusted:".length()) : ticket;
     }
 
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> objectMap(Object value) {
+        if (value instanceof Map<?, ?> map) {
+            return (Map<String, Object>) map;
+        }
+        return Map.of();
+    }
+
     private String provider(Map<String, Object> request) {
         return text(request, "provider", "LOCAL").toUpperCase(java.util.Locale.ROOT);
     }
@@ -1165,6 +1445,17 @@ class IdentityAccessService {
     private record ProtocolExchange(String exchangeId, String provider, String externalIdentity, String exchangeStatus, String retryPolicyStatus, int httpStatus, Map<String, Object> lastResponse) {}
 
     private record IdempotencyRecord(String payloadFingerprint, String exchangeId) {}
+
+    private record AuthorizationOutcome(
+            String decisionId,
+            String decisionResult,
+            String reasonCode,
+            Instant expiresAt,
+            List<Map<String, Object>> grants,
+            List<Map<String, Object>> denyGrants,
+            List<Map<String, Object>> allowGrants,
+            List<Map<String, Object>> matchingDataScopes,
+            List<Map<String, Object>> orgRuleEvidenceList) {}
 
     private record AuditEvent(String auditViewId, String eventType, String resultStatus, String actorUserId, String targetUserId, String resourceId, String protocolExchangeId, String traceId, Instant occurredAt) {
         private Map<String, Object> body() {
