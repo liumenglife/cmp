@@ -49,9 +49,15 @@ class CoreChainController {
 
     @PatchMapping("/api/contracts/{contractId}")
     ResponseEntity<Map<String, Object>> editContract(@PathVariable String contractId,
-                                                     @RequestHeader(value = "X-CMP-Permissions", required = false) String permissions,
-                                                     @RequestBody Map<String, Object> request) {
+                                                      @RequestHeader(value = "X-CMP-Permissions", required = false) String permissions,
+                                                      @RequestBody Map<String, Object> request) {
         return service.editContract(contractId, permissions, request);
+    }
+
+    @PostMapping("/api/contracts/{contractId}/approvals")
+    ResponseEntity<Map<String, Object>> startContractApproval(@PathVariable String contractId,
+                                                             @RequestBody Map<String, Object> request) {
+        return ResponseEntity.status(HttpStatus.ACCEPTED).body(service.startContractApproval(contractId, request));
     }
 
     @PostMapping("/api/document-center/assets")
@@ -134,6 +140,28 @@ class CoreChainController {
     Map<String, Object> completeProcess(@PathVariable String processId, @RequestBody Map<String, Object> request) {
         return service.completeProcess(processId, request);
     }
+
+    @PostMapping("/api/workflow-engine/approvals/{processId}/results")
+    Map<String, Object> completeApprovalResult(@PathVariable String processId, @RequestBody Map<String, Object> request) {
+        return service.completeProcess(processId, request);
+    }
+
+    @GetMapping("/api/workflow-engine/approvals/{processId}/summary")
+    Map<String, Object> approvalSummary(@PathVariable String processId) {
+        return service.approvalSummaryByProcess(processId);
+    }
+
+    @PostMapping("/api/workflow-engine/oa/callbacks")
+    ResponseEntity<Map<String, Object>> acceptOaCallback(@RequestBody Map<String, Object> request) {
+        Map<String, Object> body = service.acceptOaCallback(request);
+        HttpStatus status = "WRITEBACK_COMPENSATING".equals(body.get("callback_result")) ? HttpStatus.ACCEPTED : HttpStatus.OK;
+        return ResponseEntity.status(status).body(body);
+    }
+
+    @GetMapping("/api/workflow-engine/compensation-tasks")
+    Map<String, Object> compensationTasks(@RequestParam(required = false) String contract_id) {
+        return service.compensationTasks(contract_id);
+    }
 }
 
 @org.springframework.stereotype.Service
@@ -147,6 +175,8 @@ class CoreChainService {
     private final Map<String, WorkflowProcessState> workflowProcesses = new ConcurrentHashMap<>();
     private final Map<String, ApprovalTaskState> approvalTasks = new ConcurrentHashMap<>();
     private final Map<String, ProcessState> processes = new ConcurrentHashMap<>();
+    private final Map<String, String> oaProcessIndex = new ConcurrentHashMap<>();
+    private final Map<String, CompensationTaskState> compensationTasks = new ConcurrentHashMap<>();
 
     Map<String, Object> createContract(Map<String, Object> request) {
         String contractId = "ctr-" + UUID.randomUUID();
@@ -405,7 +435,12 @@ class CoreChainService {
     }
 
     Map<String, Object> startProcess(Map<String, Object> request) {
-        String contractId = text(request, "contract_id", null);
+        Map<String, Object> legacyRequest = new LinkedHashMap<>(request);
+        legacyRequest.put("acceptance_strategy", "LEGACY_WORKFLOW");
+        return startContractApproval(text(request, "contract_id", null), legacyRequest);
+    }
+
+    Map<String, Object> startContractApproval(String contractId, Map<String, Object> request) {
         ContractState contract = requireContract(contractId);
         String documentAssetId = text(request, "document_asset_id", null);
         String documentVersionId = text(request, "document_version_id", null);
@@ -416,9 +451,20 @@ class CoreChainService {
         }
 
         String processId = "proc-" + UUID.randomUUID();
-        Map<String, Object> approvalSummary = approvalSummary(processId, "STARTED", null);
-        ProcessState process = new ProcessState(processId, contractId, documentAssetId, documentVersionId, "STARTED", approvalSummary);
+        String approvalMode = text(request, "acceptance_strategy", "OA");
+        String processStatus = switch (approvalMode) {
+            case "CMP_WORKFLOW" -> "RUNNING";
+            case "LEGACY_WORKFLOW" -> "STARTED";
+            default -> "WAITING_CALLBACK";
+        };
+        String oaInstanceId = "OA".equals(approvalMode) ? "oa-inst-" + UUID.randomUUID() : null;
+        Map<String, Object> approvalSummary = approvalSummary(processId, processStatus, null, approvalMode, "HEALTHY");
+        ProcessState process = new ProcessState(processId, contractId, documentAssetId, documentVersionId, processStatus, approvalSummary,
+                approvalMode, oaInstanceId, 0, new ArrayList<>(), bool(request, "simulate_contract_writeback_failure", false));
         processes.put(processId, process);
+        if (oaInstanceId != null) {
+            oaProcessIndex.put(oaInstanceId, processId);
+        }
 
         ContractState updated = new ContractState(contract.contractId(), contract.contractNo(), contract.contractName(), "UNDER_APPROVAL",
                 contract.ownerOrgUnitId(), contract.ownerUserId(), contract.amount(), contract.currency(), contract.currentDocument(),
@@ -444,8 +490,9 @@ class CoreChainService {
             case "TERMINATED" -> "APPROVAL_TERMINATED";
             default -> contract.contractStatus();
         };
-        Map<String, Object> approvalSummary = approvalSummary(processId, processStatus, result);
-        ProcessState updatedProcess = new ProcessState(processId, process.contractId(), process.documentAssetId(), process.documentVersionId(), processStatus, approvalSummary);
+        Map<String, Object> approvalSummary = approvalSummary(processId, processStatus, result, process.approvalMode(), "HEALTHY");
+        ProcessState updatedProcess = new ProcessState(processId, process.contractId(), process.documentAssetId(), process.documentVersionId(), processStatus, approvalSummary,
+                process.approvalMode(), process.oaInstanceId(), process.lastEventSequence(), copyCallbackEventIds(process.callbackEventIds()), process.simulateContractWritebackFailure());
         processes.put(processId, updatedProcess);
 
         ContractState updatedContract = new ContractState(contract.contractId(), contract.contractNo(), contract.contractName(), contractStatus,
@@ -454,6 +501,61 @@ class CoreChainService {
         updatedContract.events().add(event(eventType(processStatus), processId, text(request, "trace_id", null)));
         contracts.put(contract.contractId(), updatedContract);
         return processBody(updatedProcess);
+    }
+
+    Map<String, Object> approvalSummaryByProcess(String processId) {
+        return new LinkedHashMap<>(requireProcess(processId).approvalSummary());
+    }
+
+    Map<String, Object> acceptOaCallback(Map<String, Object> request) {
+        ProcessState process = requireProcess(oaProcessIndex.get(text(request, "oa_instance_id", null)));
+        String callbackEventId = text(request, "callback_event_id", null);
+        int eventSequence = intValue(request, "event_sequence", 0);
+        if (process.callbackEventIds().contains(callbackEventId)) {
+            return callbackBody("DUPLICATE_IGNORED", process.approvalSummary());
+        }
+        if (eventSequence <= process.lastEventSequence()) {
+            return callbackBody("OUT_OF_ORDER_IGNORED", process.approvalSummary());
+        }
+
+        String result = switch (text(request, "oa_status", "APPROVING")) {
+            case "APPROVED" -> "APPROVED";
+            case "REJECTED" -> "REJECTED";
+            case "TERMINATED", "CANCELED" -> "TERMINATED";
+            default -> null;
+        };
+        String processStatus = result == null ? "WAITING_CALLBACK" : switch (result) {
+            case "APPROVED" -> "COMPLETED";
+            case "REJECTED" -> "REJECTED";
+            default -> "TERMINATED";
+        };
+        List<String> callbackEventIds = copyCallbackEventIds(process.callbackEventIds());
+        callbackEventIds.add(callbackEventId);
+        String compensationStatus = process.simulateContractWritebackFailure() && result != null ? "SUMMARY_COMPENSATING" : "HEALTHY";
+        Map<String, Object> approvalSummary = approvalSummary(process.processId(), processStatus, result, process.approvalMode(), compensationStatus);
+        ProcessState updatedProcess = new ProcessState(process.processId(), process.contractId(), process.documentAssetId(), process.documentVersionId(), processStatus,
+                approvalSummary, process.approvalMode(), process.oaInstanceId(), eventSequence, callbackEventIds, process.simulateContractWritebackFailure());
+        processes.put(process.processId(), updatedProcess);
+
+        if (process.simulateContractWritebackFailure() && result != null) {
+            createCompensationTask(updatedProcess, text(request, "trace_id", null));
+            return callbackBody("WRITEBACK_COMPENSATING", approvalSummary);
+        }
+        if (result != null) {
+            writeBackContractApproval(updatedProcess, processStatus, text(request, "trace_id", null));
+        }
+        return callbackBody("ACCEPTED", approvalSummary);
+    }
+
+    Map<String, Object> compensationTasks(String contractId) {
+        List<Map<String, Object>> items = compensationTasks.values().stream()
+                .filter(task -> contractId == null || contractId.equals(task.contractId()))
+                .map(this::compensationTaskBody)
+                .toList();
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("items", items);
+        body.put("total", items.size());
+        return body;
     }
 
     Map<String, Object> contractMaster(String contractId) {
@@ -527,7 +629,28 @@ class CoreChainService {
         body.put("document_asset_id", process.documentAssetId());
         body.put("document_version_id", process.documentVersionId());
         body.put("process_status", process.processStatus());
+        body.put("approval_mode", process.approvalMode());
+        body.put("oa_instance_id", process.oaInstanceId());
         body.put("approval_summary", process.approvalSummary());
+        return body;
+    }
+
+    private Map<String, Object> callbackBody(String callbackResult, Map<String, Object> approvalSummary) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("callback_result", callbackResult);
+        body.put("approval_summary", approvalSummary);
+        return body;
+    }
+
+    private Map<String, Object> compensationTaskBody(CompensationTaskState task) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("task_id", task.taskId());
+        body.put("task_type", task.taskType());
+        body.put("contract_id", task.contractId());
+        body.put("process_id", task.processId());
+        body.put("compensation_status", task.compensationStatus());
+        body.put("trace_id", task.traceId());
+        body.put("created_at", task.createdAt());
         return body;
     }
 
@@ -753,11 +876,42 @@ class CoreChainService {
     }
 
     private Map<String, Object> approvalSummary(String processId, String processStatus, String result) {
+        return approvalSummary(processId, processStatus, result, null, "HEALTHY");
+    }
+
+    private Map<String, Object> approvalSummary(String processId, String processStatus, String result, String approvalMode, String compensationStatus) {
         Map<String, Object> summary = new LinkedHashMap<>();
         summary.put("process_id", processId);
         summary.put("process_status", processStatus);
+        summary.put("summary_status", processStatus);
         summary.put("result", result);
+        summary.put("final_result", result);
+        summary.put("approval_mode", approvalMode);
+        Map<String, Object> bridgeHealth = new LinkedHashMap<>();
+        bridgeHealth.put("compensation_status", compensationStatus);
+        summary.put("bridge_health", bridgeHealth);
         return summary;
+    }
+
+    private void writeBackContractApproval(ProcessState process, String processStatus, String traceId) {
+        ContractState contract = requireContract(process.contractId());
+        String contractStatus = switch (processStatus) {
+            case "COMPLETED" -> "APPROVED";
+            case "REJECTED" -> "REJECTED";
+            case "TERMINATED" -> "APPROVAL_TERMINATED";
+            default -> contract.contractStatus();
+        };
+        ContractState updatedContract = new ContractState(contract.contractId(), contract.contractNo(), contract.contractName(), contractStatus,
+                contract.ownerOrgUnitId(), contract.ownerUserId(), contract.amount(), contract.currency(), contract.currentDocument(),
+                copyDocuments(contract.attachments()), process.approvalSummary(), process.processId(), copyEvents(contract.events()));
+        updatedContract.events().add(event(eventType(processStatus), process.processId(), traceId));
+        contracts.put(contract.contractId(), updatedContract);
+    }
+
+    private void createCompensationTask(ProcessState process, String traceId) {
+        String taskId = "cmp-task-" + UUID.randomUUID();
+        compensationTasks.put(taskId, new CompensationTaskState(taskId, "CONTRACT_APPROVAL_WRITEBACK", process.contractId(), process.processId(),
+                "PENDING_RETRY", traceId, Instant.now().toString()));
     }
 
     private Map<String, Object> event(String eventType, String objectId, String traceId) {
@@ -939,6 +1093,15 @@ class CoreChainService {
         return new ArrayList<>(documents);
     }
 
+    private List<String> copyCallbackEventIds(List<String> callbackEventIds) {
+        return new ArrayList<>(callbackEventIds);
+    }
+
+    private int intValue(Map<String, Object> request, String field, int defaultValue) {
+        Object value = request.get(field);
+        return value == null ? defaultValue : Integer.parseInt(value.toString());
+    }
+
     private String text(Map<String, Object> request, String field, String defaultValue) {
         Object value = request.get(field);
         return value == null || value.toString().isBlank() ? defaultValue : value.toString();
@@ -989,6 +1152,12 @@ class CoreChainService {
     }
 
     private record ProcessState(String processId, String contractId, String documentAssetId, String documentVersionId,
-                                String processStatus, Map<String, Object> approvalSummary) {
+                                String processStatus, Map<String, Object> approvalSummary, String approvalMode,
+                                String oaInstanceId, int lastEventSequence, List<String> callbackEventIds,
+                                boolean simulateContractWritebackFailure) {
+    }
+
+    private record CompensationTaskState(String taskId, String taskType, String contractId, String processId,
+                                         String compensationStatus, String traceId, String createdAt) {
     }
 }

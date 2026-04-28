@@ -704,6 +704,192 @@ class Batch2CoreChainContractTests {
                 .andExpect(jsonPath("$.timeline_event[?(@.event_type == 'APPROVAL_APPROVED')].summary").value("审批通过并回写合同状态"));
     }
 
+    @Test
+    void unifiedApprovalEntryCanUsePlatformTakeoverAndWriteBackApprovedStatusAndTimeline() throws Exception {
+        String contract = mockMvc.perform(post("/api/contracts")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"contract_name":"平台承接审批合同","owner_user_id":"u-platform-owner","owner_org_unit_id":"dept-platform-owner","trace_id":"trace-platform-contract"}
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.contract_status").value("DRAFT"))
+                .andReturn().getResponse().getContentAsString();
+        String contractId = jsonString(contract, "contract_id");
+
+        String document = mockMvc.perform(post("/api/document-center/assets")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"owner_type":"CONTRACT","owner_id":"%s","document_role":"MAIN_BODY","document_title":"平台审批正文.docx","trace_id":"trace-platform-document"}
+                                """.formatted(contractId)))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        String documentAssetId = jsonString(document, "document_asset_id");
+        String documentVersionId = jsonString(document, "document_version_id");
+
+        String approval = mockMvc.perform(post("/api/contracts/{contract_id}/approvals", contractId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"acceptance_strategy":"CMP_WORKFLOW","document_asset_id":"%s","document_version_id":"%s","starter_user_id":"u-platform-owner","trace_id":"trace-platform-approval-start"}
+                                """.formatted(documentAssetId, documentVersionId)))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.approval_mode").value("CMP_WORKFLOW"))
+                .andExpect(jsonPath("$.approval_summary.summary_status").value("RUNNING"))
+                .andReturn().getResponse().getContentAsString();
+        String processId = jsonString(approval, "process_id");
+
+        mockMvc.perform(get("/api/contracts/{contract_id}/master", contractId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.contract_status").value("UNDER_APPROVAL"))
+                .andExpect(jsonPath("$.approval_summary.process_id").value(processId))
+                .andExpect(jsonPath("$.approval_summary.approval_mode").value("CMP_WORKFLOW"))
+                .andExpect(jsonPath("$.timeline_event[?(@.event_type == 'APPROVAL_STARTED')].trace_id").value("trace-platform-approval-start"));
+
+        mockMvc.perform(post("/api/workflow-engine/approvals/{process_id}/results", processId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"result":"APPROVED","operator_user_id":"u-platform-approver","trace_id":"trace-platform-approval-approved"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.approval_summary.summary_status").value("COMPLETED"))
+                .andExpect(jsonPath("$.approval_summary.final_result").value("APPROVED"));
+
+        mockMvc.perform(get("/api/contracts/{contract_id}/master", contractId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.contract_status").value("APPROVED"))
+                .andExpect(jsonPath("$.approval_summary.process_id").value(processId))
+                .andExpect(jsonPath("$.approval_summary.approval_mode").value("CMP_WORKFLOW"))
+                .andExpect(jsonPath("$.approval_summary.summary_status").value("COMPLETED"))
+                .andExpect(jsonPath("$.approval_summary.final_result").value("APPROVED"))
+                .andExpect(jsonPath("$.timeline_event[?(@.event_type == 'APPROVAL_APPROVED')].trace_id").value("trace-platform-approval-approved"));
+    }
+
+    @Test
+    void unifiedApprovalEntryDefaultsToOaBridgeAndHandlesCallbacksIdempotencyOrderingSummaryAndCompensation() throws Exception {
+        String contract = mockMvc.perform(post("/api/contracts")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"contract_name":"OA桥接审批合同","owner_user_id":"u-oa-owner","owner_org_unit_id":"dept-oa-owner","trace_id":"trace-oa-contract"}
+                                """))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        String contractId = jsonString(contract, "contract_id");
+
+        String document = mockMvc.perform(post("/api/document-center/assets")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"owner_type":"CONTRACT","owner_id":"%s","document_role":"MAIN_BODY","document_title":"OA审批正文.docx","trace_id":"trace-oa-document"}
+                                """.formatted(contractId)))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        String documentAssetId = jsonString(document, "document_asset_id");
+        String documentVersionId = jsonString(document, "document_version_id");
+
+        String approval = mockMvc.perform(post("/api/contracts/{contract_id}/approvals", contractId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"document_asset_id":"%s","document_version_id":"%s","starter_user_id":"u-oa-owner","trace_id":"trace-oa-approval-start"}
+                                """.formatted(documentAssetId, documentVersionId)))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.approval_mode").value("OA"))
+                .andExpect(jsonPath("$.oa_instance_id").isNotEmpty())
+                .andExpect(jsonPath("$.approval_summary.summary_status").value("WAITING_CALLBACK"))
+                .andReturn().getResponse().getContentAsString();
+        String processId = jsonString(approval, "process_id");
+        String oaInstanceId = jsonString(approval, "oa_instance_id");
+
+        mockMvc.perform(post("/api/workflow-engine/oa/callbacks")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"oa_instance_id":"%s","callback_event_id":"evt-oa-approved","oa_status":"APPROVED","event_sequence":2,"trace_id":"trace-oa-approved"}
+                                """.formatted(oaInstanceId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.callback_result").value("ACCEPTED"))
+                .andExpect(jsonPath("$.approval_summary.summary_status").value("COMPLETED"))
+                .andExpect(jsonPath("$.approval_summary.final_result").value("APPROVED"));
+
+        mockMvc.perform(post("/api/workflow-engine/oa/callbacks")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"oa_instance_id":"%s","callback_event_id":"evt-oa-approved","oa_status":"APPROVED","event_sequence":2,"trace_id":"trace-oa-approved-duplicate"}
+                                """.formatted(oaInstanceId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.callback_result").value("DUPLICATE_IGNORED"))
+                .andExpect(jsonPath("$.approval_summary.summary_status").value("COMPLETED"));
+
+        mockMvc.perform(post("/api/workflow-engine/oa/callbacks")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"oa_instance_id":"%s","callback_event_id":"evt-oa-running-late","oa_status":"APPROVING","event_sequence":1,"trace_id":"trace-oa-out-of-order"}
+                                """.formatted(oaInstanceId)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.callback_result").value("OUT_OF_ORDER_IGNORED"))
+                .andExpect(jsonPath("$.approval_summary.summary_status").value("COMPLETED"));
+
+        mockMvc.perform(get("/api/workflow-engine/approvals/{process_id}/summary", processId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.process_id").value(processId))
+                .andExpect(jsonPath("$.approval_mode").value("OA"))
+                .andExpect(jsonPath("$.summary_status").value("COMPLETED"))
+                .andExpect(jsonPath("$.final_result").value("APPROVED"))
+                .andExpect(jsonPath("$.bridge_health.compensation_status").value("HEALTHY"));
+
+        mockMvc.perform(get("/api/contracts/{contract_id}", contractId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.approval_summary.process_id").value(processId))
+                .andExpect(jsonPath("$.approval_summary.approval_mode").value("OA"))
+                .andExpect(jsonPath("$.contract_master.contract_status").value("APPROVED"))
+                .andExpect(jsonPath("$.timeline_summary[?(@.event_type == 'APPROVAL_APPROVED')].trace_id").value("trace-oa-approved"));
+
+        mockMvc.perform(get("/api/contracts")
+                        .param("keyword", "OA桥接审批合同"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[?(@.contract_id == '%s')].approval_summary.process_id".formatted(contractId)).value(processId))
+                .andExpect(jsonPath("$.items[?(@.contract_id == '%s')].approval_summary.approval_mode".formatted(contractId)).value("OA"));
+
+        String failingContract = mockMvc.perform(post("/api/contracts")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"contract_name":"OA回写补偿合同","owner_user_id":"u-oa-fail","owner_org_unit_id":"dept-oa-fail","trace_id":"trace-oa-fail-contract"}
+                                """))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        String failingContractId = jsonString(failingContract, "contract_id");
+        String failingDocument = mockMvc.perform(post("/api/document-center/assets")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"owner_type":"CONTRACT","owner_id":"%s","document_role":"MAIN_BODY","document_title":"OA补偿正文.docx","trace_id":"trace-oa-fail-document"}
+                                """.formatted(failingContractId)))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        String failingAssetId = jsonString(failingDocument, "document_asset_id");
+        String failingVersionId = jsonString(failingDocument, "document_version_id");
+        String failingApproval = mockMvc.perform(post("/api/contracts/{contract_id}/approvals", failingContractId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"document_asset_id":"%s","document_version_id":"%s","starter_user_id":"u-oa-fail","simulate_contract_writeback_failure":true,"trace_id":"trace-oa-fail-start"}
+                                """.formatted(failingAssetId, failingVersionId)))
+                .andExpect(status().isAccepted())
+                .andReturn().getResponse().getContentAsString();
+        String failingOaInstanceId = jsonString(failingApproval, "oa_instance_id");
+
+        mockMvc.perform(post("/api/workflow-engine/oa/callbacks")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"oa_instance_id":"%s","callback_event_id":"evt-oa-fail-approved","oa_status":"APPROVED","event_sequence":1,"trace_id":"trace-oa-fail-approved"}
+                                """.formatted(failingOaInstanceId)))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.callback_result").value("WRITEBACK_COMPENSATING"))
+                .andExpect(jsonPath("$.approval_summary.summary_status").value("COMPLETED"))
+                .andExpect(jsonPath("$.approval_summary.bridge_health.compensation_status").value("SUMMARY_COMPENSATING"));
+
+        mockMvc.perform(get("/api/workflow-engine/compensation-tasks")
+                        .param("contract_id", failingContractId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.total").value(1))
+                .andExpect(jsonPath("$.items[0].task_type").value("CONTRACT_APPROVAL_WRITEBACK"))
+                .andExpect(jsonPath("$.items[0].compensation_status").value("PENDING_RETRY"));
+    }
+
     private String publishWorkflowDefinition(String processCode, String nodeKey, String participantMode, String bindingsJson) throws Exception {
         String definition = mockMvc.perform(post("/api/approval-engine/process-definitions")
                         .contentType(MediaType.APPLICATION_JSON)
