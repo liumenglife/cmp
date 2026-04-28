@@ -31,7 +31,7 @@
 ## 编码阶段任务清单
 
 - [✓] 第一批底座主线实现、跨主线联调、独立 QA 与发布前门禁已完成。
-- [•] 第一批归档、后续计划文件编号重命名、推送和 PR 创建。
+- [✓] 第一批归档、后续计划文件编号重命名、推送和 PR 创建。
 - [ ] 第二批合同核心主链路启动前规划核对。
 
 ## 子代理执行协议
@@ -45,9 +45,9 @@
 ## 当前正在做
 
 - [✓] 第一批底座主线已通过发布前门禁并提交 `b529fc2`。
-- [•] 将第一批 planning 真相迁入 `history.md`，并把 `current.md` 切换到第二批启动前状态。
-- [•] 将第二至第五批 Superpowers 计划文件重命名为 `102-02` 至 `102-05` 编号。
-- [ ] 推送 `feature/batch1-foundations` 并创建面向 `main` 的 PR。
+- [✓] 将第一批 planning 真相迁入 `history.md`，并把 `current.md` 切换到第二批启动前状态。
+- [✓] 将第二至第五批 Superpowers 计划文件重命名为 `102-02` 至 `102-05` 编号。
+- [✓] 推送 `feature/batch1-foundations` 并创建面向 `main` 的 PR：`https://github.com/liumenglife/cmp/pull/2`。
 
 ## 已完成里程碑
 
@@ -62,11 +62,11 @@
 
 ## 活跃支线
 
-- [•] `feature/batch1-foundations` 分支收尾：归档、命名收口、推送和 PR 创建。
+- [✓] `feature/batch1-foundations` 分支收尾：归档、命名收口、推送和 PR 创建。
 
 ## 下一步唯一动作
 
-- 完成命名收口、验证、提交、推送并创建面向 `main` 的 PR。
+- 等待 `https://github.com/liumenglife/cmp/pull/2` 审查；不要自动合并。下一批编码启动前，基于最新 `main` 新建隔离工作区和分支。
 
 ## 恢复提示
 
