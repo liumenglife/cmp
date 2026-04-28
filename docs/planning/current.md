@@ -40,7 +40,7 @@
 - [✓] `integration-hub` 统一接入与适配基础。
 - [✓] `integration-hub` 入站、出站、回调、补偿与对账。
 - [✓] 第一批跨主线联调。
-- [•] 第一批质量审查与发布前门禁。
+- [✓] 第一批质量审查与发布前门禁。
 
 ## 子代理执行协议
 
@@ -64,7 +64,7 @@
 - [✓] 完成 `integration-hub` 统一接入与适配基础实现、首次 QA、修复与二次 QA 复核。
 - [✓] 完成 `integration-hub` 入站、出站、回调、补偿与对账实现、首次 QA、多轮修复与第五次 QA 复核。
 - [✓] 完成第一批跨主线联调实现、首次 QA、修复与二次 QA 复核。
-- [•] 派发子代理执行第一批质量审查与发布前门禁。
+- [✓] 派发子代理执行第一批质量审查与发布前门禁，独立 QA 结论为通过，没有问题。
 
 ## 已完成里程碑
 
@@ -80,11 +80,13 @@
 - [✓] `integration-hub` 统一接入与适配基础全绿，验证报告为 [`102-07-integration-hub-access-adapter-implementation.md`](../reports/verification/102-07-integration-hub-access-adapter-implementation.md)。
 - [✓] `integration-hub` 入站、出站、回调、补偿与对账全绿，验证报告为 [`102-08-integration-hub-flow-compensation-reconciliation-implementation.md`](../reports/verification/102-08-integration-hub-flow-compensation-reconciliation-implementation.md)。
 - [✓] 第一批跨主线联调全绿，验证报告为 [`102-09-batch1-cross-line-integration-implementation.md`](../reports/verification/102-09-batch1-cross-line-integration-implementation.md)。
+- [✓] 第一批质量审查与发布前门禁通过，QA 报告为 [`102-10-batch1-release-gate-qa.md`](../reports/qa/102-10-batch1-release-gate-qa.md)。
 
 ## 当前阻塞
 
 - 当前无需求阻塞。
 - 当前无验证阻塞。
+- 第一批底座主线已全绿。
 
 ## 已知风险处置
 
@@ -99,7 +101,7 @@
 
 ## 下一步唯一动作
 
-- 派发子代理执行第一批质量审查与发布前门禁，并按 QA 闭环推进。
+- 提交第一批质量审查与发布前门禁收口结果；提交后准备进入下一批启动前规划核对。
 
 ## 恢复提示
 
