@@ -2,37 +2,43 @@
 
 ## 主目标
 
-- 第一批底座主线已完成并归档，当前真相切换为第二批合同核心主链路启动前状态。
+- 第一批底座主线已合并到 `main` 并完成本地收口，当前真相切换为第二批合同核心主链路编码阶段。
 - 第二批计划目标是推进 `contract-core`、`document-center`、`workflow-engine` 三条主链路，形成合同创建、编辑、文档挂接、审批承接与状态回写的核心闭环。
-- 当前分支 `feature/batch1-foundations` 仅用于第一批收口、推送和创建面向 `main` 的 PR；第二批编码不得在本分支继续实施。
+- 当前分支为 `feature/contract-core-chain`，隔离工作区为 `.worktrees/feature/contract-core-chain`，第二批编码只在该工作树推进。
 
 ## 成功定义
 
-- 第一批底座主线已通过独立 QA 与发布前门禁，并保留完整历史恢复入口。
-- Superpowers 第二至第五批计划文件已按 `102-02` 至 `102-05` 编号规范重命名，引用同步更新。
-- `feature/batch1-foundations` 已推送到 `origin` 并创建面向 `main` 的 PR，等待审查，不自动合并。
-- 下一批编码启动前，必须基于最新 `main` 创建新的隔离工作区和分支，再按第二批计划进入 TDD 与独立 QA 闭环。
+- 第一批底座主线已通过独立 QA 与发布前门禁，`PR #2` 已合并到 `main`，功能分支和旧工作树已清理。
+- 已基于最新 `main` 创建第二批隔离工作区和分支 `feature/contract-core-chain`。
+- 新工作树基线验证 `./scripts/verify-all.sh` 已通过：后端 80 个测试通过，前端检查、测试、构建通过，容器健康检查通过并完成清理。
+- 第二批必须按测试驱动开发与独立 QA 闭环执行，每个功能点全绿后先提交，再进入下一个功能点。
 
 ## 非目标
 
-- 不在 `feature/batch1-foundations` 分支继续实现第二批合同核心主链路代码。
+- 不在 `main` 或已清理的第一批分支继续实现第二批合同核心主链路代码。
 - 不提前实现第三批依赖业务能力、第四批智能增强能力或第五批联调上线准备任务。
 - 不绕过第一批 PR 审查流程直接合并。
 - 不让 `current.md` 同时保留第一批已完成长列表和第二批当前状态。
 
 ## 当前阶段
 
-- 阶段：第一批底座主线完成后的归档、命名收口、推送与 PR 创建。
-- 分支：`feature/batch1-foundations`。
-- 隔离工作区：`.worktrees/feature/batch1-foundations`。
+- 阶段：第二批合同核心主链路编码阶段。
+- 分支：`feature/contract-core-chain`。
+- 隔离工作区：`.worktrees/feature/contract-core-chain`。
 - 规格：[`102-cmp-implementation-execution-spec.md`](../superpowers/specs/102-cmp-implementation-execution-spec.md)。
-- 下一批计划：[`102-02-batch-2-core-chain-implementation-plan.md`](../superpowers/plans/102-02-batch-2-core-chain-implementation-plan.md)。
+- 当前批次计划：[`102-02-batch-2-core-chain-implementation-plan.md`](../superpowers/plans/102-02-batch-2-core-chain-implementation-plan.md)。
 
 ## 编码阶段任务清单
 
-- [✓] 第一批底座主线实现、跨主线联调、独立 QA 与发布前门禁已完成。
-- [✓] 第一批归档、后续计划文件编号重命名、推送和 PR 创建。
-- [ ] 第二批合同核心主链路启动前规划核对。
+- [✓] 第一批底座主线合并、同步、旧分支和旧工作树清理。
+- [✓] 第二批工作树与分支创建，基线验证通过。
+- [✓] 第二批批次启动门禁与接口冻结：已通过独立 QA 复审，没有问题。
+- [•] `contract-core` 合同主档与编辑基础能力：待提交第一项后启动。
+- [ ] `document-center` 文档主档与版本链基础能力。
+- [ ] `workflow-engine` 审批定义与平台运行时基础能力。
+- [ ] 合同文档挂接闭环。
+- [ ] 审批发起、审批承接与合同状态回写闭环。
+- [ ] 第二批最小端到端闭环验证。
 
 ## 子代理执行协议
 
@@ -44,16 +50,18 @@
 
 ## 当前正在做
 
-- [✓] 第一批底座主线已通过发布前门禁并提交 `b529fc2`。
-- [✓] 将第一批 planning 真相迁入 `history.md`，并把 `current.md` 切换到第二批启动前状态。
-- [✓] 将第二至第五批 Superpowers 计划文件重命名为 `102-02` 至 `102-05` 编号。
-- [✓] 推送 `feature/batch1-foundations` 并创建面向 `main` 的 PR：`https://github.com/liumenglife/cmp/pull/2`。
+- [✓] `PR #2` 已合并到 `main`，合并提交为 `dc05193`。
+- [✓] 本地 `main` 已同步到最新状态，旧分支与旧工作树已清理。
+- [✓] 已创建第二批分支与工作树：`feature/contract-core-chain`。
+- [✓] 第二批第一项已完成实现交付、问题修复与独立 QA 复审，结论为通过，没有问题。
+- [•] 准备提交第二批第一项，然后启动第二项 `contract-core` 合同主档与编辑基础能力。
 
 ## 已完成里程碑
 
 - [✓] `101` 最小可运行工程骨架已完成、推送 PR 并合并到 `main`。
-- [✓] 第一批底座主线全部功能点、跨主线联调、独立 QA 与发布前门禁已完成。
+- [✓] 第一批底座主线全部功能点、跨主线联调、独立 QA、发布前门禁与 PR 合并已完成。
 - [✓] 第一批发布前门禁报告为 [`102-10-batch1-release-gate-qa.md`](../reports/qa/102-10-batch1-release-gate-qa.md)，结论为通过，没有问题。
+- [✓] 第二批隔离工作树启动基线验证通过。
 
 ## 当前阻塞
 
@@ -62,14 +70,16 @@
 
 ## 活跃支线
 
-- [✓] `feature/batch1-foundations` 分支收尾：归档、命名收口、推送和 PR 创建。
+- [✓] `feature/batch1-foundations` 分支收尾：归档、命名收口、推送、PR 创建、合并与清理。
+- [•] `feature/contract-core-chain` 第二批合同核心主链路编码。
 
 ## 下一步唯一动作
 
-- 等待 `https://github.com/liumenglife/cmp/pull/2` 审查；不要自动合并。下一批编码启动前，基于最新 `main` 新建隔离工作区和分支。
+- 提交第二批第一项“批次启动门禁与接口冻结”；提交后启动第二项 `contract-core` 合同主档与编辑基础能力。
 
 ## 恢复提示
 
 - 恢复时先读本文件、[`history.md`](./history.md)、[`decisions.md`](./decisions.md)。
 - 第一批底座主线历史已迁入 [`history.md`](./history.md)，不要把第一批长列表写回 `current.md`。
 - 第二批正式执行依据为 [`102-cmp-implementation-execution-spec.md`](../superpowers/specs/102-cmp-implementation-execution-spec.md) 与 [`102-02-batch-2-core-chain-implementation-plan.md`](../superpowers/plans/102-02-batch-2-core-chain-implementation-plan.md)。
+- 第二批当前工作树为 `.worktrees/feature/contract-core-chain`，不要在主工作区直接编码。
