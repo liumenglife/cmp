@@ -77,6 +77,79 @@ class IdentityAccessController {
     Map<String, Object> auditViews(@RequestParam(value = "trace_id", required = false) String traceId) {
         return service.auditViews(traceId);
     }
+
+    @PostMapping("/api/org-units")
+    ResponseEntity<Map<String, Object>> createOrgUnit(@RequestBody Map<String, Object> request) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(service.createOrgUnit(request));
+    }
+
+    @GetMapping("/api/org-units/tree")
+    Map<String, Object> orgTree(@RequestParam("org_id") String orgId) {
+        return service.orgTree(orgId);
+    }
+
+    @PostMapping("/api/org-memberships")
+    ResponseEntity<Map<String, Object>> createMembership(@RequestBody Map<String, Object> request) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(service.createMembership(request));
+    }
+
+    @GetMapping("/api/org-memberships")
+    Map<String, Object> memberships(@RequestParam("user_id") String userId) {
+        return service.memberships(userId);
+    }
+
+    @PostMapping("/api/roles")
+    ResponseEntity<Map<String, Object>> createRole(@RequestBody Map<String, Object> request) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(service.createRole(request));
+    }
+
+    @PostMapping("/api/role-assignments")
+    ResponseEntity<Map<String, Object>> assignRole(@RequestBody Map<String, Object> request) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(service.assignRole(request));
+    }
+
+    @PostMapping("/api/permission-grants")
+    ResponseEntity<Map<String, Object>> grantPermission(@RequestBody Map<String, Object> request) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(service.grantPermission(request));
+    }
+
+    @GetMapping("/api/menus/visible")
+    Map<String, Object> visibleMenus(@RequestParam("user_id") String userId, @RequestParam("org_id") String orgId) {
+        return service.visibleMenus(userId, orgId);
+    }
+
+    @GetMapping("/api/permissions/function-check")
+    Map<String, Object> functionCheck(
+            @RequestParam("user_id") String userId,
+            @RequestParam("permission_code") String permissionCode,
+            @RequestParam(value = "trace_id", required = false) String traceId) {
+        return service.functionCheck(userId, permissionCode, traceId);
+    }
+
+    @PostMapping("/api/data-scopes")
+    ResponseEntity<Map<String, Object>> createDataScope(@RequestBody Map<String, Object> request) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(service.createDataScope(request));
+    }
+
+    @PostMapping("/api/data-scope-predicates")
+    Map<String, Object> dataScopePredicate(@RequestBody Map<String, Object> request) {
+        return service.dataScopePredicate(request);
+    }
+
+    @PostMapping("/api/org-rules")
+    ResponseEntity<Map<String, Object>> createOrgRule(@RequestBody Map<String, Object> request) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(service.createOrgRule(request));
+    }
+
+    @PostMapping("/api/org-rule-versions")
+    ResponseEntity<Map<String, Object>> freezeOrgRuleVersion(@RequestBody Map<String, Object> request) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(service.freezeOrgRuleVersion(request));
+    }
+
+    @PostMapping("/api/org-rule-resolutions")
+    Map<String, Object> resolveOrgRule(@RequestBody Map<String, Object> request) {
+        return service.resolveOrgRule(request);
+    }
 }
 
 @org.springframework.stereotype.Service
@@ -275,6 +348,275 @@ class IdentityAccessService {
         return body;
     }
 
+    @Transactional
+    Map<String, Object> createOrgUnit(Map<String, Object> request) {
+        String orgUnitId = text(request, "org_unit_id", "ou-" + UUID.randomUUID());
+        String parentId = text(request, "parent_org_unit_id", null);
+        String orgId = parentId == null ? orgUnitId : orgUnit(parentId).get("org_id").toString();
+        String parentPath = parentId == null ? "/" : orgUnit(parentId).get("org_path").toString();
+        String orgPath = parentPath + orgUnitId + "/";
+        int pathDepth = (int) orgPath.chars().filter(ch -> ch == '/').count() - 1;
+        Instant now = now();
+        jdbcTemplate.update("""
+                insert into ia_org_unit
+                (org_unit_id, org_id, parent_org_unit_id, org_unit_code, org_unit_name, org_unit_type, org_status, org_path, path_depth, manager_user_id, sort_order, created_at, updated_at)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, orgUnitId, orgId, parentId, text(request, "org_unit_code", orgUnitId), text(request, "org_unit_name", orgUnitId),
+                text(request, "org_unit_type", "DEPARTMENT"), "ACTIVE", orgPath, pathDepth, text(request, "manager_user_id", null), number(request, "sort_order", 0), ts(now), ts(now));
+        audit("ORG_CHANGED", "SUCCESS", text(request, "operator_id", "SYSTEM"), null, orgUnitId, null, trace(request));
+        return orgUnit(orgUnitId);
+    }
+
+    Map<String, Object> orgTree(String orgId) {
+        List<Map<String, Object>> items = jdbcTemplate.query("""
+                select org_unit_id, org_id, parent_org_unit_id, org_unit_code, org_unit_name, org_unit_type, org_status, org_path, path_depth, manager_user_id
+                from ia_org_unit
+                where org_id = ?
+                order by org_path
+                """, (rs, rowNum) -> orgUnitBody(rs), orgId);
+        return Map.of("item_list", items, "total", items.size());
+    }
+
+    @Transactional
+    Map<String, Object> createMembership(Map<String, Object> request) {
+        String orgUnitId = text(request, "org_unit_id", null);
+        Map<String, Object> unit = orgUnit(orgUnitId);
+        String membershipId = text(request, "membership_id", "mem-" + UUID.randomUUID());
+        boolean primary = bool(request, "is_primary_department", false);
+        Instant now = now();
+        jdbcTemplate.update("""
+                insert into ia_org_membership
+                (membership_id, user_id, org_id, org_unit_id, membership_type, membership_status, is_primary_department, position_title, created_at, updated_at)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, membershipId, text(request, "user_id", null), unit.get("org_id"), orgUnitId, text(request, "membership_type", "PRIMARY"),
+                "ACTIVE", primary, text(request, "position_title", null), ts(now), ts(now));
+        audit("ORG_CHANGED", "SUCCESS", text(request, "operator_id", "SYSTEM"), text(request, "user_id", null), membershipId, null, trace(request));
+        return membership(membershipId);
+    }
+
+    Map<String, Object> memberships(String userId) {
+        List<Map<String, Object>> items = jdbcTemplate.query("""
+                select m.membership_id, m.user_id, m.org_id, m.org_unit_id, m.membership_type, m.is_primary_department,
+                       u.org_unit_name, u.org_path
+                from ia_org_membership m
+                join ia_org_unit u on u.org_unit_id = m.org_unit_id
+                where m.user_id = ? and m.membership_status = 'ACTIVE'
+                order by m.is_primary_department desc, m.membership_id
+                """, (rs, rowNum) -> membershipBody(rs), userId);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("membership_list", items);
+        body.put("primary_department", items.stream().filter(item -> Boolean.TRUE.equals(item.get("is_primary_department"))).findFirst().orElse(null));
+        body.put("part_time_departments", items.stream().filter(item -> "PART_TIME".equals(item.get("membership_type"))).toList());
+        return body;
+    }
+
+    @Transactional
+    Map<String, Object> createRole(Map<String, Object> request) {
+        String roleId = text(request, "role_id", "role-" + UUID.randomUUID());
+        Instant now = now();
+        jdbcTemplate.update("""
+                insert into ia_role (role_id, role_code, role_name, role_scope, role_type, role_status, inherits_role_id, created_at, updated_at)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, roleId, text(request, "role_code", roleId), text(request, "role_name", roleId), text(request, "role_scope", "PLATFORM"),
+                text(request, "role_type", "BUSINESS"), "ACTIVE", text(request, "inherits_role_id", null), ts(now), ts(now));
+        return role(roleId);
+    }
+
+    @Transactional
+    Map<String, Object> assignRole(Map<String, Object> request) {
+        String assignmentId = text(request, "assignment_id", "ra-" + UUID.randomUUID());
+        Instant now = now();
+        jdbcTemplate.update("""
+                insert into ia_role_assignment
+                (assignment_id, role_id, subject_type, subject_id, grant_org_id, assignment_status, granted_reason, granted_by, created_at, updated_at)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, assignmentId, text(request, "role_id", null), text(request, "subject_type", "USER"), text(request, "subject_id", null),
+                text(request, "grant_org_id", "ORG-DEFAULT"), "ACTIVE", text(request, "granted_reason", null), text(request, "granted_by", "SYSTEM"), ts(now), ts(now));
+        audit("ROLE_GRANTED", "SUCCESS", text(request, "granted_by", "SYSTEM"), text(request, "subject_id", null), assignmentId, null, trace(request));
+        return roleAssignment(assignmentId);
+    }
+
+    @Transactional
+    Map<String, Object> grantPermission(Map<String, Object> request) {
+        String grantId = text(request, "permission_grant_id", "pg-" + UUID.randomUUID());
+        Instant now = now();
+        jdbcTemplate.update("""
+                insert into ia_permission_grant
+                (permission_grant_id, grant_target_type, grant_target_id, permission_type, permission_code, resource_type, resource_scope_ref, grant_status, priority_no, effect_mode, created_at, updated_at)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, grantId, text(request, "grant_target_type", "ROLE"), text(request, "grant_target_id", null), text(request, "permission_type", "FUNCTION"),
+                text(request, "permission_code", null), text(request, "resource_type", null), text(request, "resource_scope_ref", null), "ACTIVE",
+                number(request, "priority_no", 100), text(request, "effect_mode", "ALLOW"), ts(now), ts(now));
+        audit("PERMISSION_GRANTED", "SUCCESS", text(request, "granted_by", "SYSTEM"), null, grantId, null, trace(request));
+        return permissionGrant(grantId);
+    }
+
+    Map<String, Object> visibleMenus(String userId, String orgId) {
+        List<String> roleIds = effectiveRoleIds(userId, orgId);
+        List<Map<String, Object>> grants = permissionGrants(userId, roleIds, "MENU", null);
+        List<String> menus = grants.stream()
+                .filter(grant -> "ALLOW".equals(grant.get("effect_mode")))
+                .map(grant -> grant.get("permission_code").toString())
+                .distinct()
+                .toList();
+        return Map.of("user_id", userId, "menu_codes", menus);
+    }
+
+    @Transactional
+    Map<String, Object> functionCheck(String userId, String permissionCode, String traceId) {
+        List<String> roleIds = effectiveRoleIds(userId, null);
+        List<Map<String, Object>> grants = permissionGrants(userId, roleIds, "FUNCTION", permissionCode);
+        boolean denied = grants.stream().anyMatch(grant -> "DENY".equals(grant.get("effect_mode")));
+        boolean allowed = !denied && grants.stream().anyMatch(grant -> "ALLOW".equals(grant.get("effect_mode")));
+        String effect = denied ? "DENY" : allowed ? "ALLOW" : "NONE";
+        audit(allowed ? "PERMISSION_GRANTED" : "AUTHZ_DENIED", allowed ? "SUCCESS" : "DENIED", userId, userId, permissionCode, null, traceId == null ? "trace-" + UUID.randomUUID() : traceId);
+        return Map.of("user_id", userId, "permission_code", permissionCode, "allowed", allowed, "effect_mode", effect);
+    }
+
+    @Transactional
+    Map<String, Object> createDataScope(Map<String, Object> request) {
+        String dataScopeId = text(request, "data_scope_id", "ds-" + UUID.randomUUID());
+        Instant now = now();
+        jdbcTemplate.update("""
+                insert into ia_data_scope
+                (data_scope_id, subject_type, subject_id, resource_type, scope_type, scope_ref, scope_status, priority_no, effect_mode, created_at, updated_at)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, dataScopeId, text(request, "subject_type", "USER"), text(request, "subject_id", null), text(request, "resource_type", "CONTRACT"),
+                text(request, "scope_type", "SELF"), text(request, "scope_ref", null), "ACTIVE", number(request, "priority_no", 100), text(request, "effect_mode", "ALLOW"), ts(now), ts(now));
+        return dataScope(dataScopeId);
+    }
+
+    @Transactional
+    Map<String, Object> dataScopePredicate(Map<String, Object> request) {
+        String userId = text(request, "user_id", null);
+        String activeOrgId = text(request, "active_org_id", "ORG-DEFAULT");
+        String activeOrgUnitId = text(request, "active_org_unit_id", null);
+        String resourceType = text(request, "resource_type", "CONTRACT");
+        String traceId = trace(request);
+        List<Map<String, Object>> scopes = effectiveDataScopes(userId, activeOrgId, resourceType);
+        String decisionId = "dec-" + UUID.randomUUID();
+        List<Map<String, Object>> allowPredicates = new java.util.ArrayList<>();
+        List<Map<String, Object>> denyPredicates = new java.util.ArrayList<>();
+        List<Map<String, Object>> hitRows = new java.util.ArrayList<>();
+        for (Map<String, Object> scope : scopes) {
+            Map<String, Object> predicate = predicateForScope(scope, userId, activeOrgId, activeOrgUnitId, traceId);
+            if ("DENY".equals(scope.get("effect_mode"))) {
+                denyPredicates.add(predicate);
+            } else {
+                allowPredicates.add(predicate);
+            }
+            Map<String, Object> dataScopeHit = new LinkedHashMap<>();
+            dataScopeHit.put("hit_type", "DATA_SCOPE");
+            dataScopeHit.put("hit_ref_id", scope.get("data_scope_id"));
+            dataScopeHit.put("frozen_ref_id", null);
+            dataScopeHit.put("resolution_record_id", null);
+            dataScopeHit.put("hit_result", scope.get("effect_mode"));
+            dataScopeHit.put("hit_priority_no", scope.get("priority_no"));
+            dataScopeHit.put("evidence_snapshot", scope);
+            hitRows.add(dataScopeHit);
+            if ("RULE".equals(scope.get("scope_type"))) {
+                hitRows.add(Map.of(
+                        "hit_type", "ORG_RULE",
+                        "hit_ref_id", scope.get("scope_ref"),
+                        "frozen_ref_id", predicate.get("org_rule_version_id"),
+                        "resolution_record_id", predicate.get("org_rule_resolution_record_id"),
+                        "hit_result", scope.get("effect_mode"),
+                        "hit_priority_no", scope.get("priority_no"),
+                        "evidence_snapshot", predicate));
+            }
+        }
+        String decisionResult = allowPredicates.isEmpty() ? "DENY" : denyPredicates.isEmpty() ? "ALLOW" : "CONDITIONAL";
+        String reasonCode = scopes.isEmpty() ? "NO_DATA_SCOPE" : allowPredicates.isEmpty() ? "EXPLICIT_DENY_NO_ALLOW" : denyPredicates.isEmpty() ? "DATA_SCOPE_MATCHED" : "DATA_SCOPE_WITH_DENY";
+        String snapshotChecksum = "scope-" + scopes.size() + "-allow-" + allowPredicates.size() + "-deny-" + denyPredicates.size();
+        jdbcTemplate.update("""
+                insert into ia_authorization_decision
+                (decision_id, subject_user_id, subject_org_id, subject_org_unit_id, action_code, resource_type, decision_result, decision_reason_code, data_scope_snapshot_checksum, request_trace_id, evaluated_at)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, decisionId, userId, activeOrgId, activeOrgUnitId, text(request, "action_code", "QUERY"), resourceType,
+                decisionResult, reasonCode, snapshotChecksum, traceId, ts(now()));
+        for (Map<String, Object> hitRow : hitRows) {
+            jdbcTemplate.update("""
+                    insert into ia_authorization_hit_result
+                    (hit_result_id, decision_id, hit_type, hit_ref_id, frozen_ref_id, resolution_record_id, hit_result, hit_priority_no, evidence_snapshot)
+                    values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, "hit-" + UUID.randomUUID(), decisionId, hitRow.get("hit_type"), hitRow.get("hit_ref_id"), hitRow.get("frozen_ref_id"),
+                    hitRow.get("resolution_record_id"), hitRow.get("hit_result"), hitRow.get("hit_priority_no"), json(hitRow.get("evidence_snapshot")));
+        }
+        audit("DENY".equals(decisionResult) ? "AUTHZ_DENIED" : "DATA_SCOPE_HIT", "DENY".equals(decisionResult) ? "DENIED" : "SUCCESS", userId, userId, decisionId, null, traceId);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("resource_type", resourceType);
+        body.put("decision_id", decisionId);
+        body.put("effect", decisionResult);
+        body.put("deny_predicates", denyPredicates);
+        body.put("allow_predicates", allowPredicates);
+        body.put("field_mapping_version", "1.0");
+        body.put("scope_snapshot_checksum", snapshotChecksum);
+        return body;
+    }
+
+    @Transactional
+    Map<String, Object> createOrgRule(Map<String, Object> request) {
+        String ruleId = text(request, "org_rule_id", "rule-" + UUID.randomUUID());
+        Instant now = now();
+        jdbcTemplate.update("""
+                insert into ia_org_rule
+                (org_rule_id, rule_code, rule_name, rule_type, rule_status, rule_scope_type, rule_scope_ref, resolver_config, fallback_policy, version_no, created_at, updated_at)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, ruleId, text(request, "rule_code", ruleId), text(request, "rule_name", ruleId), text(request, "rule_type", "MANAGER_OF_ORG_UNIT"),
+                "ACTIVE", text(request, "rule_scope_type", "GLOBAL"), text(request, "rule_scope_ref", "*"), json(request.getOrDefault("resolver_config", Map.of())),
+                text(request, "fallback_policy", "EMPTY_SET"), number(request, "version_no", 1), ts(now), ts(now));
+        return orgRule(ruleId);
+    }
+
+    @Transactional
+    Map<String, Object> freezeOrgRuleVersion(Map<String, Object> request) {
+        Map<String, Object> rule = orgRule(text(request, "org_rule_id", null));
+        String versionId = text(request, "org_rule_version_id", "rulever-" + UUID.randomUUID());
+        int versionNo = number(request, "version_no", ((Number) rule.get("version_no")).intValue());
+        String checksum = "rule-" + rule.get("org_rule_id") + "-v" + versionNo;
+        jdbcTemplate.update("""
+                insert into ia_org_rule_version
+                (org_rule_version_id, org_rule_id, version_no, rule_type, rule_scope_type, rule_scope_ref, resolver_config_snapshot, fallback_policy_snapshot, schema_version, version_checksum, version_status, effective_from)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, versionId, rule.get("org_rule_id"), versionNo, rule.get("rule_type"), rule.get("rule_scope_type"), rule.get("rule_scope_ref"),
+                rule.get("resolver_config"), rule.get("fallback_policy"), "1.0", checksum, "EFFECTIVE", ts(now()));
+        return orgRuleVersion(versionId);
+    }
+
+    @Transactional
+    Map<String, Object> resolveOrgRule(Map<String, Object> request) {
+        Map<String, Object> version = orgRuleVersion(text(request, "org_rule_version_id", null));
+        String orgUnitId = text(request, "candidate_org_unit_id", text(request, "active_org_unit_id", null));
+        Map<String, Object> unit = orgUnit(orgUnitId);
+        String managerUserId = unit.get("manager_user_id") == null ? null : unit.get("manager_user_id").toString();
+        List<Map<String, Object>> subjects = managerUserId == null ? List.of() : List.of(Map.of(
+                "user_id", managerUserId,
+                "source_type", "ORG_MANAGER",
+                "source_ref", orgUnitId,
+                "priority_no", 1));
+        List<Map<String, Object>> evidence = List.of(Map.of(
+                "source_type", "ORG_MANAGER",
+                "source_ref", orgUnitId,
+                "org_rule_version_id", version.get("org_rule_version_id")));
+        String recordId = "orr-" + UUID.randomUUID();
+        String traceId = trace(request);
+        jdbcTemplate.update("""
+                insert into ia_org_rule_resolution_record
+                (org_rule_resolution_record_id, org_rule_version_id, request_trace_id, resolution_scene, context_checksum, resolution_status, resolved_subject_snapshot, evidence_snapshot, fallback_used, resolver_version, resolved_at)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, recordId, version.get("org_rule_version_id"), traceId, text(request, "resolution_scene", "AUTHORIZATION"),
+                "ctx-" + orgUnitId, subjects.isEmpty() ? "EMPTY" : "RESOLVED", json(subjects), json(evidence), false, "1.0", ts(now()));
+        audit("ORG_RULE_RESOLVED", subjects.isEmpty() ? "DENIED" : "SUCCESS", text(request, "user_id", "SYSTEM"), managerUserId, recordId, null, traceId);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("org_rule_resolution_record_id", recordId);
+        body.put("org_rule_version_id", version.get("org_rule_version_id"));
+        body.put("resolution_status", subjects.isEmpty() ? "EMPTY" : "RESOLVED");
+        body.put("resolved_subject_list", subjects);
+        body.put("evidence_list", evidence);
+        body.put("context_checksum", "ctx-" + orgUnitId);
+        return body;
+    }
+
     private IdentityBinding createMatchedBinding(String provider, String externalIdentity, List<String> candidateUserIds, Map<String, Object> request) {
         String matchedUserId = candidateUserIds.size() == 1 ? candidateUserIds.getFirst() : null;
         User matched = matchedUserId == null ? null : requireUser(matchedUserId);
@@ -465,6 +807,260 @@ class IdentityAccessService {
         return body;
     }
 
+    private Map<String, Object> orgUnit(String orgUnitId) {
+        return queryOptional("""
+                select org_unit_id, org_id, parent_org_unit_id, org_unit_code, org_unit_name, org_unit_type, org_status, org_path, path_depth, manager_user_id
+                from ia_org_unit where org_unit_id = ?
+                """, (rs, rowNum) -> orgUnitBody(rs), orgUnitId)
+                .orElseThrow(() -> new IllegalArgumentException("org_unit_id 不存在: " + orgUnitId));
+    }
+
+    private Map<String, Object> orgUnitBody(ResultSet rs) throws SQLException {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("org_unit_id", rs.getString("org_unit_id"));
+        body.put("org_id", rs.getString("org_id"));
+        body.put("parent_org_unit_id", rs.getString("parent_org_unit_id"));
+        body.put("org_unit_code", rs.getString("org_unit_code"));
+        body.put("org_unit_name", rs.getString("org_unit_name"));
+        body.put("org_unit_type", rs.getString("org_unit_type"));
+        body.put("org_status", rs.getString("org_status"));
+        body.put("org_path", rs.getString("org_path"));
+        body.put("path_depth", rs.getInt("path_depth"));
+        body.put("manager_user_id", rs.getString("manager_user_id"));
+        return body;
+    }
+
+    private Map<String, Object> membership(String membershipId) {
+        return queryOptional("""
+                select m.membership_id, m.user_id, m.org_id, m.org_unit_id, m.membership_type, m.is_primary_department,
+                       u.org_unit_name, u.org_path
+                from ia_org_membership m
+                join ia_org_unit u on u.org_unit_id = m.org_unit_id
+                where m.membership_id = ?
+                """, (rs, rowNum) -> membershipBody(rs), membershipId)
+                .orElseThrow(() -> new IllegalArgumentException("membership_id 不存在: " + membershipId));
+    }
+
+    private Map<String, Object> membershipBody(ResultSet rs) throws SQLException {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("membership_id", rs.getString("membership_id"));
+        body.put("user_id", rs.getString("user_id"));
+        body.put("org_id", rs.getString("org_id"));
+        body.put("org_unit_id", rs.getString("org_unit_id"));
+        body.put("membership_type", rs.getString("membership_type"));
+        body.put("is_primary_department", rs.getBoolean("is_primary_department"));
+        body.put("org_unit_name", rs.getString("org_unit_name"));
+        body.put("org_path", rs.getString("org_path"));
+        return body;
+    }
+
+    private Map<String, Object> role(String roleId) {
+        return queryOptional("select role_id, role_code, role_name, role_scope, role_type, role_status from ia_role where role_id = ?",
+                (rs, rowNum) -> {
+                    Map<String, Object> body = new LinkedHashMap<>();
+                    body.put("role_id", rs.getString("role_id"));
+                    body.put("role_code", rs.getString("role_code"));
+                    body.put("role_name", rs.getString("role_name"));
+                    body.put("role_scope", rs.getString("role_scope"));
+                    body.put("role_type", rs.getString("role_type"));
+                    body.put("role_status", rs.getString("role_status"));
+                    return body;
+                }, roleId)
+                .orElseThrow(() -> new IllegalArgumentException("role_id 不存在: " + roleId));
+    }
+
+    private Map<String, Object> roleAssignment(String assignmentId) {
+        return queryOptional("select assignment_id, role_id, subject_type, subject_id, grant_org_id, assignment_status from ia_role_assignment where assignment_id = ?",
+                (rs, rowNum) -> {
+                    Map<String, Object> body = new LinkedHashMap<>();
+                    body.put("assignment_id", rs.getString("assignment_id"));
+                    body.put("role_id", rs.getString("role_id"));
+                    body.put("subject_type", rs.getString("subject_type"));
+                    body.put("subject_id", rs.getString("subject_id"));
+                    body.put("grant_org_id", rs.getString("grant_org_id"));
+                    body.put("assignment_status", rs.getString("assignment_status"));
+                    return body;
+                }, assignmentId)
+                .orElseThrow(() -> new IllegalArgumentException("assignment_id 不存在: " + assignmentId));
+    }
+
+    private Map<String, Object> permissionGrant(String grantId) {
+        return queryOptional("""
+                select permission_grant_id, grant_target_type, grant_target_id, permission_type, permission_code, resource_type, grant_status, priority_no, effect_mode
+                from ia_permission_grant where permission_grant_id = ?
+                """, (rs, rowNum) -> permissionGrantBody(rs), grantId)
+                .orElseThrow(() -> new IllegalArgumentException("permission_grant_id 不存在: " + grantId));
+    }
+
+    private Map<String, Object> permissionGrantBody(ResultSet rs) throws SQLException {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("permission_grant_id", rs.getString("permission_grant_id"));
+        body.put("grant_target_type", rs.getString("grant_target_type"));
+        body.put("grant_target_id", rs.getString("grant_target_id"));
+        body.put("permission_type", rs.getString("permission_type"));
+        body.put("permission_code", rs.getString("permission_code"));
+        body.put("resource_type", rs.getString("resource_type"));
+        body.put("grant_status", rs.getString("grant_status"));
+        body.put("priority_no", rs.getInt("priority_no"));
+        body.put("effect_mode", rs.getString("effect_mode"));
+        return body;
+    }
+
+    private List<String> effectiveRoleIds(String userId, String orgId) {
+        java.util.LinkedHashSet<String> roleIds = new java.util.LinkedHashSet<>(jdbcTemplate.query("""
+                select role_id from ia_role_assignment
+                where subject_type = 'USER' and subject_id = ? and assignment_status = 'ACTIVE'
+                  and (? is null or grant_org_id = ?)
+                order by assignment_id
+                """, (rs, rowNum) -> rs.getString("role_id"), userId, orgId, orgId));
+        roleIds.addAll(jdbcTemplate.query("""
+                select ra.role_id
+                from ia_role_assignment ra
+                join ia_org_membership m on m.org_unit_id = ra.subject_id
+                where ra.subject_type = 'ORG_UNIT' and m.user_id = ? and ra.assignment_status = 'ACTIVE' and m.membership_status = 'ACTIVE'
+                order by ra.assignment_id
+                """, (rs, rowNum) -> rs.getString("role_id"), userId));
+        return roleIds.stream().toList();
+    }
+
+    private List<Map<String, Object>> permissionGrants(String userId, List<String> roleIds, String permissionType, String permissionCode) {
+        List<Map<String, Object>> grants = new java.util.ArrayList<>();
+        grants.addAll(jdbcTemplate.query("""
+                select permission_grant_id, grant_target_type, grant_target_id, permission_type, permission_code, resource_type, grant_status, priority_no, effect_mode
+                from ia_permission_grant
+                where grant_target_type = 'USER' and grant_target_id = ? and permission_type = ? and grant_status = 'ACTIVE'
+                  and (? is null or permission_code = ?)
+                """, (rs, rowNum) -> permissionGrantBody(rs), userId, permissionType, permissionCode, permissionCode));
+        for (String roleId : roleIds) {
+            grants.addAll(jdbcTemplate.query("""
+                    select permission_grant_id, grant_target_type, grant_target_id, permission_type, permission_code, resource_type, grant_status, priority_no, effect_mode
+                    from ia_permission_grant
+                    where grant_target_type = 'ROLE' and grant_target_id = ? and permission_type = ? and grant_status = 'ACTIVE'
+                      and (? is null or permission_code = ?)
+                    """, (rs, rowNum) -> permissionGrantBody(rs), roleId, permissionType, permissionCode, permissionCode));
+        }
+        return grants.stream()
+                .sorted(java.util.Comparator.comparingInt(grant -> ((Number) grant.get("priority_no")).intValue()))
+                .toList();
+    }
+
+    private Map<String, Object> dataScope(String dataScopeId) {
+        return queryOptional("""
+                select data_scope_id, subject_type, subject_id, resource_type, scope_type, scope_ref, scope_status, priority_no, effect_mode
+                from ia_data_scope where data_scope_id = ?
+                """, (rs, rowNum) -> dataScopeBody(rs), dataScopeId)
+                .orElseThrow(() -> new IllegalArgumentException("data_scope_id 不存在: " + dataScopeId));
+    }
+
+    private Map<String, Object> dataScopeBody(ResultSet rs) throws SQLException {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("data_scope_id", rs.getString("data_scope_id"));
+        body.put("subject_type", rs.getString("subject_type"));
+        body.put("subject_id", rs.getString("subject_id"));
+        body.put("resource_type", rs.getString("resource_type"));
+        body.put("scope_type", rs.getString("scope_type"));
+        body.put("scope_ref", rs.getString("scope_ref"));
+        body.put("scope_status", rs.getString("scope_status"));
+        body.put("priority_no", rs.getInt("priority_no"));
+        body.put("effect_mode", rs.getString("effect_mode"));
+        return body;
+    }
+
+    private List<Map<String, Object>> effectiveDataScopes(String userId, String orgId, String resourceType) {
+        List<Map<String, Object>> scopes = new java.util.ArrayList<>(jdbcTemplate.query("""
+                select data_scope_id, subject_type, subject_id, resource_type, scope_type, scope_ref, scope_status, priority_no, effect_mode
+                from ia_data_scope
+                where subject_type = 'USER' and subject_id = ? and resource_type = ? and scope_status = 'ACTIVE'
+                """, (rs, rowNum) -> dataScopeBody(rs), userId, resourceType));
+        for (String roleId : effectiveRoleIds(userId, orgId)) {
+            scopes.addAll(jdbcTemplate.query("""
+                    select data_scope_id, subject_type, subject_id, resource_type, scope_type, scope_ref, scope_status, priority_no, effect_mode
+                    from ia_data_scope
+                    where subject_type = 'ROLE' and subject_id = ? and resource_type = ? and scope_status = 'ACTIVE'
+                    """, (rs, rowNum) -> dataScopeBody(rs), roleId, resourceType));
+        }
+        return scopes.stream()
+                .sorted(java.util.Comparator.comparingInt(scope -> ((Number) scope.get("priority_no")).intValue()))
+                .toList();
+    }
+
+    private Map<String, Object> predicateForScope(Map<String, Object> scope, String userId, String activeOrgId, String activeOrgUnitId, String traceId) {
+        String scopeType = scope.get("scope_type").toString();
+        String scopeRef = scope.get("scope_ref").toString();
+        return switch (scopeType) {
+            case "SELF" -> Map.of("field", "owner_user_id", "operator", "EQ", "value", userId, "scope_type", scopeType);
+            case "ORG" -> Map.of("field", "tenant_or_org_id", "operator", "EQ", "value", activeOrgId, "scope_type", scopeType);
+            case "ORG_UNIT" -> Map.of("field", "owner_org_unit_id", "operator", "IN", "values", List.of(scopeRef), "scope_type", scopeType);
+            case "ORG_SUBTREE" -> Map.of("field", "owner_org_path", "operator", "STARTS_WITH_PATH", "value", orgUnit(scopeRef).get("org_path"), "scope_type", scopeType);
+            case "USER_LIST" -> Map.of("field", "owner_user_id", "operator", "IN", "values", List.of(scopeRef.split(",")), "scope_type", scopeType);
+            case "RULE" -> rulePredicate(scopeRef, userId, activeOrgId, activeOrgUnitId, traceId);
+            default -> throw new IllegalArgumentException("未知 scope_type: " + scopeType);
+        };
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> rulePredicate(String orgRuleVersionId, String userId, String activeOrgId, String activeOrgUnitId, String traceId) {
+        Map<String, Object> request = new LinkedHashMap<>();
+        request.put("org_rule_version_id", orgRuleVersionId);
+        request.put("resolution_scene", "AUTHORIZATION");
+        request.put("user_id", userId);
+        request.put("active_org_id", activeOrgId);
+        request.put("active_org_unit_id", activeOrgUnitId);
+        request.put("trace_id", traceId);
+        Map<String, Object> resolution = resolveOrgRule(request);
+        List<Map<String, Object>> subjects = (List<Map<String, Object>>) resolution.get("resolved_subject_list");
+        Map<String, Object> predicate = new LinkedHashMap<>();
+        predicate.put("field", "owner_user_id");
+        predicate.put("operator", "IN");
+        predicate.put("values", subjects.stream().map(subject -> subject.get("user_id")).toList());
+        predicate.put("scope_type", "RULE");
+        predicate.put("org_rule_version_id", resolution.get("org_rule_version_id"));
+        predicate.put("org_rule_resolution_record_id", resolution.get("org_rule_resolution_record_id"));
+        predicate.put("resolution_status", resolution.get("resolution_status"));
+        return predicate;
+    }
+
+    private Map<String, Object> orgRule(String ruleId) {
+        return queryOptional("""
+                select org_rule_id, rule_code, rule_name, rule_type, rule_status, rule_scope_type, rule_scope_ref, resolver_config, fallback_policy, version_no
+                from ia_org_rule where org_rule_id = ?
+                """, (rs, rowNum) -> {
+                    Map<String, Object> body = new LinkedHashMap<>();
+                    body.put("org_rule_id", rs.getString("org_rule_id"));
+                    body.put("rule_code", rs.getString("rule_code"));
+                    body.put("rule_name", rs.getString("rule_name"));
+                    body.put("rule_type", rs.getString("rule_type"));
+                    body.put("rule_status", rs.getString("rule_status"));
+                    body.put("rule_scope_type", rs.getString("rule_scope_type"));
+                    body.put("rule_scope_ref", rs.getString("rule_scope_ref"));
+                    body.put("resolver_config", rs.getString("resolver_config"));
+                    body.put("fallback_policy", rs.getString("fallback_policy"));
+                    body.put("version_no", rs.getInt("version_no"));
+                    return body;
+                }, ruleId).orElseThrow(() -> new IllegalArgumentException("org_rule_id 不存在: " + ruleId));
+    }
+
+    private Map<String, Object> orgRuleVersion(String versionId) {
+        return queryOptional("""
+                select org_rule_version_id, org_rule_id, version_no, rule_type, rule_scope_type, rule_scope_ref, resolver_config_snapshot, fallback_policy_snapshot, schema_version, version_checksum, version_status
+                from ia_org_rule_version where org_rule_version_id = ?
+                """, (rs, rowNum) -> {
+                    Map<String, Object> body = new LinkedHashMap<>();
+                    body.put("org_rule_version_id", rs.getString("org_rule_version_id"));
+                    body.put("org_rule_id", rs.getString("org_rule_id"));
+                    body.put("version_no", rs.getInt("version_no"));
+                    body.put("rule_type", rs.getString("rule_type"));
+                    body.put("rule_scope_type", rs.getString("rule_scope_type"));
+                    body.put("rule_scope_ref", rs.getString("rule_scope_ref"));
+                    body.put("resolver_config_snapshot", rs.getString("resolver_config_snapshot"));
+                    body.put("fallback_policy_snapshot", rs.getString("fallback_policy_snapshot"));
+                    body.put("schema_version", rs.getString("schema_version"));
+                    body.put("version_checksum", rs.getString("version_checksum"));
+                    body.put("version_status", rs.getString("version_status"));
+                    return body;
+                }, versionId).orElseThrow(() -> new IllegalArgumentException("org_rule_version_id 不存在: " + versionId));
+    }
+
     private String canonicalFingerprint(Map<String, Object> request) {
         try {
             return objectMapper.writeValueAsString(new java.util.TreeMap<>(request));
@@ -505,6 +1101,22 @@ class IdentityAccessService {
 
     private String trace(Map<String, Object> request) {
         return text(request, "trace_id", "trace-" + UUID.randomUUID());
+    }
+
+    private int number(Map<String, Object> request, String key, int defaultValue) {
+        Object value = request.get(key);
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+        return value == null ? defaultValue : Integer.parseInt(value.toString());
+    }
+
+    private boolean bool(Map<String, Object> request, String key, boolean defaultValue) {
+        Object value = request.get(key);
+        if (value instanceof Boolean bool) {
+            return bool;
+        }
+        return value == null ? defaultValue : Boolean.parseBoolean(value.toString());
     }
 
     private String text(Map<String, Object> request, String key, String defaultValue) {
