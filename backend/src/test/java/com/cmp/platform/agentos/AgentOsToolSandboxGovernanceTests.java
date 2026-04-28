@@ -40,6 +40,17 @@ class AgentOsToolSandboxGovernanceTests {
         jdbcTemplate.update("DELETE FROM ao_agent_result");
         jdbcTemplate.update("DELETE FROM ao_agent_run");
         jdbcTemplate.update("DELETE FROM ao_agent_task");
+
+        jdbcTemplate.update("DELETE FROM ia_identity_audit");
+        jdbcTemplate.update("DELETE FROM ia_authorization_hit_result");
+        jdbcTemplate.update("DELETE FROM ia_authorization_decision");
+        jdbcTemplate.update("DELETE FROM ia_data_scope");
+        jdbcTemplate.update("DELETE FROM ia_permission_grant");
+        jdbcTemplate.update("DELETE FROM ia_org_membership");
+        jdbcTemplate.update("DELETE FROM ia_org_unit");
+        jdbcTemplate.update("DELETE FROM ia_user");
+
+        seedAuthorizedAgentUser();
     }
 
     @Test
@@ -187,12 +198,49 @@ class AgentOsToolSandboxGovernanceTests {
     }
 
     private org.springframework.test.web.servlet.ResultActions invokeTool(String runId, String toolName, String payload) throws Exception {
+        String authorizedPayload = payload;
+        if (toolName.startsWith("platform.contract.") && !payload.contains("requester_id")) {
+            authorizedPayload = payload.substring(0, payload.length() - 1)
+                    + ",\"requester_id\":\"u-agent-tool-001\",\"active_org_id\":\"org-root\",\"active_org_unit_id\":\"dept-agent-tool\"}";
+        }
         return mockMvc.perform(post("/api/agent-os/runs/{runId}/tools/{toolName}/invoke", runId, toolName)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(payload))
+                        .content(authorizedPayload))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.tool_invocation_id").isNotEmpty())
                 .andExpect(jsonPath("$.tool_result_id").isNotEmpty());
+    }
+
+    private void seedAuthorizedAgentUser() {
+        jdbcTemplate.update("""
+                insert into ia_user (user_id, login_name, display_name, user_status, default_org_id, default_org_unit_id, created_at)
+                values ('u-agent-tool-001', 'u-agent-tool-001', 'u-agent-tool-001', 'ACTIVE', 'org-root', 'dept-agent-tool', CURRENT_TIMESTAMP)
+                """);
+        jdbcTemplate.update("""
+                insert into ia_org_unit
+                (org_unit_id, org_id, parent_org_unit_id, org_unit_code, org_unit_name, org_unit_type, org_status, org_path, path_depth, sort_order, created_at, updated_at)
+                values ('org-root', 'org-root', null, 'org-root', 'org-root', 'ORG', 'ACTIVE', '/org-root/', 1, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """);
+        jdbcTemplate.update("""
+                insert into ia_org_unit
+                (org_unit_id, org_id, parent_org_unit_id, org_unit_code, org_unit_name, org_unit_type, org_status, org_path, path_depth, sort_order, created_at, updated_at)
+                values ('dept-agent-tool', 'org-root', 'org-root', 'dept-agent-tool', 'dept-agent-tool', 'DEPARTMENT', 'ACTIVE', '/org-root/dept-agent-tool/', 2, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """);
+        jdbcTemplate.update("""
+                insert into ia_org_membership
+                (membership_id, user_id, org_id, org_unit_id, membership_type, membership_status, is_primary_department, created_at, updated_at)
+                values ('m-u-agent-tool-001', 'u-agent-tool-001', 'org-root', 'dept-agent-tool', 'PRIMARY', 'ACTIVE', true, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """);
+        jdbcTemplate.update("""
+                insert into ia_permission_grant
+                (permission_grant_id, grant_target_type, grant_target_id, permission_type, permission_code, resource_type, grant_status, priority_no, effect_mode, created_at, updated_at)
+                values ('pg-agent-tool-001', 'USER', 'u-agent-tool-001', 'FUNCTION', 'AGENT_TOOL:INVOKE', 'CONTRACT', 'ACTIVE', 10, 'ALLOW', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """);
+        jdbcTemplate.update("""
+                insert into ia_data_scope
+                (data_scope_id, subject_type, subject_id, resource_type, scope_type, scope_ref, scope_status, priority_no, effect_mode, created_at, updated_at)
+                values ('ds-agent-tool-001', 'USER', 'u-agent-tool-001', 'CONTRACT', 'USER_LIST', 'ctr-agent-001', 'ACTIVE', 10, 'ALLOW', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """);
     }
 
     private String createRun(String traceId, String scenario) throws Exception {

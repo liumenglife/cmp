@@ -3,6 +3,7 @@ package com.cmp.platform.agentos;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.cmp.platform.identityaccess.IdentityAccessAuthorizationGateway;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Timestamp;
@@ -91,8 +92,9 @@ class AgentOsController {
     }
 
     @PostMapping("/api/agent-os/runs/{runId}/tools/{toolName}/invoke")
-    Map<String, Object> invokeTool(@PathVariable String runId, @PathVariable String toolName, @RequestBody Map<String, Object> request) {
-        return service.invokeTool(runId, toolName, request);
+    ResponseEntity<Map<String, Object>> invokeTool(@PathVariable String runId, @PathVariable String toolName, @RequestBody Map<String, Object> request) {
+        AgentOsService.Outcome outcome = service.invokeToolEndpoint(runId, toolName, request);
+        return ResponseEntity.status(outcome.status()).body(outcome.body());
     }
 
     @GetMapping("/api/agent-os/runs/{runId}/tool-pair-check")
@@ -114,14 +116,24 @@ class AgentOsService {
 
     private final ObjectMapper objectMapper;
     private final JdbcTemplate jdbcTemplate;
+    private final IdentityAccessAuthorizationGateway authorizationGateway;
 
-    AgentOsService(ObjectMapper objectMapper, JdbcTemplate jdbcTemplate) {
+    AgentOsService(ObjectMapper objectMapper, JdbcTemplate jdbcTemplate, IdentityAccessAuthorizationGateway authorizationGateway) {
         this.objectMapper = objectMapper;
         this.jdbcTemplate = jdbcTemplate;
+        this.authorizationGateway = authorizationGateway;
     }
 
     @Transactional
     Outcome createTask(String idempotencyKey, Map<String, Object> request) {
+        Map<String, Object> authorization = null;
+        String scenario = scenario(request);
+        if (requiresTaskAuthorization(request, scenario)) {
+            authorization = authorizeToolAccess(request, null);
+            if (!"ALLOW".equals(authorization.get("decision_result"))) {
+                return authorizationDenied(authorization);
+            }
+        }
         String requesterId = text(request, "requester_id", "SYSTEM");
         String taskSource = text(request, "task_source", "BUSINESS_MODULE");
         String payloadFingerprint = fingerprint(request);
@@ -132,6 +144,9 @@ class AgentOsService {
         if (existing.isPresent()) {
             Map<String, Object> body = taskResponse(existing.get().get("task_id").toString());
             body.put("duplicate", true);
+            if (authorization != null) {
+                body.put("authorization", authorization);
+            }
             return new Outcome(HttpStatus.OK, body);
         }
 
@@ -158,16 +173,23 @@ class AgentOsService {
                 traceId, ts(now), ts(now), ts(now));
         audit(runId, taskId, "RUN_STARTED", "QueryEngine 运行已创建", "SUCCESS", requesterId, traceId, "LOW");
 
-        String scenario = scenario(request);
         if ("MANUAL_START".equals(scenario)) {
-            return new Outcome(HttpStatus.ACCEPTED, taskResponse(taskId));
+            Map<String, Object> body = taskResponse(taskId);
+            if (authorization != null) {
+                body.put("authorization", authorization);
+            }
+            return new Outcome(HttpStatus.ACCEPTED, body);
         }
 
         String resultId = executeMinimalLoop(taskId, runId, request, scenario);
         if (resultId != null) {
             jdbcTemplate.update("update ao_agent_task set final_result_id = ?, updated_at = ? where task_id = ?", resultId, ts(now()), taskId);
         }
-        return new Outcome(HttpStatus.ACCEPTED, taskResponse(taskId));
+        Map<String, Object> body = taskResponse(taskId);
+        if (authorization != null) {
+            body.put("authorization", authorization);
+        }
+        return new Outcome(HttpStatus.ACCEPTED, body);
     }
 
     @Transactional
@@ -303,6 +325,20 @@ class AgentOsService {
         body.put("grant_status", "GRANTED");
         body.put("schema_snapshot", parseMap(definition.get("schema_json").toString()));
         return body;
+    }
+
+    @Transactional
+    Outcome invokeToolEndpoint(String runId, String toolName, Map<String, Object> request) {
+        if (requiresToolAuthorization(toolName)) {
+            Map<String, Object> authorization = authorizeToolAccess(request, toolName);
+            if (!"ALLOW".equals(authorization.get("decision_result"))) {
+                return authorizationDenied(authorization);
+            }
+            Map<String, Object> body = invokeTool(runId, toolName, request);
+            body.put("authorization", authorization);
+            return new Outcome(HttpStatus.OK, body);
+        }
+        return new Outcome(HttpStatus.OK, invokeTool(runId, toolName, request));
     }
 
     @Transactional
@@ -667,6 +703,68 @@ class AgentOsService {
             case "REJECTED" -> "SANDBOX_REJECTED";
             default -> null;
         };
+    }
+
+    private boolean requiresTaskAuthorization(Map<String, Object> request, String scenario) {
+        return bool(request, "authorization_required", false) || "TOOL_SUCCESS".equals(scenario);
+    }
+
+    private boolean requiresToolAuthorization(String toolName) {
+        return toolName != null && toolName.startsWith("platform.contract.");
+    }
+
+    private Map<String, Object> authorizeToolAccess(Map<String, Object> request, String toolName) {
+        Map<String, Object> authorizationRequest = new LinkedHashMap<>(objectMap(request.get("authorization_ref")));
+        if (authorizationRequest.isEmpty()) {
+            authorizationRequest.put("subject_ref", subjectRef(request));
+            authorizationRequest.put("action_code", "AGENT_TOOL:INVOKE");
+            authorizationRequest.put("resource_type", resourceType(request, toolName));
+            authorizationRequest.put("resource_ref", Map.of("resource_id", resourceId(request)));
+        }
+        authorizationRequest.put("trace_id", trace(request));
+        return authorizationGateway.decide(authorizationRequest);
+    }
+
+    private Map<String, Object> subjectRef(Map<String, Object> request) {
+        Map<String, Object> subject = new LinkedHashMap<>();
+        subject.put("user_id", text(request, "requester_id", text(request, "user_id", "SYSTEM")));
+        String orgId = text(request, "active_org_id", null);
+        if (orgId != null) {
+            subject.put("org_id", orgId);
+        }
+        String orgUnitId = text(request, "active_org_unit_id", null);
+        if (orgUnitId != null) {
+            subject.put("org_unit_id", orgUnitId);
+        }
+        return subject;
+    }
+
+    private String resourceType(Map<String, Object> request, String toolName) {
+        String requestResourceType = text(request, "resource_type", null);
+        if (requestResourceType != null) {
+            return requestResourceType;
+        }
+        String contextObjectType = text(objectMap(request.get("input_context")), "object_type", null);
+        if (contextObjectType != null) {
+            return contextObjectType;
+        }
+        return toolName != null && toolName.startsWith("platform.contract.") ? "CONTRACT" : "UNKNOWN";
+    }
+
+    private String resourceId(Map<String, Object> request) {
+        String requestObjectId = text(request, "object_id", null);
+        if (requestObjectId != null) {
+            return requestObjectId;
+        }
+        return text(objectMap(request.get("input_context")), "object_id", "UNKNOWN");
+    }
+
+    private Outcome authorizationDenied(Map<String, Object> authorization) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("code", "40301");
+        body.put("error", "IDENTITY_ACCESS_AUTHZ_DENIED");
+        body.put("authorization", authorization);
+        return new Outcome(HttpStatus.FORBIDDEN, body);
     }
 
     private String insertToolInvocation(String runId, String promptId, Map<String, Object> definition, String providerCode, String status, String failureCode, String simulate) {

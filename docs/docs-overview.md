@@ -133,6 +133,7 @@
 以下文件用于记录阶段性分析、复核、验收或专题判断，不替代正式技术链路：
 
 1. [查询引擎驱动薄运行内核与外围治理能力分析报告](./reports/Harness/%E6%9F%A5%E8%AF%A2%E5%BC%95%E6%93%8E%E9%A9%B1%E5%8A%A8%E8%96%84%E8%BF%90%E8%A1%8C%E5%86%85%E6%A0%B8%E4%B8%8E%E5%A4%96%E5%9B%B4%E6%B2%BB%E7%90%86%E8%83%BD%E5%8A%9B%E5%88%86%E6%9E%90%E6%8A%A5%E5%91%8A.md)
+2. [第一批跨主线联调实现验证报告](./reports/verification/102-09-batch1-cross-line-integration-implementation.md)
 
 ## 七、上游来源材料
 
@@ -252,6 +253,7 @@
 | Superpowers 正式执行基准 | [docs/superpowers/plans/2026-04-26-batch-4-intelligent-applications-implementation-plan.md](./superpowers/plans/2026-04-26-batch-4-intelligent-applications-implementation-plan.md) | 第四批智能与增强能力执行计划 | 已存在 |
 | Superpowers 正式执行基准 | [docs/superpowers/plans/2026-04-26-batch-5-integration-acceptance-release-plan.md](./superpowers/plans/2026-04-26-batch-5-integration-acceptance-release-plan.md) | 第五批联调验收与上线准备执行计划 | 已存在 |
 | 过程报告 | [查询引擎驱动薄运行内核与外围治理能力分析报告](./reports/Harness/%E6%9F%A5%E8%AF%A2%E5%BC%95%E6%93%8E%E9%A9%B1%E5%8A%A8%E8%96%84%E8%BF%90%E8%A1%8C%E5%86%85%E6%A0%B8%E4%B8%8E%E5%A4%96%E5%9B%B4%E6%B2%BB%E7%90%86%E8%83%BD%E5%8A%9B%E5%88%86%E6%9E%90%E6%8A%A5%E5%91%8A.md) | 智能体操作系统查询引擎驱动薄运行内核与外围治理能力分析报告 | 已存在 |
+| 过程报告 | [第一批跨主线联调实现验证报告](./reports/verification/102-09-batch1-cross-line-integration-implementation.md) | 第一批底座三条主线最小跨主线联调验证报告 | 已存在 |
 | 上游来源材料 | [docs/specifications/湖南星邦智能装备股份有限公司合同管理平台招标技术要求.pdf](./specifications/%E6%B9%96%E5%8D%97%E6%98%9F%E9%82%A6%E6%99%BA%E8%83%BD%E8%A3%85%E5%A4%87%E8%82%A1%E4%BB%BD%E6%9C%89%E9%99%90%E5%85%AC%E5%8F%B8%E5%90%88%E5%90%8C%E7%AE%A1%E7%90%86%E5%B9%B3%E5%8F%B0%E6%8B%9B%E6%A0%87%E6%8A%80%E6%9C%AF%E8%A6%81%E6%B1%82.pdf) | 正式上游来源材料 | 已存在 |
 
 ## 十、维护规则
