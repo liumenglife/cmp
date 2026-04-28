@@ -32,8 +32,8 @@
 ## 编码阶段任务清单
 
 - [✓] 第一批启动门禁核对：核对正式输入、范围边界、环境条件与验收样例。
-- [•] `identity-access` 统一主体与身份协议治理。
-- [ ] `identity-access` 组织、角色、权限与数据权限。
+- [✓] `identity-access` 统一主体与身份协议治理。
+- [•] `identity-access` 组织、角色、权限与数据权限。
 - [ ] `identity-access` 统一授权判定与解密下载授权。
 - [ ] `agent-os` 最小 `QueryEngine / Harness Kernel`。
 - [ ] `agent-os` 工具契约、沙箱与治理挂点。
@@ -56,7 +56,8 @@
 - [✓] 在 `.worktrees/feature/batch1-foundations` 基于最新 `main` 创建同名隔离分支。
 - [✓] 将第2套 Superpowers 规格与计划按 `102-*` 编号规范命名，并同步引用和 planning 真相。
 - [✓] 完成第一批启动门禁核对报告与独立 QA 复核。
-- [•] 派发子代理执行 `identity-access` 统一主体与身份协议治理。
+- [✓] 完成 `identity-access` 统一主体与身份协议治理实现、首次 QA、修复与二次 QA 复核。
+- [•] 派发子代理执行 `identity-access` 组织、角色、权限与数据权限。
 
 ## 已完成里程碑
 
@@ -64,6 +65,7 @@
 - [✓] 已删除本地无用分支 `skeleton-101`、`feature/minimal-runnable-skeleton` 和错误位置的 `feature/batch1-foundations`。
 - [✓] 当前批次隔离工作区为 `.worktrees/feature/batch1-foundations`。
 - [✓] 第一批启动门禁核对通过，报告为 [`102-01-batch1-startup-gate-check.md`](../reports/verification/102-01-batch1-startup-gate-check.md)。
+- [✓] `identity-access` 统一主体与身份协议治理全绿，验证报告为 [`102-02-identity-access-subject-protocol-implementation.md`](../reports/verification/102-02-identity-access-subject-protocol-implementation.md)。
 
 ## 当前阻塞
 
@@ -77,7 +79,7 @@
 
 ## 下一步唯一动作
 
-- 派发子代理执行 `identity-access` 统一主体与身份协议治理，并按 TDD / QA 闭环推进。
+- 派发子代理执行 `identity-access` 组织、角色、权限与数据权限，并按 TDD / QA 闭环推进。
 
 ## 恢复提示
 
