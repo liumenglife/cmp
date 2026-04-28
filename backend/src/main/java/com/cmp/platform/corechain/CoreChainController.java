@@ -153,7 +153,7 @@ class CoreChainService {
         String contractNo = "CMP-" + UUID.randomUUID().toString().substring(0, 8).toUpperCase();
         ContractState contract = new ContractState(contractId, contractNo, text(request, "contract_name", "未命名合同"), "DRAFT",
                 text(request, "owner_org_unit_id", null), text(request, "owner_user_id", null), text(request, "amount", null),
-                text(request, "currency", null), null, null, null, new ArrayList<>());
+                text(request, "currency", null), null, new ArrayList<>(), null, null, new ArrayList<>());
         contract.events().add(event("CONTRACT_CREATED", contractId, text(request, "trace_id", null)));
         contracts.put(contractId, contract);
         return contractBody(contract);
@@ -170,7 +170,8 @@ class CoreChainService {
 
         ContractState updated = new ContractState(contract.contractId(), contract.contractNo(), text(request, "contract_name", contract.contractName()),
                 contract.contractStatus(), contract.ownerOrgUnitId(), contract.ownerUserId(), text(request, "amount", contract.amount()),
-                text(request, "currency", contract.currency()), contract.currentDocument(), contract.approvalSummary(), contract.processId(), copyEvents(contract.events()));
+                text(request, "currency", contract.currency()), contract.currentDocument(), copyDocuments(contract.attachments()),
+                contract.approvalSummary(), contract.processId(), copyEvents(contract.events()));
         updated.events().add(event("CONTRACT_UPDATED", contractId, text(request, "trace_id", null)));
         contracts.put(contractId, updated);
         return ResponseEntity.ok(contractBody(updated));
@@ -183,19 +184,15 @@ class CoreChainService {
         String documentVersionId = "doc-ver-" + UUID.randomUUID();
         List<Map<String, Object>> auditRecords = new ArrayList<>();
         auditRecords.add(event("DOCUMENT_ASSET_CREATED", documentAssetId, text(request, "trace_id", null)));
+        String documentRole = normalizeDocumentRole(text(request, "document_role", text(request, "document_kind", "MAIN_BODY")));
         DocumentAssetState asset = new DocumentAssetState(documentAssetId, documentVersionId, text(request, "owner_type", "CONTRACT"), contractId,
-                text(request, "document_role", text(request, "document_kind", "MAIN_BODY")),
+                documentRole,
                 text(request, "document_title", text(request, "document_name", null)), "FIRST_VERSION_WRITTEN", "NOT_REQUIRED", "NOT_GENERATED", 1, auditRecords);
         documentAssets.put(documentAssetId, asset);
         documentVersions.put(documentVersionId, new DocumentVersionState(documentVersionId, documentAssetId, 1, null, null,
                 text(request, "version_label", "V1"), "首版写入", "ACTIVE", text(request, "file_upload_token", null), text(request, "source_channel", "MANUAL_UPLOAD")));
 
-        DocumentRef document = new DocumentRef(asset.documentAssetId(), asset.currentVersionId(), "FIRST_VERSION_WRITTEN");
-        ContractState updated = new ContractState(contract.contractId(), contract.contractNo(), contract.contractName(), contract.contractStatus(),
-                contract.ownerOrgUnitId(), contract.ownerUserId(), contract.amount(), contract.currency(), document,
-                contract.approvalSummary(), contract.processId(), copyEvents(contract.events()));
-        updated.events().add(event("DOCUMENT_BOUND", document.documentAssetId(), text(request, "trace_id", null)));
-        contracts.put(contractId, updated);
+        bindContractDocument(contract, asset, text(request, "trace_id", null));
 
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("contract_id", contractId);
@@ -217,7 +214,7 @@ class CoreChainService {
                 asset.documentStatus(), asset.encryptionStatus(), asset.previewStatus(), versionNo, copyEvents(asset.auditRecords()));
         updated.auditRecords().add(event("DOCUMENT_VERSION_APPENDED", versionId, text(request, "trace_id", null)));
         documentAssets.put(documentAssetId, updated);
-        refreshContractDocumentRef(updated);
+        refreshContractDocumentRef(updated, text(request, "trace_id", null));
         return documentVersionBody(version);
     }
 
@@ -263,7 +260,7 @@ class CoreChainService {
                 asset.documentStatus(), asset.encryptionStatus(), asset.previewStatus(), asset.latestVersionNo(), copyEvents(asset.auditRecords()));
         updated.auditRecords().add(event("DOCUMENT_VERSION_ACTIVATED", documentVersionId, text(request, "trace_id", null)));
         documentAssets.put(asset.documentAssetId(), updated);
-        refreshContractDocumentRef(updated);
+        refreshContractDocumentRef(updated, text(request, "trace_id", null));
         return documentAssetBody(updated);
     }
 
@@ -425,7 +422,7 @@ class CoreChainService {
 
         ContractState updated = new ContractState(contract.contractId(), contract.contractNo(), contract.contractName(), "UNDER_APPROVAL",
                 contract.ownerOrgUnitId(), contract.ownerUserId(), contract.amount(), contract.currency(), contract.currentDocument(),
-                approvalSummary, processId, copyEvents(contract.events()));
+                copyDocuments(contract.attachments()), approvalSummary, processId, copyEvents(contract.events()));
         updated.events().add(event("APPROVAL_STARTED", processId, text(request, "trace_id", null)));
         contracts.put(contractId, updated);
         return processBody(process);
@@ -453,7 +450,7 @@ class CoreChainService {
 
         ContractState updatedContract = new ContractState(contract.contractId(), contract.contractNo(), contract.contractName(), contractStatus,
                 contract.ownerOrgUnitId(), contract.ownerUserId(), contract.amount(), contract.currency(), contract.currentDocument(),
-                approvalSummary, processId, copyEvents(contract.events()));
+                copyDocuments(contract.attachments()), approvalSummary, processId, copyEvents(contract.events()));
         updatedContract.events().add(event(eventType(processStatus), processId, text(request, "trace_id", null)));
         contracts.put(contract.contractId(), updatedContract);
         return processBody(updatedProcess);
@@ -479,6 +476,7 @@ class CoreChainService {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("contract_master", contractBody(contract));
         body.put("document_summary", contract.currentDocument() == null ? null : documentBody(contract.currentDocument()));
+        body.put("attachment_summaries", contract.attachments().stream().map(this::documentBody).toList());
         body.put("approval_summary", contract.approvalSummary());
         body.put("timeline_summary", contract.events());
         return body;
@@ -495,6 +493,7 @@ class CoreChainService {
         body.put("amount", contract.amount());
         body.put("currency", contract.currency());
         body.put("current_document", contract.currentDocument() == null ? null : documentBody(contract.currentDocument()));
+        body.put("attachment_summaries", contract.attachments().stream().map(this::documentBody).toList());
         body.put("approval_summary", contract.approvalSummary());
         body.put("timeline_event", contract.events());
         body.put("audit_record", contract.events());
@@ -536,6 +535,10 @@ class CoreChainService {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("document_asset_id", document.documentAssetId());
         body.put("document_version_id", document.documentVersionId());
+        body.put("effective_document_version_id", document.effectiveDocumentVersionId());
+        body.put("document_role", document.documentRole());
+        body.put("document_title", document.documentTitle());
+        body.put("latest_version_no", document.latestVersionNo());
         body.put("document_status", document.documentStatus());
         return body;
     }
@@ -772,8 +775,10 @@ class CoreChainService {
             case "CONTRACT_CREATED" -> "合同主档已创建";
             case "DOCUMENT_ASSET_CREATED" -> "文档主档已创建并绑定业务对象";
             case "DOCUMENT_BOUND" -> "文档已绑定合同当前主版本";
+            case "ATTACHMENT_BOUND" -> "附件已挂接合同并刷新附件摘要";
             case "DOCUMENT_VERSION_APPENDED" -> "文档版本已追加并刷新当前主版本";
             case "DOCUMENT_VERSION_ACTIVATED" -> "文档当前主版本已切换";
+            case "DOCUMENT_MAIN_VERSION_SWITCHED" -> "合同主正文业务有效版本已切换";
             case "APPROVAL_STARTED" -> "审批已发起并回写合同状态";
             case "APPROVAL_APPROVED" -> "审批通过并回写合同状态";
             case "APPROVAL_REJECTED" -> "审批驳回并回写合同状态";
@@ -815,16 +820,53 @@ class CoreChainService {
         return version;
     }
 
-    private void refreshContractDocumentRef(DocumentAssetState asset) {
+    private void refreshContractDocumentRef(DocumentAssetState asset, String traceId) {
         if (!"CONTRACT".equals(asset.ownerType())) {
             return;
         }
         ContractState contract = requireContract(asset.ownerId());
-        DocumentRef document = new DocumentRef(asset.documentAssetId(), asset.currentVersionId(), "FIRST_VERSION_WRITTEN");
+        DocumentRef document = documentRef(asset);
+        List<DocumentRef> attachments = copyDocuments(contract.attachments());
+        DocumentRef currentDocument = contract.currentDocument();
+        if ("ATTACHMENT".equals(asset.documentRole())) {
+            attachments.removeIf(ref -> asset.documentAssetId().equals(ref.documentAssetId()));
+            attachments.add(document);
+        } else {
+            currentDocument = document;
+        }
         ContractState updated = new ContractState(contract.contractId(), contract.contractNo(), contract.contractName(), contract.contractStatus(),
-                contract.ownerOrgUnitId(), contract.ownerUserId(), contract.amount(), contract.currency(), document,
+                contract.ownerOrgUnitId(), contract.ownerUserId(), contract.amount(), contract.currency(), currentDocument, attachments,
                 contract.approvalSummary(), contract.processId(), copyEvents(contract.events()));
+        updated.events().add(event("DOCUMENT_MAIN_VERSION_SWITCHED", asset.currentVersionId(), traceId));
         contracts.put(contract.contractId(), updated);
+    }
+
+    private void bindContractDocument(ContractState contract, DocumentAssetState asset, String traceId) {
+        DocumentRef document = documentRef(asset);
+        List<DocumentRef> attachments = copyDocuments(contract.attachments());
+        DocumentRef currentDocument = contract.currentDocument();
+        String eventType;
+        if ("ATTACHMENT".equals(asset.documentRole())) {
+            attachments.add(document);
+            eventType = "ATTACHMENT_BOUND";
+        } else {
+            currentDocument = document;
+            eventType = "DOCUMENT_BOUND";
+        }
+        ContractState updated = new ContractState(contract.contractId(), contract.contractNo(), contract.contractName(), contract.contractStatus(),
+                contract.ownerOrgUnitId(), contract.ownerUserId(), contract.amount(), contract.currency(), currentDocument, attachments,
+                contract.approvalSummary(), contract.processId(), copyEvents(contract.events()));
+        updated.events().add(event(eventType, document.documentAssetId(), traceId));
+        contracts.put(contract.contractId(), updated);
+    }
+
+    private DocumentRef documentRef(DocumentAssetState asset) {
+        return new DocumentRef(asset.documentAssetId(), asset.currentVersionId(), asset.currentVersionId(), asset.documentRole(), asset.documentTitle(),
+                asset.latestVersionNo(), asset.documentStatus());
+    }
+
+    private String normalizeDocumentRole(String role) {
+        return "CONTRACT_BODY".equals(role) ? "MAIN_BODY" : role;
     }
 
     private ProcessState requireProcess(String processId) {
@@ -893,18 +935,24 @@ class CoreChainService {
         return new ArrayList<>(events);
     }
 
+    private List<DocumentRef> copyDocuments(List<DocumentRef> documents) {
+        return new ArrayList<>(documents);
+    }
+
     private String text(Map<String, Object> request, String field, String defaultValue) {
         Object value = request.get(field);
         return value == null || value.toString().isBlank() ? defaultValue : value.toString();
     }
 
     private record ContractState(String contractId, String contractNo, String contractName, String contractStatus,
-                                 String ownerOrgUnitId, String ownerUserId, String amount, String currency,
-                                 DocumentRef currentDocument, Map<String, Object> approvalSummary, String processId,
-                                 List<Map<String, Object>> events) {
+                                  String ownerOrgUnitId, String ownerUserId, String amount, String currency,
+                                  DocumentRef currentDocument, List<DocumentRef> attachments,
+                                  Map<String, Object> approvalSummary, String processId,
+                                  List<Map<String, Object>> events) {
     }
 
-    private record DocumentRef(String documentAssetId, String documentVersionId, String documentStatus) {
+    private record DocumentRef(String documentAssetId, String documentVersionId, String effectiveDocumentVersionId,
+                               String documentRole, String documentTitle, int latestVersionNo, String documentStatus) {
     }
 
     private record DocumentAssetState(String documentAssetId, String currentVersionId, String ownerType, String ownerId,

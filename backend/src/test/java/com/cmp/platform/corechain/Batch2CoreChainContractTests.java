@@ -213,6 +213,171 @@ class Batch2CoreChainContractTests {
     }
 
     @Test
+    void uploadingMainBodyCreatesDocumentFirstVersionAndRefreshesContractDocumentSummary() throws Exception {
+        String contract = mockMvc.perform(post("/api/contracts")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"contract_name":"正文挂接测试合同","owner_user_id":"u-main-body","owner_org_unit_id":"dept-main-body","trace_id":"trace-main-body-contract"}
+                                """))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        String contractId = jsonString(contract, "contract_id");
+
+        String mainBody = mockMvc.perform(post("/api/document-center/assets")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"owner_type":"CONTRACT","owner_id":"%s","document_role":"MAIN_BODY","document_title":"合同主正文.docx","source_channel":"MANUAL_UPLOAD","file_upload_token":"upload-main-body-first-version","version_label":"正文首版","trace_id":"trace-main-body-upload"}
+                                """.formatted(contractId)))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.document_asset_id").isNotEmpty())
+                .andExpect(jsonPath("$.document_version_id").isNotEmpty())
+                .andExpect(jsonPath("$.current_version_id").isNotEmpty())
+                .andExpect(jsonPath("$.latest_version_no").value(1))
+                .andExpect(jsonPath("$.document_role").value("MAIN_BODY"))
+                .andExpect(jsonPath("$.document_title").value("合同主正文.docx"))
+                .andExpect(jsonPath("$.audit_record[?(@.event_type == 'DOCUMENT_ASSET_CREATED')].trace_id").value("trace-main-body-upload"))
+                .andReturn().getResponse().getContentAsString();
+        String documentAssetId = jsonString(mainBody, "document_asset_id");
+        String documentVersionId = jsonString(mainBody, "document_version_id");
+
+        mockMvc.perform(get("/api/document-center/assets/{document_asset_id}/versions", documentAssetId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.total").value(1))
+                .andExpect(jsonPath("$.items[0].document_version_id").value(documentVersionId))
+                .andExpect(jsonPath("$.items[0].version_no").value(1))
+                .andExpect(jsonPath("$.items[0].version_label").value("正文首版"))
+                .andExpect(jsonPath("$.items[0].version_status").value("ACTIVE"));
+
+        mockMvc.perform(get("/api/contracts/{contract_id}/master", contractId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.current_document.document_asset_id").value(documentAssetId))
+                .andExpect(jsonPath("$.current_document.document_version_id").value(documentVersionId))
+                .andExpect(jsonPath("$.current_document.effective_document_version_id").value(documentVersionId))
+                .andExpect(jsonPath("$.current_document.document_role").value("MAIN_BODY"))
+                .andExpect(jsonPath("$.current_document.document_title").value("合同主正文.docx"))
+                .andExpect(jsonPath("$.current_document.latest_version_no").value(1))
+                .andExpect(jsonPath("$.current_document.version_chain").doesNotExist())
+                .andExpect(jsonPath("$.timeline_event[?(@.event_type == 'DOCUMENT_BOUND')].object_id").value(documentAssetId));
+    }
+
+    @Test
+    void attachingMultipleDocumentsKeepsVersionTruthInDocumentCenterAndExposesAttachmentSummariesInContractDetail() throws Exception {
+        String contract = mockMvc.perform(post("/api/contracts")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"contract_name":"附件挂接测试合同","owner_user_id":"u-attachment","owner_org_unit_id":"dept-attachment","trace_id":"trace-attachment-contract"}
+                                """))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        String contractId = jsonString(contract, "contract_id");
+
+        String mainBody = mockMvc.perform(post("/api/document-center/assets")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"owner_type":"CONTRACT","owner_id":"%s","document_role":"MAIN_BODY","document_title":"附件测试主正文.docx","source_channel":"MANUAL_UPLOAD","file_upload_token":"upload-attachment-main","trace_id":"trace-attachment-main"}
+                                """.formatted(contractId)))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        String mainAssetId = jsonString(mainBody, "document_asset_id");
+        String mainVersionId = jsonString(mainBody, "document_version_id");
+
+        String firstAttachment = mockMvc.perform(post("/api/document-center/assets")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"owner_type":"CONTRACT","owner_id":"%s","document_role":"ATTACHMENT","document_title":"技术协议.pdf","source_channel":"MANUAL_UPLOAD","file_upload_token":"upload-attachment-technical","version_label":"技术协议首版","trace_id":"trace-attachment-technical"}
+                                """.formatted(contractId)))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        String firstAttachmentAssetId = jsonString(firstAttachment, "document_asset_id");
+        String firstAttachmentVersionId = jsonString(firstAttachment, "document_version_id");
+
+        String secondAttachment = mockMvc.perform(post("/api/document-center/assets")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"owner_type":"CONTRACT","owner_id":"%s","document_role":"ATTACHMENT","document_title":"报价清单.xlsx","source_channel":"MANUAL_UPLOAD","file_upload_token":"upload-attachment-price","version_label":"报价清单首版","trace_id":"trace-attachment-price"}
+                                """.formatted(contractId)))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        String secondAttachmentAssetId = jsonString(secondAttachment, "document_asset_id");
+        String secondAttachmentVersionId = jsonString(secondAttachment, "document_version_id");
+
+        mockMvc.perform(get("/api/contracts/{contract_id}", contractId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.document_summary.document_asset_id").value(mainAssetId))
+                .andExpect(jsonPath("$.document_summary.effective_document_version_id").value(mainVersionId))
+                .andExpect(jsonPath("$.attachment_summaries.length()").value(2))
+                .andExpect(jsonPath("$.attachment_summaries[?(@.document_asset_id == '%s')].document_title".formatted(firstAttachmentAssetId)).value("技术协议.pdf"))
+                .andExpect(jsonPath("$.attachment_summaries[?(@.document_asset_id == '%s')].effective_document_version_id".formatted(firstAttachmentAssetId)).value(firstAttachmentVersionId))
+                .andExpect(jsonPath("$.attachment_summaries[?(@.document_asset_id == '%s')].document_title".formatted(secondAttachmentAssetId)).value("报价清单.xlsx"))
+                .andExpect(jsonPath("$.attachment_summaries[?(@.document_asset_id == '%s')].effective_document_version_id".formatted(secondAttachmentAssetId)).value(secondAttachmentVersionId))
+                .andExpect(jsonPath("$.attachment_summaries[0].version_chain").doesNotExist())
+                .andExpect(jsonPath("$.timeline_summary[?(@.event_type == 'ATTACHMENT_BOUND')]").isNotEmpty());
+
+        mockMvc.perform(get("/api/document-center/assets/{document_asset_id}/versions", firstAttachmentAssetId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.total").value(1))
+                .andExpect(jsonPath("$.items[0].document_version_id").value(firstAttachmentVersionId))
+                .andExpect(jsonPath("$.items[0].version_label").value("技术协议首版"));
+
+        mockMvc.perform(get("/api/contracts/{contract_id}/master", contractId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.current_document.document_asset_id").value(mainAssetId))
+                .andExpect(jsonPath("$.current_document.effective_document_version_id").value(mainVersionId));
+    }
+
+    @Test
+    void switchingMainBodyVersionRefreshesContractSummaryAndTimelineWithoutCopyingVersionChain() throws Exception {
+        String contract = mockMvc.perform(post("/api/contracts")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"contract_name":"正文版本切换测试合同","owner_user_id":"u-main-switch","owner_org_unit_id":"dept-main-switch","trace_id":"trace-main-switch-contract"}
+                                """))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        String contractId = jsonString(contract, "contract_id");
+
+        String mainBody = mockMvc.perform(post("/api/document-center/assets")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"owner_type":"CONTRACT","owner_id":"%s","document_role":"MAIN_BODY","document_title":"版本切换正文.docx","source_channel":"MANUAL_UPLOAD","file_upload_token":"upload-main-switch-v1","version_label":"V1","trace_id":"trace-main-switch-v1"}
+                                """.formatted(contractId)))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        String documentAssetId = jsonString(mainBody, "document_asset_id");
+        String firstVersionId = jsonString(mainBody, "document_version_id");
+
+        String secondVersion = mockMvc.perform(post("/api/document-center/assets/{document_asset_id}/versions", documentAssetId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"base_version_id":"%s","change_reason":"调整交付范围","version_label":"V2","file_upload_token":"upload-main-switch-v2","source_channel":"MANUAL_UPLOAD","trace_id":"trace-main-switch-v2"}
+                                """.formatted(firstVersionId)))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        String secondVersionId = jsonString(secondVersion, "document_version_id");
+
+        mockMvc.perform(get("/api/contracts/{contract_id}/master", contractId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.current_document.document_asset_id").value(documentAssetId))
+                .andExpect(jsonPath("$.current_document.effective_document_version_id").value(secondVersionId))
+                .andExpect(jsonPath("$.current_document.latest_version_no").value(2))
+                .andExpect(jsonPath("$.current_document.version_chain").doesNotExist())
+                .andExpect(jsonPath("$.timeline_event[?(@.event_type == 'DOCUMENT_MAIN_VERSION_SWITCHED')].object_id").value(secondVersionId))
+                .andExpect(jsonPath("$.timeline_event[?(@.event_type == 'DOCUMENT_MAIN_VERSION_SWITCHED')].trace_id").value("trace-main-switch-v2"));
+
+        mockMvc.perform(post("/api/document-center/versions/{document_version_id}/activate", firstVersionId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"trace_id":"trace-main-switch-back-v1"}
+                                """))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(get("/api/contracts/{contract_id}/master", contractId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.current_document.effective_document_version_id").value(firstVersionId))
+                .andExpect(jsonPath("$.timeline_event[?(@.event_type == 'DOCUMENT_MAIN_VERSION_SWITCHED' && @.object_id == '%s')].trace_id".formatted(firstVersionId)).value("trace-main-switch-back-v1"));
+    }
+
+    @Test
     void documentCenterAppendsQueriesAndActivatesVersionsWithSingleCurrentVersion() throws Exception {
         String contract = mockMvc.perform(post("/api/contracts")
                         .contentType(MediaType.APPLICATION_JSON)
