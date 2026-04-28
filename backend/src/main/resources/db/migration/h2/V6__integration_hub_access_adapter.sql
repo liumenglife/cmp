@@ -1,0 +1,215 @@
+create table ih_inbound_message (
+    inbound_message_id varchar(80) primary key,
+    source_system varchar(40) not null,
+    message_type varchar(80) not null,
+    external_request_id varchar(120) not null,
+    idempotency_key varchar(160) not null,
+    object_type varchar(80),
+    object_hint clob,
+    ingest_status varchar(40) not null,
+    processing_status varchar(40) not null,
+    route_target varchar(80),
+    binding_status varchar(40),
+    mapping_version varchar(40) not null,
+    model_version varchar(40) not null,
+    security_profile_version varchar(40) not null,
+    certificate_version varchar(40) not null,
+    verification_result varchar(40) not null,
+    profile_version varchar(40) not null,
+    evidence_group_id varchar(80),
+    raw_payload_ref varchar(256),
+    normalized_payload_json clob,
+    request_digest varchar(80) not null,
+    trace_id varchar(120) not null,
+    received_at timestamp not null,
+    processed_at timestamp,
+    created_at timestamp not null,
+    updated_at timestamp not null
+);
+
+create unique index uk_ih_inbound_idem on ih_inbound_message(source_system, idempotency_key);
+create unique index uk_ih_inbound_external on ih_inbound_message(source_system, external_request_id, message_type);
+create index idx_ih_inbound_status on ih_inbound_message(ingest_status, processing_status, received_at);
+
+create table ih_outbound_dispatch (
+    dispatch_id varchar(80) primary key,
+    target_system varchar(40) not null,
+    dispatch_type varchar(80) not null,
+    object_type varchar(80) not null,
+    object_id varchar(120) not null,
+    projection_version varchar(40) not null,
+    mapping_version varchar(40) not null,
+    model_version varchar(40) not null,
+    security_profile_version varchar(40) not null,
+    certificate_version varchar(40) not null,
+    verification_result varchar(40) not null,
+    profile_version varchar(40) not null,
+    dispatch_status varchar(40) not null,
+    callback_expected boolean not null,
+    target_request_ref varchar(120),
+    idempotency_key varchar(160) not null,
+    evidence_group_id varchar(80),
+    dispatch_payload_ref varchar(256),
+    request_digest varchar(80) not null,
+    last_result_code varchar(80),
+    last_result_message varchar(512),
+    attempt_count integer not null,
+    next_retry_at timestamp,
+    last_attempt_at timestamp,
+    completed_at timestamp,
+    trace_id varchar(120) not null,
+    created_at timestamp not null,
+    updated_at timestamp not null
+);
+
+create unique index uk_ih_dispatch_idem on ih_outbound_dispatch(target_system, idempotency_key);
+create index idx_ih_dispatch_object on ih_outbound_dispatch(object_type, object_id, target_system);
+create index idx_ih_dispatch_status on ih_outbound_dispatch(dispatch_status, next_retry_at);
+
+create table ih_callback_receipt (
+    callback_receipt_id varchar(80) primary key,
+    source_system varchar(40) not null,
+    receipt_type varchar(80) not null,
+    external_receipt_id varchar(120) not null,
+    linked_dispatch_id varchar(80),
+    linked_binding_id varchar(80),
+    idempotency_key varchar(160) not null,
+    receipt_status varchar(40) not null,
+    processing_status varchar(40) not null,
+    mapping_version varchar(40) not null,
+    model_version varchar(40) not null,
+    security_profile_version varchar(40) not null,
+    certificate_version varchar(40) not null,
+    verification_result varchar(40) not null,
+    profile_version varchar(40) not null,
+    evidence_group_id varchar(80),
+    event_sequence integer,
+    occurred_at timestamp,
+    received_at timestamp not null,
+    raw_payload_ref varchar(256),
+    normalized_payload_json clob,
+    request_digest varchar(80) not null,
+    conflict_reason varchar(512),
+    trace_id varchar(120) not null,
+    created_at timestamp not null,
+    updated_at timestamp not null
+);
+
+create unique index uk_ih_callback_idem on ih_callback_receipt(source_system, idempotency_key);
+create unique index uk_ih_callback_external on ih_callback_receipt(source_system, external_receipt_id, receipt_type);
+create index idx_ih_callback_status on ih_callback_receipt(receipt_status, processing_status, received_at);
+
+create table ih_integration_binding (
+    binding_id varchar(80) primary key,
+    system_name varchar(40) not null,
+    binding_type varchar(80) not null,
+    object_type varchar(80) not null,
+    object_id varchar(120) not null,
+    external_object_type varchar(80) not null,
+    external_object_id varchar(120) not null,
+    external_parent_id varchar(120),
+    binding_status varchar(40) not null,
+    binding_role varchar(80),
+    confirmed_ref_source varchar(80),
+    first_bound_at timestamp not null,
+    last_verified_at timestamp,
+    last_inbound_message_id varchar(80),
+    last_dispatch_id varchar(80),
+    created_at timestamp not null,
+    updated_at timestamp not null
+);
+
+create unique index uk_ih_binding on ih_integration_binding(system_name, object_type, object_id, external_object_type, external_object_id);
+create index idx_ih_binding_external on ih_integration_binding(system_name, external_object_type, external_object_id);
+
+create table ih_integration_job (
+    job_id varchar(80) primary key,
+    platform_job_id varchar(80),
+    job_type varchar(80) not null,
+    job_status varchar(40) not null,
+    resource_type varchar(80) not null,
+    resource_id varchar(80) not null,
+    job_round_no integer not null,
+    source_system varchar(40),
+    target_system varchar(40),
+    priority integer not null,
+    attempt_no integer not null,
+    max_attempts integer not null,
+    runner_code varchar(80) not null,
+    next_run_at timestamp not null,
+    last_error_code varchar(80),
+    last_error_message varchar(512),
+    manual_action_required boolean not null,
+    finished_at timestamp,
+    created_at timestamp not null,
+    updated_at timestamp not null
+);
+
+create unique index uk_ih_job_attempt on ih_integration_job(job_type, resource_type, resource_id, job_round_no, attempt_no);
+create index idx_ih_job_pick on ih_integration_job(job_status, next_run_at, priority);
+
+create table ih_endpoint_profile (
+    endpoint_profile_id varchar(80) primary key,
+    system_name varchar(40) not null,
+    endpoint_type varchar(40) not null,
+    endpoint_code varchar(80) not null,
+    base_url varchar(256) not null,
+    auth_mode varchar(40) not null,
+    credential_ref varchar(120) not null,
+    timeout_ms integer not null,
+    retry_policy_code varchar(80) not null,
+    callback_enabled boolean not null,
+    rate_limit_bucket varchar(120) not null,
+    profile_status varchar(40) not null,
+    profile_version varchar(40) not null,
+    created_at timestamp not null,
+    updated_at timestamp not null
+);
+
+create unique index uk_ih_endpoint on ih_endpoint_profile(system_name, endpoint_type, endpoint_code);
+
+create table ih_security_nonce (
+    nonce_id varchar(80) primary key,
+    system_name varchar(40) not null,
+    direction varchar(40) not null,
+    endpoint_code varchar(80) not null,
+    nonce varchar(160) not null,
+    request_digest varchar(80) not null,
+    security_profile_version varchar(40) not null,
+    certificate_version varchar(40) not null,
+    issued_at timestamp not null,
+    expires_at timestamp not null,
+    created_at timestamp not null
+);
+
+create unique index uk_ih_security_nonce on ih_security_nonce(system_name, direction, endpoint_code, nonce, security_profile_version, certificate_version);
+create index idx_ih_security_nonce_expiry on ih_security_nonce(expires_at);
+
+create table ih_integration_audit_event (
+    audit_event_id varchar(80) primary key,
+    trace_id varchar(120) not null,
+    direction varchar(40) not null,
+    resource_type varchar(80) not null,
+    resource_id varchar(80) not null,
+    action_type varchar(80) not null,
+    result_status varchar(40) not null,
+    system_name varchar(40) not null,
+    object_type varchar(80),
+    object_id varchar(120),
+    operator_type varchar(40) not null,
+    operator_id varchar(120) not null,
+    mapping_version varchar(40) not null,
+    model_version varchar(40) not null,
+    security_profile_version varchar(40) not null,
+    certificate_version varchar(40) not null,
+    verification_result varchar(40) not null,
+    profile_version varchar(40) not null,
+    evidence_group_id varchar(80),
+    error_code varchar(80),
+    error_message varchar(512),
+    payload_snapshot_ref varchar(256),
+    occurred_at timestamp not null
+);
+
+create index idx_ih_audit_trace on ih_integration_audit_event(trace_id, occurred_at);
+create index idx_ih_audit_resource on ih_integration_audit_event(resource_type, resource_id, occurred_at);
