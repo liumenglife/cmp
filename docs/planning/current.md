@@ -2,45 +2,37 @@
 
 ## 主目标
 
-- 在 `.worktrees/feature/batch1-foundations` 隔离工作区推进第一批底座主线实现。
-- 本批次以 `identity-access`、`agent-os`、`integration-hub` 三条底座主线为范围，建立统一身份、组织、权限、任务、审计、集成边界与 `agent-os` 最小 `QueryEngine / Harness Kernel` 闭环。
-- 每个功能点必须按 `编码 -> QA -> 修复（如需要）-> QA（有修复）` 循环推进，全绿后先提交，再进入下一个功能点；首次 QA 通过且未发生修复时，不重复执行第二次 QA。
+- 第一批底座主线已完成并归档，当前真相切换为第二批合同核心主链路启动前状态。
+- 第二批计划目标是推进 `contract-core`、`document-center`、`workflow-engine` 三条主链路，形成合同创建、编辑、文档挂接、审批承接与状态回写的核心闭环。
+- 当前分支 `feature/batch1-foundations` 仅用于第一批收口、推送和创建面向 `main` 的 PR；第二批编码不得在本分支继续实施。
 
 ## 成功定义
 
-- `identity-access` 成为统一身份、组织、权限、数据权限和授权判定真相源。
-- `agent-os` 完成最小 `QueryEngine / Harness Kernel` 可运行、可恢复、可审计闭环。
-- `integration-hub` 成为唯一外部接入、入站、出站、回调、绑定、补偿与对账治理入口。
-- 三条主线之间无重复底座、无绕行入口、无审计断链。
-- 每个功能点均有 TDD 证据、自动化验证证据、独立 QA 结论和对应提交。
+- 第一批底座主线已通过独立 QA 与发布前门禁，并保留完整历史恢复入口。
+- Superpowers 第二至第五批计划文件已按 `102-02` 至 `102-05` 编号规范重命名，引用同步更新。
+- `feature/batch1-foundations` 已推送到 `origin` 并创建面向 `main` 的 PR，等待审查，不自动合并。
+- 下一批编码启动前，必须基于最新 `main` 创建新的隔离工作区和分支，再按第二批计划进入 TDD 与独立 QA 闭环。
 
 ## 非目标
 
-- 不提前实现第二批合同核心主链路、第三批依赖业务能力、第四批智能增强能力或第五批联调上线准备任务。
-- 不让业务模块私建用户、组织、权限、任务、审计、外部交换、合同、文档或流程真相。
-- 不把 `agent-os` 漂移为面向开发者写代码的 Coding Agent OS。
-- 不把 `OA`、企业微信、`CRM`、`SF`、`SRM`、`SAP` 本体改造写成 `CMP` 内部实现责任。
+- 不在 `feature/batch1-foundations` 分支继续实现第二批合同核心主链路代码。
+- 不提前实现第三批依赖业务能力、第四批智能增强能力或第五批联调上线准备任务。
+- 不绕过第一批 PR 审查流程直接合并。
+- 不让 `current.md` 同时保留第一批已完成长列表和第二批当前状态。
 
 ## 当前阶段
 
-- 阶段：第一批底座主线编码实现。
+- 阶段：第一批底座主线完成后的归档、命名收口、推送与 PR 创建。
 - 分支：`feature/batch1-foundations`。
 - 隔离工作区：`.worktrees/feature/batch1-foundations`。
 - 规格：[`102-cmp-implementation-execution-spec.md`](../superpowers/specs/102-cmp-implementation-execution-spec.md)。
-- 计划：[`102-01-batch-1-foundations-implementation-plan.md`](../superpowers/plans/102-01-batch-1-foundations-implementation-plan.md)。
+- 下一批计划：[`102-02-batch-2-core-chain-implementation-plan.md`](../superpowers/plans/102-02-batch-2-core-chain-implementation-plan.md)。
 
 ## 编码阶段任务清单
 
-- [✓] 第一批启动门禁核对：核对正式输入、范围边界、环境条件与验收样例。
-- [✓] `identity-access` 统一主体与身份协议治理。
-- [✓] `identity-access` 组织、角色、权限与数据权限。
-- [✓] `identity-access` 统一授权判定与解密下载授权。
-- [✓] `agent-os` 最小 `QueryEngine / Harness Kernel`。
-- [✓] `agent-os` 工具契约、沙箱与治理挂点。
-- [✓] `integration-hub` 统一接入与适配基础。
-- [✓] `integration-hub` 入站、出站、回调、补偿与对账。
-- [✓] 第一批跨主线联调。
-- [✓] 第一批质量审查与发布前门禁。
+- [✓] 第一批底座主线实现、跨主线联调、独立 QA 与发布前门禁已完成。
+- [•] 第一批归档、后续计划文件编号重命名、推送和 PR 创建。
+- [ ] 第二批合同核心主链路启动前规划核对。
 
 ## 子代理执行协议
 
@@ -52,60 +44,32 @@
 
 ## 当前正在做
 
-- [✓] 删除错误创建在主工作区的 `feature/batch1-foundations` 分支。
-- [✓] 在 `.worktrees/feature/batch1-foundations` 基于最新 `main` 创建同名隔离分支。
-- [✓] 将第2套 Superpowers 规格与计划按 `102-*` 编号规范命名，并同步引用和 planning 真相。
-- [✓] 完成第一批启动门禁核对报告与独立 QA 复核。
-- [✓] 完成 `identity-access` 统一主体与身份协议治理实现、首次 QA、修复与二次 QA 复核。
-- [✓] 完成 `identity-access` 组织、角色、权限与数据权限实现、首次 QA、修复与二次 QA 复核。
-- [✓] 完成 `identity-access` 统一授权判定与解密下载授权实现、首次 QA、修复与二次 QA 复核。
-- [✓] 完成 `agent-os` 最小 `QueryEngine / Harness Kernel` 实现、首次 QA、修复与二次 QA 复核。
-- [✓] 完成 `agent-os` 工具契约、沙箱与治理挂点实现、首次 QA、修复与二次 QA 复核。
-- [✓] 完成 `integration-hub` 统一接入与适配基础实现、首次 QA、修复与二次 QA 复核。
-- [✓] 完成 `integration-hub` 入站、出站、回调、补偿与对账实现、首次 QA、多轮修复与第五次 QA 复核。
-- [✓] 完成第一批跨主线联调实现、首次 QA、修复与二次 QA 复核。
-- [✓] 派发子代理执行第一批质量审查与发布前门禁，独立 QA 结论为通过，没有问题。
+- [✓] 第一批底座主线已通过发布前门禁并提交 `b529fc2`。
+- [•] 将第一批 planning 真相迁入 `history.md`，并把 `current.md` 切换到第二批启动前状态。
+- [•] 将第二至第五批 Superpowers 计划文件重命名为 `102-02` 至 `102-05` 编号。
+- [ ] 推送 `feature/batch1-foundations` 并创建面向 `main` 的 PR。
 
 ## 已完成里程碑
 
 - [✓] `101` 最小可运行工程骨架已完成、推送 PR 并合并到 `main`。
-- [✓] 已删除本地无用分支 `skeleton-101`、`feature/minimal-runnable-skeleton` 和错误位置的 `feature/batch1-foundations`。
-- [✓] 当前批次隔离工作区为 `.worktrees/feature/batch1-foundations`。
-- [✓] 第一批启动门禁核对通过，报告为 [`102-01-batch1-startup-gate-check.md`](../reports/verification/102-01-batch1-startup-gate-check.md)。
-- [✓] `identity-access` 统一主体与身份协议治理全绿，验证报告为 [`102-02-identity-access-subject-protocol-implementation.md`](../reports/verification/102-02-identity-access-subject-protocol-implementation.md)。
-- [✓] `identity-access` 组织、角色、权限与数据权限全绿，验证报告为 [`102-03-identity-access-org-role-permission-implementation.md`](../reports/verification/102-03-identity-access-org-role-permission-implementation.md)。
-- [✓] `identity-access` 统一授权判定与解密下载授权全绿，验证报告为 [`102-04-identity-access-authorization-decrypt-implementation.md`](../reports/verification/102-04-identity-access-authorization-decrypt-implementation.md)。
-- [✓] `agent-os` 最小 `QueryEngine / Harness Kernel` 全绿，验证报告为 [`102-05-agent-os-query-engine-kernel-implementation.md`](../reports/verification/102-05-agent-os-query-engine-kernel-implementation.md)。
-- [✓] `agent-os` 工具契约、沙箱与治理挂点全绿，验证报告为 [`102-06-agent-os-tool-sandbox-governance-implementation.md`](../reports/verification/102-06-agent-os-tool-sandbox-governance-implementation.md)。
-- [✓] `integration-hub` 统一接入与适配基础全绿，验证报告为 [`102-07-integration-hub-access-adapter-implementation.md`](../reports/verification/102-07-integration-hub-access-adapter-implementation.md)。
-- [✓] `integration-hub` 入站、出站、回调、补偿与对账全绿，验证报告为 [`102-08-integration-hub-flow-compensation-reconciliation-implementation.md`](../reports/verification/102-08-integration-hub-flow-compensation-reconciliation-implementation.md)。
-- [✓] 第一批跨主线联调全绿，验证报告为 [`102-09-batch1-cross-line-integration-implementation.md`](../reports/verification/102-09-batch1-cross-line-integration-implementation.md)。
-- [✓] 第一批质量审查与发布前门禁通过，QA 报告为 [`102-10-batch1-release-gate-qa.md`](../reports/qa/102-10-batch1-release-gate-qa.md)。
+- [✓] 第一批底座主线全部功能点、跨主线联调、独立 QA 与发布前门禁已完成。
+- [✓] 第一批发布前门禁报告为 [`102-10-batch1-release-gate-qa.md`](../reports/qa/102-10-batch1-release-gate-qa.md)，结论为通过，没有问题。
 
 ## 当前阻塞
 
 - 当前无需求阻塞。
 - 当前无验证阻塞。
-- 第一批底座主线已全绿。
-
-## 已知风险处置
-
-- `integration-hub` 第七项第二次 QA 报告中的生产级签名与密钥托管、可配置重放窗口、`request_digest` 业务等价边界不回阻已全绿任务。
-- 真实外部 SDK、生产密钥托管、证书链校验和密钥轮换服务后续作为安全生产化专项处理，不夹带进第八项。
-- 第八项必须复核 `request_digest` 的业务字段等价规则，默认继续排除 `trace_id` 等追踪元数据，避免合法重试误判为幂等冲突。
 
 ## 活跃支线
 
-- [✓] 工作区纠偏：当前批次已改为在 `.worktrees/feature/batch1-foundations` 隔离工作区执行。
-- [✓] 文档命名纠偏：将日期命名的第2套 Superpowers 规格与第一批计划收口到 `102-*` 编号命名。
+- [•] `feature/batch1-foundations` 分支收尾：归档、命名收口、推送和 PR 创建。
 
 ## 下一步唯一动作
 
-- 提交第一批质量审查与发布前门禁收口结果；提交后准备进入下一批启动前规划核对。
+- 完成命名收口、验证、提交、推送并创建面向 `main` 的 PR。
 
 ## 恢复提示
 
 - 恢复时先读本文件、[`history.md`](./history.md)、[`decisions.md`](./decisions.md)。
-- 当前编码分支为 `feature/batch1-foundations`，隔离工作区为 `.worktrees/feature/batch1-foundations`。
-- 本批次正式执行依据为 [`102-cmp-implementation-execution-spec.md`](../superpowers/specs/102-cmp-implementation-execution-spec.md) 与 [`102-01-batch-1-foundations-implementation-plan.md`](../superpowers/plans/102-01-batch-1-foundations-implementation-plan.md)。
-- 不要把已归档的 `101` 最小骨架任务写回 `current.md`；历史批次只在 `history.md` 维护。
+- 第一批底座主线历史已迁入 [`history.md`](./history.md)，不要把第一批长列表写回 `current.md`。
+- 第二批正式执行依据为 [`102-cmp-implementation-execution-spec.md`](../superpowers/specs/102-cmp-implementation-execution-spec.md) 与 [`102-02-batch-2-core-chain-implementation-plan.md`](../superpowers/plans/102-02-batch-2-core-chain-implementation-plan.md)。
