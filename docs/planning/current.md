@@ -38,8 +38,8 @@
 - [✓] `agent-os` 最小 `QueryEngine / Harness Kernel`。
 - [✓] `agent-os` 工具契约、沙箱与治理挂点。
 - [✓] `integration-hub` 统一接入与适配基础。
-- [•] `integration-hub` 入站、出站、回调、补偿与对账。
-- [ ] 第一批跨主线联调。
+- [✓] `integration-hub` 入站、出站、回调、补偿与对账。
+- [•] 第一批跨主线联调。
 - [ ] 第一批质量审查与发布前门禁。
 
 ## 子代理执行协议
@@ -62,7 +62,8 @@
 - [✓] 完成 `agent-os` 最小 `QueryEngine / Harness Kernel` 实现、首次 QA、修复与二次 QA 复核。
 - [✓] 完成 `agent-os` 工具契约、沙箱与治理挂点实现、首次 QA、修复与二次 QA 复核。
 - [✓] 完成 `integration-hub` 统一接入与适配基础实现、首次 QA、修复与二次 QA 复核。
-- [•] 派发子代理执行 `integration-hub` 入站、出站、回调、补偿与对账。
+- [✓] 完成 `integration-hub` 入站、出站、回调、补偿与对账实现、首次 QA、多轮修复与第五次 QA 复核。
+- [•] 派发子代理执行第一批跨主线联调。
 
 ## 已完成里程碑
 
@@ -76,6 +77,7 @@
 - [✓] `agent-os` 最小 `QueryEngine / Harness Kernel` 全绿，验证报告为 [`102-05-agent-os-query-engine-kernel-implementation.md`](../reports/verification/102-05-agent-os-query-engine-kernel-implementation.md)。
 - [✓] `agent-os` 工具契约、沙箱与治理挂点全绿，验证报告为 [`102-06-agent-os-tool-sandbox-governance-implementation.md`](../reports/verification/102-06-agent-os-tool-sandbox-governance-implementation.md)。
 - [✓] `integration-hub` 统一接入与适配基础全绿，验证报告为 [`102-07-integration-hub-access-adapter-implementation.md`](../reports/verification/102-07-integration-hub-access-adapter-implementation.md)。
+- [✓] `integration-hub` 入站、出站、回调、补偿与对账全绿，验证报告为 [`102-08-integration-hub-flow-compensation-reconciliation-implementation.md`](../reports/verification/102-08-integration-hub-flow-compensation-reconciliation-implementation.md)。
 
 ## 当前阻塞
 
@@ -95,7 +97,7 @@
 
 ## 下一步唯一动作
 
-- 派发子代理执行 `integration-hub` 入站、出站、回调、补偿与对账，并按 TDD / QA 闭环推进。
+- 派发子代理执行第一批跨主线联调，并按 TDD / QA 闭环推进。
 
 ## 恢复提示
 
