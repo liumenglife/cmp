@@ -26,6 +26,8 @@ class AgentOsQueryEngineKernelTests {
 
     @BeforeEach
     void cleanAgentOsTables() {
+        jdbcTemplate.update("DELETE FROM ao_provider_usage");
+        jdbcTemplate.update("DELETE FROM ao_tool_result");
         jdbcTemplate.update("DELETE FROM ao_agent_audit_event");
         jdbcTemplate.update("DELETE FROM ao_tool_invocation");
         jdbcTemplate.update("DELETE FROM ao_prompt_snapshot");
@@ -80,6 +82,9 @@ class AgentOsQueryEngineKernelTests {
         assertRowCount("ao_agent_run", "run_id = '" + runId + "' and run_status = 'SUCCEEDED' and loop_count = 1", 1);
         assertRowCount("ao_prompt_snapshot", "run_id = '" + runId + "' and platform_root_version = 'platform-root-v1' and context_token_estimate > 0", 1);
         assertRowCount("ao_tool_invocation", "run_id = '" + runId + "' and tool_type = 'MODEL' and invocation_status = 'SUCCEEDED'", 1);
+        assertRowCount("ao_tool_result", "run_id = '" + runId + "' and tool_name = 'model.generate_text' and result_status = 'SUCCEEDED'", 1);
+        assertRowCount("ao_agent_audit_event", "parent_object_id = '" + runId + "' and action_type = 'TOOL_INVOKED'", 1);
+        assertRowCount("ao_agent_audit_event", "parent_object_id = '" + runId + "' and action_type = 'TOOL_RESULT_RECORDED'", 1);
         assertRowCount("ao_agent_audit_event", "object_id = '" + runId + "' and action_type = 'STATE_CHECKPOINT' and trace_id = 'trace-agent-success'", 1);
     }
 
@@ -95,6 +100,10 @@ class AgentOsQueryEngineKernelTests {
         String runId = jsonString(response, "run_id");
         assertRowCount("ao_agent_run", "run_id = '" + runId + "' and run_status = 'FAILED' and failure_code = 'MODEL_CALL_FAILED'", 1);
         assertRowCount("ao_agent_result", "run_id = '" + runId + "' and result_status = 'FAILED'", 1);
+        assertRowCount("ao_tool_invocation", "run_id = '" + runId + "' and tool_type = 'MODEL' and invocation_status = 'FAILED'", 1);
+        assertRowCount("ao_tool_result", "run_id = '" + runId + "' and tool_name = 'model.generate_text' and result_status = 'FAILED' and failure_code = 'MODEL_CALL_FAILED'", 1);
+        assertRowCount("ao_agent_audit_event", "parent_object_id = '" + runId + "' and action_type = 'TOOL_INVOKED' and result_status = 'FAILED'", 1);
+        assertRowCount("ao_agent_audit_event", "parent_object_id = '" + runId + "' and action_type = 'TOOL_RESULT_RECORDED' and result_status = 'FAILED'", 1);
         assertRowCount("ao_agent_audit_event", "object_id = '" + runId + "' and action_type = 'MODEL_CALL_FAILED' and result_status = 'FAILED'", 1);
     }
 

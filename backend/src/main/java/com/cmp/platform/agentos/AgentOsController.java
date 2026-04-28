@@ -22,6 +22,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestHeader;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
@@ -77,6 +78,31 @@ class AgentOsController {
     @GetMapping("/api/agent-os/environment-events/{eventId}")
     Map<String, Object> environmentEvent(@PathVariable String eventId) {
         return service.environmentEvent(eventId);
+    }
+
+    @GetMapping("/api/agent-os/internal/tools")
+    Map<String, Object> tools(@RequestParam(value = "capability_code", required = false) String capabilityCode) {
+        return service.tools(capabilityCode);
+    }
+
+    @GetMapping("/api/agent-os/internal/tools/{toolName}/schema")
+    Map<String, Object> toolSchema(@PathVariable String toolName, @RequestParam("run_id") String runId) {
+        return service.toolSchema(runId, toolName);
+    }
+
+    @PostMapping("/api/agent-os/runs/{runId}/tools/{toolName}/invoke")
+    Map<String, Object> invokeTool(@PathVariable String runId, @PathVariable String toolName, @RequestBody Map<String, Object> request) {
+        return service.invokeTool(runId, toolName, request);
+    }
+
+    @GetMapping("/api/agent-os/runs/{runId}/tool-pair-check")
+    Map<String, Object> toolPairCheck(@PathVariable String runId) {
+        return service.toolPairCheck(runId);
+    }
+
+    @PostMapping("/api/agent-os/runs/{runId}/verification-reports")
+    Map<String, Object> verificationReport(@PathVariable String runId, @RequestBody Map<String, Object> request) {
+        return service.verificationReport(runId, request);
     }
 }
 
@@ -231,6 +257,182 @@ class AgentOsService {
         return eventBody(eventId);
     }
 
+    @Transactional
+    Map<String, Object> tools(String capabilityCode) {
+        seedToolDefinitions();
+        List<Map<String, Object>> tools = jdbcTemplate.query("""
+                select tool_name, tool_family, capability_code, risk_level, search_hint
+                from ao_tool_definition
+                where ? is null or capability_code = ?
+                order by cache_order_group, tool_name
+                """, (rs, rowNum) -> {
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("tool_name", rs.getString("tool_name"));
+            body.put("tool_family", rs.getString("tool_family"));
+            body.put("capability_code", rs.getString("capability_code"));
+            body.put("risk_level", rs.getString("risk_level"));
+            body.put("search_hint", rs.getString("search_hint"));
+            return body;
+        }, capabilityCode, capabilityCode);
+        return Map.of("tool_list", tools);
+    }
+
+    @Transactional
+    Map<String, Object> toolSchema(String runId, String toolName) {
+        seedToolDefinitions();
+        Map<String, Object> run = queryRun(runId);
+        Map<String, Object> definition = toolDefinition(toolName);
+        String snapshotRef = "tool-snap-" + UUID.randomUUID();
+        Instant now = now();
+        jdbcTemplate.update("""
+                insert into ao_tool_definition_snapshot
+                (snapshot_ref, run_id, tool_name, schema_snapshot_json, sandbox_policy_ref, offload_policy_ref, created_at)
+                values (?, ?, ?, ?, ?, ?, ?)
+                """, snapshotRef, runId, toolName, definition.get("schema_json"), definition.get("sandbox_policy_ref"), definition.get("offload_policy_ref"), ts(now));
+        jdbcTemplate.update("""
+                insert into ao_tool_grant
+                (grant_id, run_id, tool_name, snapshot_ref, grant_status, grant_scope_json, denied_reason, created_at)
+                values (?, ?, ?, ?, ?, ?, ?, ?)
+                """, "tool-grant-" + UUID.randomUUID(), runId, toolName, snapshotRef, "GRANTED",
+                json(Map.of("resource_scope", "CURRENT_BUSINESS_OBJECT", "risk_level", definition.get("risk_level"))), null, ts(now));
+        audit(snapshotRef, runId, "TOOL_SCHEMA_SNAPSHOT_CREATED", "工具 schema 快照已固化", "SUCCESS", "SYSTEM", run.get("trace_id").toString(), definition.get("risk_level").toString());
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("tool_name", toolName);
+        body.put("snapshot_ref", snapshotRef);
+        body.put("grant_status", "GRANTED");
+        body.put("schema_snapshot", parseMap(definition.get("schema_json").toString()));
+        return body;
+    }
+
+    @Transactional
+    Map<String, Object> invokeTool(String runId, String toolName, Map<String, Object> request) {
+        seedToolDefinitions();
+        Map<String, Object> run = queryRun(runId);
+        String promptId = ensurePromptSnapshot(runId);
+        toolSchema(runId, toolName);
+        Map<String, Object> definition = toolDefinition(toolName);
+        String simulate = text(request, "simulate", "NORMAL");
+        String traceId = run.get("trace_id").toString();
+        String providerCode = "MODEL".equals(definition.get("tool_family")) && "PRIMARY_CIRCUIT_OPEN".equals(simulate) ? "MOCK_FALLBACK_PROVIDER" : "MOCK_PROVIDER";
+        String status = toolStatus(definition, simulate, request);
+        String failureCode = failureCode(status);
+        String invocationId = insertToolInvocation(runId, promptId, definition, providerCode, status, failureCode, simulate);
+        String resultId = insertToolResult(runId, invocationId, definition, status, failureCode, simulate);
+        if ("MODEL".equals(definition.get("tool_family"))) {
+            recordProviderUsage(runId, invocationId, providerCode, "PRIMARY_CIRCUIT_OPEN".equals(simulate) ? "DEGRADED" : "SELECTED", simulate);
+        }
+        audit(invocationId, runId, "TOOL_INVOKED", "工具调用已进入沙箱执行", status.equals("SUCCEEDED") ? "SUCCESS" : status, "SYSTEM", traceId, definition.get("risk_level").toString());
+        audit(resultId, runId, "TOOL_RESULT_RECORDED", "工具结果已归一化并落库", status.equals("SUCCEEDED") ? "SUCCESS" : status, "SYSTEM", traceId, definition.get("risk_level").toString());
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("tool_invocation_id", invocationId);
+        body.put("tool_result_id", resultId);
+        body.put("tool_name", toolName);
+        body.put("result_status", status);
+        body.put("failure_code", failureCode);
+        body.put("provider_code", providerCode);
+        body.put("offloaded", "LARGE_OUTPUT".equals(simulate));
+        body.put("artifact_ref", "LARGE_OUTPUT".equals(simulate) ? "artifact://tool-output/" + resultId : null);
+        return body;
+    }
+
+    @Transactional
+    Map<String, Object> toolPairCheck(String runId) {
+        Map<String, Object> run = queryRun(runId);
+        Integer invocationCount = jdbcTemplate.queryForObject("select count(*) from ao_tool_invocation where run_id = ?", Integer.class, runId);
+        Integer resultCount = jdbcTemplate.queryForObject("""
+                select count(*) from ao_tool_result r
+                where r.run_id = ? and exists (
+                    select 1 from ao_tool_invocation i where i.tool_invocation_id = r.tool_invocation_id and i.run_id = r.run_id
+                )
+                """, Integer.class, runId);
+        Integer missingResultCount = jdbcTemplate.queryForObject("""
+                select count(*) from (
+                    select i.tool_invocation_id
+                    from ao_tool_invocation i
+                    left join ao_tool_result r on r.run_id = i.run_id and r.tool_invocation_id = i.tool_invocation_id
+                    where i.run_id = ?
+                    group by i.tool_invocation_id
+                    having count(r.tool_result_id) = 0
+                ) broken
+                """, Integer.class, runId);
+        Integer duplicateResultCount = jdbcTemplate.queryForObject("""
+                select count(*) from (
+                    select i.tool_invocation_id
+                    from ao_tool_invocation i
+                    left join ao_tool_result r on r.run_id = i.run_id and r.tool_invocation_id = i.tool_invocation_id
+                    where i.run_id = ?
+                    group by i.tool_invocation_id
+                    having count(r.tool_result_id) > 1
+                ) broken
+                """, Integer.class, runId);
+        Integer orphanResultCount = jdbcTemplate.queryForObject("""
+                select count(*) from ao_tool_result r
+                where r.run_id = ? and not exists (
+                    select 1 from ao_tool_invocation i where i.run_id = r.run_id and i.tool_invocation_id = r.tool_invocation_id
+                )
+                """, Integer.class, runId);
+        int brokenInvocationCount = value(missingResultCount) + value(duplicateResultCount);
+        boolean paired = brokenInvocationCount == 0 && value(orphanResultCount) == 0;
+        if (!paired) {
+            audit(runId, run.get("task_id").toString(), "TOOL_PAIR_BROKEN", "工具调用与工具结果断对", "FAILED", "SYSTEM", run.get("trace_id").toString(), "HIGH");
+        }
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("run_id", runId);
+        body.put("pair_status", paired ? "PAIRED" : "BROKEN");
+        body.put("failure_code", paired ? null : "TOOL_PAIR_BROKEN");
+        body.put("invocation_count", invocationCount == null ? 0 : invocationCount);
+        body.put("result_count", resultCount == null ? 0 : resultCount);
+        body.put("missing_result_count", value(missingResultCount));
+        body.put("duplicate_result_count", value(duplicateResultCount));
+        body.put("orphan_result_count", value(orphanResultCount));
+        body.put("broken_invocation_count", brokenInvocationCount + value(orphanResultCount));
+        return body;
+    }
+
+    @Transactional
+    Map<String, Object> verificationReport(String runId, Map<String, Object> request) {
+        Map<String, Object> run = queryRun(runId);
+        Map<String, Object> pairCheck = toolPairCheck(runId);
+        Map<String, Object> auditCheck = toolAuditPairCheck(runId, run);
+        String target = text(request, "target", "agent-os tool sandbox governance");
+        String reportId = "verify-" + UUID.randomUUID();
+        boolean resultPaired = pairCheck.get("pair_status").equals("PAIRED");
+        boolean auditPaired = auditCheck.get("pair_status").equals("PAIRED");
+        List<Map<String, Object>> checkItems = List.of(
+                Map.of("check_code", "TOOL_RESULT_PAIRING", "status", resultPaired ? "PASSED" : "FAILED", "evidence_ref", "run://" + runId),
+                Map.of("check_code", "TOOL_AUDIT_PAIRING", "status", auditPaired ? "PASSED" : "FAILED", "evidence_ref", "run://" + runId));
+        List<Map<String, Object>> failureEvidence = resultPaired && auditPaired
+                ? List.of(Map.of("evidence_type", "NONE", "summary", "未发现失败证据"))
+                : List.of(Map.of("evidence_type", resultPaired ? "TOOL_AUDIT_PAIR_BROKEN" : "TOOL_PAIR_BROKEN",
+                        "summary", resultPaired ? "工具调用与结果缺少成对审计" : "工具调用与结果断对"));
+        Map<String, Object> baseline = Map.of("p95_latency_ms", 500, "max_tool_timeout_ms", 1000, "regression_scope", "agent-os-task6");
+        String conclusion = resultPaired && auditPaired ? "PASSED" : "FAILED";
+        String regressionEntry = "regression://agent-os/tool-sandbox/" + reportId;
+        jdbcTemplate.update("""
+                insert into ao_verification_report
+                (verification_report_id, run_id, verification_target, independent_context_sources_json, check_items_json,
+                 failure_evidence_json, performance_baseline_json, uncovered_risks_json, conclusion, regression_baseline_entry, created_at)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, reportId, runId, target,
+                json(List.of("ao_tool_invocation", "ao_tool_result", "ao_agent_audit_event", "ao_provider_usage")),
+                json(checkItems), json(failureEvidence), json(baseline), json(List.of()), conclusion, regressionEntry, ts(now()));
+        audit(reportId, runId, "VERIFICATION_REPORT_CREATED", "验证报告已生成", conclusion, "VERIFICATION_AGENT", run.get("trace_id").toString(), "MEDIUM");
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("verification_report_id", reportId);
+        body.put("verification_target", target);
+        body.put("independent_context_sources", List.of("ao_tool_invocation", "ao_tool_result", "ao_agent_audit_event", "ao_provider_usage"));
+        body.put("check_items", checkItems);
+        body.put("failure_evidence", failureEvidence);
+        body.put("performance_baseline", baseline);
+        body.put("uncovered_risks", List.of());
+        body.put("conclusion", conclusion);
+        body.put("regression_baseline_entry", regressionEntry);
+        return body;
+    }
+
     private String executeMinimalLoop(String taskId, String runId, Map<String, Object> request, String scenario) {
         String traceId = trace(request);
         String promptId = createPromptSnapshot(runId, request);
@@ -265,6 +467,9 @@ class AgentOsService {
         }
         if ("AUDIT_MISSING".equals(scenario)) {
             return fail(taskId, runId, "AUDIT_REQUIRED", "审计缺失，阻断结果释放", "RESULT_RELEASE_BLOCKED", traceId, "审计缺失，结果不可释放");
+        }
+        if ("TOOL_SUCCESS".equals(scenario)) {
+            invokeTool(runId, "platform.contract.readonly.lookup", Map.of("object_id", "ctr-agent-001"));
         }
 
         Map<String, Object> inputPayload = objectMap(request.get("input_payload"));
@@ -325,7 +530,147 @@ class AgentOsService {
     }
 
     private void createModelInvocation(String runId, String promptId, String scenario) {
+        seedToolDefinitions();
+        Map<String, Object> run = queryRun(runId);
+        Map<String, Object> definition = toolDefinition("model.generate_text");
         boolean failed = "MODEL_FAIL".equals(scenario);
+        if ("TOOL_SUCCESS".equals(scenario)) {
+            invokeTool(runId, "model.generate_text", Map.of("capability", "generate_text"));
+            return;
+        }
+        String status = failed ? "FAILED" : "SUCCEEDED";
+        String failureCode = failed ? "MODEL_CALL_FAILED" : null;
+        String invocationId = insertToolInvocation(runId, promptId, definition, "MOCK_PROVIDER", status, failureCode, scenario);
+        String resultId = insertToolResult(runId, invocationId, definition, status, failureCode, scenario);
+        recordProviderUsage(runId, invocationId, "MOCK_PROVIDER", failed ? "FAILED" : "SELECTED", scenario);
+        audit(invocationId, runId, "TOOL_INVOKED", "模型工具调用已进入沙箱执行", failed ? "FAILED" : "SUCCESS", "SYSTEM",
+                run.get("trace_id").toString(), definition.get("risk_level").toString());
+        audit(resultId, runId, "TOOL_RESULT_RECORDED", "模型工具结果已归一化并落库", failed ? "FAILED" : "SUCCESS", "SYSTEM",
+                run.get("trace_id").toString(), definition.get("risk_level").toString());
+    }
+
+    private Map<String, Object> toolAuditPairCheck(String runId, Map<String, Object> run) {
+        Integer invocationAuditBroken = jdbcTemplate.queryForObject("""
+                select count(*) from (
+                    select i.tool_invocation_id
+                    from ao_tool_invocation i
+                    left join ao_agent_audit_event a on a.parent_object_id = i.run_id
+                        and a.object_id = i.tool_invocation_id
+                        and a.action_type = 'TOOL_INVOKED'
+                    where i.run_id = ?
+                    group by i.tool_invocation_id
+                    having count(a.audit_event_id) <> 1
+                ) broken
+                """, Integer.class, runId);
+        Integer resultAuditBroken = jdbcTemplate.queryForObject("""
+                select count(*) from (
+                    select r.tool_result_id
+                    from ao_tool_result r
+                    left join ao_agent_audit_event a on a.parent_object_id = r.run_id
+                        and a.object_id = r.tool_result_id
+                        and a.action_type = 'TOOL_RESULT_RECORDED'
+                    where r.run_id = ?
+                    group by r.tool_result_id
+                    having count(a.audit_event_id) <> 1
+                ) broken
+                """, Integer.class, runId);
+        int brokenCount = value(invocationAuditBroken) + value(resultAuditBroken);
+        if (brokenCount > 0) {
+            audit(runId, run.get("task_id").toString(), "TOOL_AUDIT_PAIR_BROKEN", "工具调用与结果缺少成对审计", "FAILED", "SYSTEM", run.get("trace_id").toString(), "HIGH");
+        }
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("pair_status", brokenCount == 0 ? "PAIRED" : "BROKEN");
+        body.put("broken_audit_count", brokenCount);
+        return body;
+    }
+
+    private void seedToolDefinitions() {
+        if (Boolean.TRUE.equals(jdbcTemplate.queryForObject("select count(*) > 0 from ao_tool_definition", Boolean.class))) {
+            return;
+        }
+        insertToolDefinition("platform.contract.readonly.lookup", "INTERNAL_SERVICE", "CONTRACT_READ", "L1_READONLY", "READONLY",
+                "读取当前授权合同摘要", Map.of("input_schema", Map.of("object_id", Map.of("type", "string"))), "sandbox-readonly-v1", "offload-large-v1");
+        insertToolDefinition("platform.contract.guarded.writeback", "INTERNAL_SERVICE", "CONTRACT_WRITE", "L3_GUARDED_WRITE", "CONTROLLED_WRITE",
+                "受控写入合同 AI 结果", Map.of("input_schema", Map.of("object_id", Map.of("type", "string"))), "sandbox-write-guarded-v1", "offload-large-v1");
+        insertToolDefinition("model.generate_text", "MODEL", "generate_text", "L2_CONTROLLED_COMPUTE", "CONTROLLED_COMPUTE",
+                "模型文本生成能力", Map.of("input_schema", Map.of("capability", Map.of("type", "string"))), "sandbox-model-v1", "offload-provider-v1");
+    }
+
+    private void insertToolDefinition(String name, String family, String capability, String risk, String sideEffect, String hint,
+                                      Map<String, Object> schema, String sandboxPolicy, String offloadPolicy) {
+        Instant now = now();
+        jdbcTemplate.update("""
+                insert into ao_tool_definition
+                (tool_name, tool_family, capability_code, risk_level, side_effect_level, search_hint, schema_json,
+                 definition_stability, cache_order_group, sandbox_policy_ref, offload_policy_ref, created_at, updated_at)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, name, family, capability, risk, sideEffect, hint, json(schema), "BUILT_IN_STABLE", family, sandboxPolicy, offloadPolicy, ts(now), ts(now));
+    }
+
+    private Map<String, Object> toolDefinition(String toolName) {
+        return queryOptional("""
+                select tool_name, tool_family, capability_code, risk_level, side_effect_level, schema_json, sandbox_policy_ref, offload_policy_ref
+                from ao_tool_definition where tool_name = ?
+                """, (rs, rowNum) -> {
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("tool_name", rs.getString("tool_name"));
+            body.put("tool_family", rs.getString("tool_family"));
+            body.put("capability_code", rs.getString("capability_code"));
+            body.put("risk_level", rs.getString("risk_level"));
+            body.put("side_effect_level", rs.getString("side_effect_level"));
+            body.put("schema_json", rs.getString("schema_json"));
+            body.put("sandbox_policy_ref", rs.getString("sandbox_policy_ref"));
+            body.put("offload_policy_ref", rs.getString("offload_policy_ref"));
+            return body;
+        }, toolName).orElseThrow(() -> new IllegalArgumentException("tool 不存在: " + toolName));
+    }
+
+    private String ensurePromptSnapshot(String runId) {
+        return queryOptional("select latest_prompt_snapshot_id from ao_agent_run where run_id = ?", (rs, rowNum) -> rs.getString("latest_prompt_snapshot_id"), runId)
+                .filter(value -> value != null && !value.isBlank())
+                .orElseGet(() -> {
+                    String promptId = "prompt-" + UUID.randomUUID();
+                    Instant now = now();
+                    jdbcTemplate.update("""
+                            insert into ao_prompt_snapshot
+                            (prompt_snapshot_id, run_id, snapshot_no, general_persona_code, persona_code, platform_root_version,
+                             runtime_framework_version, general_persona_version, persona_patch_version, dynamic_injection_digest,
+                             dynamic_injection_summary, trimmed_reason_summary, context_token_estimate, prompt_body_ref,
+                             assembly_policy_version, trimming_policy_version, budget_policy_version, cache_prefix_policy_version, created_at)
+                            values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            """, promptId, runId, 1, GENERAL_PERSONA, "CONTRACT_REVIEW_AGENT", PLATFORM_ROOT_VERSION,
+                            "runtime-loop-v1", "general-persona-v1", "contract-review-agent-v1", "dyn-manual",
+                            json(Map.of("task_brief", "manual tool invocation")), "未触发裁剪", 64, "prompt-body-ref://" + promptId,
+                            "assembly-v1", "trim-v1", "budget-v1", "cache-v1", ts(now));
+                    jdbcTemplate.update("update ao_agent_run set latest_prompt_snapshot_id = ?, updated_at = ? where run_id = ?", promptId, ts(now), runId);
+                    return promptId;
+                });
+    }
+
+    private String toolStatus(Map<String, Object> definition, String simulate, Map<String, Object> request) {
+        if ("TIMEOUT".equals(simulate)) {
+            return "TIMED_OUT";
+        }
+        if ("FAILURE".equals(simulate)) {
+            return "FAILED";
+        }
+        if (definition.get("risk_level").toString().startsWith("L3") || bool(request, "bypass_sandbox", false)) {
+            return "REJECTED";
+        }
+        return "SUCCEEDED";
+    }
+
+    private String failureCode(String status) {
+        return switch (status) {
+            case "FAILED" -> "RUNTIME_FAILURE";
+            case "TIMED_OUT" -> "TOOL_TIMEOUT";
+            case "REJECTED" -> "SANDBOX_REJECTED";
+            default -> null;
+        };
+    }
+
+    private String insertToolInvocation(String runId, String promptId, Map<String, Object> definition, String providerCode, String status, String failureCode, String simulate) {
+        String invocationId = "tool-" + UUID.randomUUID();
         Instant now = now();
         jdbcTemplate.update("""
                 insert into ao_tool_invocation
@@ -333,9 +678,42 @@ class AgentOsService {
                  input_digest, output_digest, output_artifact_ref, output_truncated_reason, latency_ms, token_in, token_out,
                  error_code, error_message_summary, retry_no, created_at, updated_at)
                 values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, "tool-" + UUID.randomUUID(), runId, promptId, "MODEL", "contract-risk-summary", "MOCK_PROVIDER", failed ? "FAILED" : "SUCCEEDED",
-                "input-" + promptId, failed ? null : "output-risk-medium", failed ? null : "artifact://model-output/contract-risk", "SUMMARY_REF",
-                failed ? 20 : 35, 180, failed ? 0 : 80, failed ? "MODEL_CALL_FAILED" : null, failed ? "模型返回失败" : null, 0, ts(now), ts(now));
+                """, invocationId, runId, promptId, definition.get("tool_family"), definition.get("tool_name"), providerCode, status,
+                "input-" + invocationId, status.equals("SUCCEEDED") ? "output-" + invocationId : null,
+                "LARGE_OUTPUT".equals(simulate) ? "artifact://tool-output/" + invocationId : null,
+                "LARGE_OUTPUT".equals(simulate) ? "OUTPUT_OFFLOADED" : null,
+                "TIMED_OUT".equals(status) ? 1001 : 25, "MODEL".equals(definition.get("tool_family")) ? 180 : 0,
+                "MODEL".equals(definition.get("tool_family")) && status.equals("SUCCEEDED") ? 80 : 0,
+                failureCode, failureCode == null ? null : "工具执行未成功", 0, ts(now), ts(now));
+        return invocationId;
+    }
+
+    private String insertToolResult(String runId, String invocationId, Map<String, Object> definition, String status, String failureCode, String simulate) {
+        String resultId = "tool-result-" + UUID.randomUUID();
+        jdbcTemplate.update("""
+                insert into ao_tool_result
+                (tool_result_id, tool_invocation_id, run_id, tool_name, result_status, result_class, output_summary,
+                 output_artifact_ref, failure_code, failure_class, retryable, resource_usage_json, created_at)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, resultId, invocationId, runId, definition.get("tool_name"), status,
+                "MODEL".equals(definition.get("tool_family")) ? "STRUCTURED_EXTRACTION" : "READ_OBSERVATION",
+                "LARGE_OUTPUT".equals(simulate) ? "工具输出已卸载为摘要和引用" : status + " observation",
+                "LARGE_OUTPUT".equals(simulate) ? "artifact://tool-output/" + resultId : null,
+                failureCode, failureCode == null ? null : failureCode, !"REJECTED".equals(status),
+                json(Map.of("latency_ms", "TIMED_OUT".equals(status) ? 1001 : 25)), ts(now()));
+        return resultId;
+    }
+
+    private void recordProviderUsage(String runId, String invocationId, String providerCode, String routeStatus, String simulate) {
+        jdbcTemplate.update("""
+                insert into ao_provider_usage
+                (provider_usage_id, run_id, tool_invocation_id, capability_code, provider_code, model_code, route_status,
+                 quota_status, rate_status, circuit_status, degrade_reason, token_in, token_out, estimated_cost, created_at)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, "provider-use-" + UUID.randomUUID(), runId, invocationId, "generate_text", providerCode,
+                "MOCK_FALLBACK_PROVIDER".equals(providerCode) ? "mock-low-cost" : "mock-primary", routeStatus, "PASSED", "PASSED",
+                "PRIMARY_CIRCUIT_OPEN".equals(simulate) ? "OPEN" : "CLOSED", "PRIMARY_CIRCUIT_OPEN".equals(simulate) ? "主 Provider 熔断，切换备路由" : null,
+                180, 80, 0.010000, ts(now()));
     }
 
     private String createResult(String taskId, String runId, String status, String type, String summary, Map<String, Object> payload, List<Map<String, Object>> citations, String digest) {
@@ -550,6 +928,10 @@ class AgentOsService {
     private boolean bool(Map<String, Object> map, String key, boolean fallback) {
         Object value = map.get(key);
         return value instanceof Boolean bool ? bool : fallback;
+    }
+
+    private int value(Integer value) {
+        return value == null ? 0 : value;
     }
 
     @SuppressWarnings("unchecked")
