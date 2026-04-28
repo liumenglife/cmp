@@ -189,6 +189,6 @@ scripts/verify-all.sh
 本设计是进入第一批底座实现前的工程入口。后续实施顺序应为：
 
 1. 先按本文实现“最小可运行工程骨架”。
-2. 通过工程骨架质量审查后，再回到 [`CMP 实现阶段统一执行规格`](./2026-04-26-cmp-implementation-execution-spec.md)。
-3. 继续执行 [`Batch 1 Foundations Implementation Plan`](../plans/2026-04-26-batch-1-foundations-implementation-plan.md) 中的第一批底座任务。
+2. 通过工程骨架质量审查后，再回到 [`CMP 实现阶段统一执行规格`](./102-cmp-implementation-execution-spec.md)。
+3. 继续执行 [`Batch 1 Foundations Implementation Plan`](../plans/102-01-batch-1-foundations-implementation-plan.md) 中的第一批底座任务。
 4. 每个后续任务均按“编码、质量审查、修复、再次质量审查直到通过”的循环推进，不跳过独立审查，不把阻断问题留给下一批。

@@ -121,18 +121,20 @@
 
 以下文件用于开发执行阶段，承接正式技术文档并转化为 Agent 可执行的规格、批次计划、门禁与验证闭环：
 
-1. [docs/superpowers/specs/2026-04-26-cmp-implementation-execution-spec.md](./superpowers/specs/2026-04-26-cmp-implementation-execution-spec.md)
-2. [docs/superpowers/plans/2026-04-26-batch-1-foundations-implementation-plan.md](./superpowers/plans/2026-04-26-batch-1-foundations-implementation-plan.md)
-3. [docs/superpowers/plans/2026-04-26-batch-2-core-chain-implementation-plan.md](./superpowers/plans/2026-04-26-batch-2-core-chain-implementation-plan.md)
-4. [docs/superpowers/plans/2026-04-26-batch-3-dependent-business-capabilities-implementation-plan.md](./superpowers/plans/2026-04-26-batch-3-dependent-business-capabilities-implementation-plan.md)
-5. [docs/superpowers/plans/2026-04-26-batch-4-intelligent-applications-implementation-plan.md](./superpowers/plans/2026-04-26-batch-4-intelligent-applications-implementation-plan.md)
-6. [docs/superpowers/plans/2026-04-26-batch-5-integration-acceptance-release-plan.md](./superpowers/plans/2026-04-26-batch-5-integration-acceptance-release-plan.md)
+1. [docs/superpowers/specs/102-cmp-implementation-execution-spec.md](./superpowers/specs/102-cmp-implementation-execution-spec.md)
+2. [docs/superpowers/plans/102-01-batch-1-foundations-implementation-plan.md](./superpowers/plans/102-01-batch-1-foundations-implementation-plan.md)
+3. [docs/superpowers/plans/102-02-batch-2-core-chain-implementation-plan.md](./superpowers/plans/102-02-batch-2-core-chain-implementation-plan.md)
+4. [docs/superpowers/plans/102-03-batch-3-dependent-business-capabilities-implementation-plan.md](./superpowers/plans/102-03-batch-3-dependent-business-capabilities-implementation-plan.md)
+5. [docs/superpowers/plans/102-04-batch-4-intelligent-applications-implementation-plan.md](./superpowers/plans/102-04-batch-4-intelligent-applications-implementation-plan.md)
+6. [docs/superpowers/plans/102-05-batch-5-integration-acceptance-release-plan.md](./superpowers/plans/102-05-batch-5-integration-acceptance-release-plan.md)
 
 ## 六、过程报告
 
 以下文件用于记录阶段性分析、复核、验收或专题判断，不替代正式技术链路：
 
 1. [查询引擎驱动薄运行内核与外围治理能力分析报告](./reports/Harness/%E6%9F%A5%E8%AF%A2%E5%BC%95%E6%93%8E%E9%A9%B1%E5%8A%A8%E8%96%84%E8%BF%90%E8%A1%8C%E5%86%85%E6%A0%B8%E4%B8%8E%E5%A4%96%E5%9B%B4%E6%B2%BB%E7%90%86%E8%83%BD%E5%8A%9B%E5%88%86%E6%9E%90%E6%8A%A5%E5%91%8A.md)
+2. [第一批跨主线联调实现验证报告](./reports/verification/102-09-batch1-cross-line-integration-implementation.md)
+3. [第一批底座主线质量审查与发布前门禁报告](./reports/qa/102-10-batch1-release-gate-qa.md)
 
 ## 七、上游来源材料
 
@@ -176,8 +178,8 @@
 4. [docs/technicals/detailed-design.md](./technicals/detailed-design.md)
 5. [docs/technicals/implementation-plan.md](./technicals/implementation-plan.md)
 6. 再进入所属底座主线 / 应用级模块的完整链路
-7. [docs/superpowers/specs/2026-04-26-cmp-implementation-execution-spec.md](./superpowers/specs/2026-04-26-cmp-implementation-execution-spec.md)
-8. 按当前批次读取对应 Superpowers 执行计划；第一批入口为 [docs/superpowers/plans/2026-04-26-batch-1-foundations-implementation-plan.md](./superpowers/plans/2026-04-26-batch-1-foundations-implementation-plan.md)
+7. [docs/superpowers/specs/102-cmp-implementation-execution-spec.md](./superpowers/specs/102-cmp-implementation-execution-spec.md)
+8. 按当前批次读取对应 Superpowers 执行计划；第一批入口为 [docs/superpowers/plans/102-01-batch-1-foundations-implementation-plan.md](./superpowers/plans/102-01-batch-1-foundations-implementation-plan.md)
 9. [docs/planning/current.md](./planning/current.md)
 10. [docs/planning/decisions.md](./planning/decisions.md)
 
@@ -245,13 +247,15 @@
 | planning 真相文件 | [docs/planning/current.md](./planning/current.md) | 当前批次真相 | 已存在 |
 | planning 真相文件 | [docs/planning/decisions.md](./planning/decisions.md) | 关键决策记录 | 已存在 |
 | planning 真相文件 | [docs/planning/history.md](./planning/history.md) | 历史批次归档 | 已存在 |
-| Superpowers 正式执行基准 | [docs/superpowers/specs/2026-04-26-cmp-implementation-execution-spec.md](./superpowers/specs/2026-04-26-cmp-implementation-execution-spec.md) | 实现阶段统一执行规格 | 已存在 |
-| Superpowers 正式执行基准 | [docs/superpowers/plans/2026-04-26-batch-1-foundations-implementation-plan.md](./superpowers/plans/2026-04-26-batch-1-foundations-implementation-plan.md) | 第一批底座主线执行计划 | 已存在 |
-| Superpowers 正式执行基准 | [docs/superpowers/plans/2026-04-26-batch-2-core-chain-implementation-plan.md](./superpowers/plans/2026-04-26-batch-2-core-chain-implementation-plan.md) | 第二批合同核心主链路执行计划 | 已存在 |
-| Superpowers 正式执行基准 | [docs/superpowers/plans/2026-04-26-batch-3-dependent-business-capabilities-implementation-plan.md](./superpowers/plans/2026-04-26-batch-3-dependent-business-capabilities-implementation-plan.md) | 第三批依赖型业务能力执行计划 | 已存在 |
-| Superpowers 正式执行基准 | [docs/superpowers/plans/2026-04-26-batch-4-intelligent-applications-implementation-plan.md](./superpowers/plans/2026-04-26-batch-4-intelligent-applications-implementation-plan.md) | 第四批智能与增强能力执行计划 | 已存在 |
-| Superpowers 正式执行基准 | [docs/superpowers/plans/2026-04-26-batch-5-integration-acceptance-release-plan.md](./superpowers/plans/2026-04-26-batch-5-integration-acceptance-release-plan.md) | 第五批联调验收与上线准备执行计划 | 已存在 |
+| Superpowers 正式执行基准 | [docs/superpowers/specs/102-cmp-implementation-execution-spec.md](./superpowers/specs/102-cmp-implementation-execution-spec.md) | 实现阶段统一执行规格 | 已存在 |
+| Superpowers 正式执行基准 | [docs/superpowers/plans/102-01-batch-1-foundations-implementation-plan.md](./superpowers/plans/102-01-batch-1-foundations-implementation-plan.md) | 第一批底座主线执行计划 | 已存在 |
+| Superpowers 正式执行基准 | [docs/superpowers/plans/102-02-batch-2-core-chain-implementation-plan.md](./superpowers/plans/102-02-batch-2-core-chain-implementation-plan.md) | 第二批合同核心主链路执行计划 | 已存在 |
+| Superpowers 正式执行基准 | [docs/superpowers/plans/102-03-batch-3-dependent-business-capabilities-implementation-plan.md](./superpowers/plans/102-03-batch-3-dependent-business-capabilities-implementation-plan.md) | 第三批依赖型业务能力执行计划 | 已存在 |
+| Superpowers 正式执行基准 | [docs/superpowers/plans/102-04-batch-4-intelligent-applications-implementation-plan.md](./superpowers/plans/102-04-batch-4-intelligent-applications-implementation-plan.md) | 第四批智能与增强能力执行计划 | 已存在 |
+| Superpowers 正式执行基准 | [docs/superpowers/plans/102-05-batch-5-integration-acceptance-release-plan.md](./superpowers/plans/102-05-batch-5-integration-acceptance-release-plan.md) | 第五批联调验收与上线准备执行计划 | 已存在 |
 | 过程报告 | [查询引擎驱动薄运行内核与外围治理能力分析报告](./reports/Harness/%E6%9F%A5%E8%AF%A2%E5%BC%95%E6%93%8E%E9%A9%B1%E5%8A%A8%E8%96%84%E8%BF%90%E8%A1%8C%E5%86%85%E6%A0%B8%E4%B8%8E%E5%A4%96%E5%9B%B4%E6%B2%BB%E7%90%86%E8%83%BD%E5%8A%9B%E5%88%86%E6%9E%90%E6%8A%A5%E5%91%8A.md) | 智能体操作系统查询引擎驱动薄运行内核与外围治理能力分析报告 | 已存在 |
+| 过程报告 | [第一批跨主线联调实现验证报告](./reports/verification/102-09-batch1-cross-line-integration-implementation.md) | 第一批底座三条主线最小跨主线联调验证报告 | 已存在 |
+| 过程报告 | [第一批底座主线质量审查与发布前门禁报告](./reports/qa/102-10-batch1-release-gate-qa.md) | 第一批底座三条主线质量审查与发布前门禁报告 | 已存在 |
 | 上游来源材料 | [docs/specifications/湖南星邦智能装备股份有限公司合同管理平台招标技术要求.pdf](./specifications/%E6%B9%96%E5%8D%97%E6%98%9F%E9%82%A6%E6%99%BA%E8%83%BD%E8%A3%85%E5%A4%87%E8%82%A1%E4%BB%BD%E6%9C%89%E9%99%90%E5%85%AC%E5%8F%B8%E5%90%88%E5%90%8C%E7%AE%A1%E7%90%86%E5%B9%B3%E5%8F%B0%E6%8B%9B%E6%A0%87%E6%8A%80%E6%9C%AF%E8%A6%81%E6%B1%82.pdf) | 正式上游来源材料 | 已存在 |
 
 ## 十、维护规则

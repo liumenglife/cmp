@@ -1,6 +1,8 @@
 spring:
   application:
     name: cmp-backend
+  flyway:
+    locations: classpath:db/migration/{vendor}
 
 server:
   port: 8080
@@ -14,3 +16,13 @@ management:
     health:
       probes:
         enabled: true
+
+---
+spring:
+  config:
+    activate:
+      on-profile: local
+  datasource:
+    url: jdbc:mysql://mysql:3306/cmp?useUnicode=true&characterEncoding=utf8&connectionTimeZone=UTC
+    username: cmp
+    password: cmp_dev_password

@@ -36,7 +36,7 @@
 - [`docs/planning/current.md`](../../planning/current.md)
 - [`docs/planning/decisions.md`](../../planning/decisions.md)
 - [`docs/technicals/implementation-batch-plan.md`](../../technicals/implementation-batch-plan.md)
-- [`第二批合同核心主链路成型计划`](./2026-04-26-batch-2-core-chain-implementation-plan.md)
+- [`第二批合同核心主链路成型计划`](./102-02-batch-2-core-chain-implementation-plan.md)
 
 ### 2.2 `e-signature` 输入
 

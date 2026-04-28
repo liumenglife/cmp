@@ -1,0 +1,157 @@
+create table ao_agent_task (
+    task_id varchar(80) primary key,
+    task_type varchar(64) not null,
+    task_source varchar(64) not null,
+    requester_type varchar(64) not null,
+    requester_id varchar(80) not null,
+    persona_code varchar(80),
+    general_persona_code varchar(80) not null,
+    task_status varchar(40) not null,
+    business_module varchar(80),
+    object_type varchar(80),
+    object_id varchar(120),
+    current_run_id varchar(80),
+    final_result_id varchar(80),
+    idempotency_key varchar(160),
+    payload_fingerprint varchar(512),
+    trace_id varchar(120) not null,
+    created_at timestamp not null,
+    updated_at timestamp not null
+);
+
+create unique index uk_ao_task_idempotency on ao_agent_task(task_source, requester_id, idempotency_key);
+create index idx_ao_task_trace on ao_agent_task(trace_id);
+
+create table ao_agent_run (
+    run_id varchar(80) primary key,
+    task_id varchar(80) not null,
+    parent_run_id varchar(80),
+    session_id varchar(80) not null,
+    agent_code varchar(80) not null,
+    general_persona_code varchar(80) not null,
+    persona_code varchar(80),
+    run_status varchar(40) not null,
+    runtime_state varchar(80) not null,
+    loop_count integer not null,
+    latest_prompt_snapshot_id varchar(80),
+    latest_checkpoint_summary clob,
+    failure_code varchar(80),
+    failure_reason varchar(512),
+    trace_id varchar(120) not null,
+    started_at timestamp not null,
+    finished_at timestamp,
+    created_at timestamp not null,
+    updated_at timestamp not null,
+    version_no integer not null default 1
+);
+
+create unique index uk_ao_run_session on ao_agent_run(session_id);
+create index idx_ao_run_task on ao_agent_run(task_id, created_at);
+
+create table ao_agent_result (
+    result_id varchar(80) primary key,
+    task_id varchar(80) not null,
+    run_id varchar(80) not null,
+    result_status varchar(40) not null,
+    result_type varchar(64) not null,
+    output_text_summary clob,
+    output_payload_json clob,
+    citation_payload_json clob,
+    human_confirmation_required boolean not null,
+    writeback_status varchar(40) not null,
+    provider_result_digest varchar(256),
+    created_at timestamp not null,
+    updated_at timestamp not null
+);
+
+create index idx_ao_result_task on ao_agent_result(task_id, created_at);
+create index idx_ao_result_run on ao_agent_result(run_id, created_at);
+
+create table ao_environment_event (
+    event_id varchar(80) primary key,
+    event_type varchar(80) not null,
+    event_source varchar(120) not null,
+    severity varchar(40) not null,
+    related_task_id varchar(80),
+    related_run_id varchar(80),
+    event_payload_json clob not null,
+    event_fingerprint varchar(512) not null,
+    processing_status varchar(40) not null,
+    derived_task_id varchar(80),
+    idempotency_key varchar(160),
+    payload_fingerprint varchar(512),
+    trace_id varchar(120) not null,
+    created_at timestamp not null,
+    updated_at timestamp not null
+);
+
+create unique index uk_ao_env_idempotency on ao_environment_event(event_source, idempotency_key);
+create index idx_ao_env_task on ao_environment_event(related_task_id, created_at);
+
+create table ao_prompt_snapshot (
+    prompt_snapshot_id varchar(80) primary key,
+    run_id varchar(80) not null,
+    snapshot_no integer not null,
+    general_persona_code varchar(80) not null,
+    persona_code varchar(80),
+    platform_root_version varchar(80) not null,
+    runtime_framework_version varchar(80) not null,
+    general_persona_version varchar(80) not null,
+    persona_patch_version varchar(80),
+    dynamic_injection_digest varchar(256) not null,
+    dynamic_injection_summary clob not null,
+    trimmed_reason_summary varchar(512),
+    context_token_estimate integer not null,
+    prompt_body_ref varchar(256) not null,
+    assembly_policy_version varchar(80) not null,
+    trimming_policy_version varchar(80) not null,
+    budget_policy_version varchar(80) not null,
+    cache_prefix_policy_version varchar(80) not null,
+    created_at timestamp not null
+);
+
+create unique index uk_ao_prompt_run_snapshot on ao_prompt_snapshot(run_id, snapshot_no);
+
+create table ao_tool_invocation (
+    tool_invocation_id varchar(80) primary key,
+    run_id varchar(80) not null,
+    prompt_snapshot_id varchar(80) not null,
+    tool_type varchar(40) not null,
+    tool_name varchar(120) not null,
+    provider_code varchar(80),
+    invocation_status varchar(40) not null,
+    input_digest varchar(256) not null,
+    output_digest varchar(256),
+    output_artifact_ref varchar(256),
+    output_truncated_reason varchar(256),
+    latency_ms integer not null,
+    token_in integer not null,
+    token_out integer not null,
+    error_code varchar(80),
+    error_message_summary varchar(512),
+    retry_no integer not null,
+    created_at timestamp not null,
+    updated_at timestamp not null
+);
+
+create index idx_ao_tool_run on ao_tool_invocation(run_id, created_at);
+
+create table ao_agent_audit_event (
+    audit_event_id varchar(80) primary key,
+    object_type varchar(80) not null,
+    object_id varchar(80) not null,
+    parent_object_type varchar(80),
+    parent_object_id varchar(80),
+    action_type varchar(80) not null,
+    action_summary varchar(512) not null,
+    actor_type varchar(40) not null,
+    actor_id varchar(80) not null,
+    result_status varchar(40) not null,
+    trace_id varchar(120) not null,
+    risk_level varchar(40) not null,
+    payload_digest varchar(256),
+    occurred_at timestamp not null
+);
+
+create index idx_ao_audit_object on ao_agent_audit_event(object_type, object_id, occurred_at);
+create index idx_ao_audit_trace on ao_agent_audit_event(trace_id);

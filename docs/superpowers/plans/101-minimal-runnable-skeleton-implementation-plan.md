@@ -15,8 +15,8 @@
 ### 1.1 必读输入
 
 - `docs/superpowers/specs/101-minimal-runnable-skeleton-design.md`
-- `docs/superpowers/specs/2026-04-26-cmp-implementation-execution-spec.md`
-- `docs/superpowers/plans/2026-04-26-batch-1-foundations-implementation-plan.md`
+- `docs/superpowers/specs/102-cmp-implementation-execution-spec.md`
+- `docs/superpowers/plans/102-01-batch-1-foundations-implementation-plan.md`
 
 ### 1.2 范围边界
 
@@ -904,8 +904,8 @@ git commit -m "feat: add repository verification scripts"
 
 **Files:**
 - Read: `docs/superpowers/specs/101-minimal-runnable-skeleton-design.md`
-- Read: `docs/superpowers/specs/2026-04-26-cmp-implementation-execution-spec.md`
-- Read: `docs/superpowers/plans/2026-04-26-batch-1-foundations-implementation-plan.md`
+- Read: `docs/superpowers/specs/102-cmp-implementation-execution-spec.md`
+- Read: `docs/superpowers/plans/102-01-batch-1-foundations-implementation-plan.md`
 - Verify: `backend/**`
 - Verify: `frontend/**`
 - Verify: `docker-compose.yml`

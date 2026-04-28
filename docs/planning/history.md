@@ -48,3 +48,55 @@
 
 - 上述批次不再写入 `current.md`。
 - 如需恢复文档阶段背景，只读取本节；当前执行状态以 `current.md` 的编码阶段任务清单为准。
+
+## 2026-04-27 最小可运行工程骨架批次归档
+
+### 归档原因
+
+- `101` 最小可运行工程骨架已经完成、推送 PR 并合并到 `main`。
+- 当前开发主线切换到 `102` 第一批底座主线实现，`current.md` 只保留当前批次真相。
+
+### 已归档任务批次
+
+- [✓] 后端最小工程与健康检查：已按测试驱动开发完成，独立质量审查修复后通过，提交 `6a56fe5`。
+- [✓] 前端最小工程与渲染测试：已按测试驱动开发完成，独立质量审查修复后通过，提交 `e8142fe`。
+- [✓] 本地编排与容器健康验证：已按测试驱动开发完成，独立质量审查修复后通过，提交 `f61e391`。
+- [✓] 仓库级验证脚本：已按测试驱动开发完成，独立质量审查通过，提交 `4baf1f0`。
+- [✓] 范围边界与最终质量验收：独立最终质量验收通过，`scripts/verify-all.sh` 通过。
+
+### 迁移说明
+
+- `101` 批次不再写入 `current.md`。
+- 如需恢复最小工程骨架背景，读取 [`101-minimal-runnable-skeleton-design.md`](../superpowers/specs/101-minimal-runnable-skeleton-design.md) 与 [`101-minimal-runnable-skeleton-implementation-plan.md`](../superpowers/plans/101-minimal-runnable-skeleton-implementation-plan.md)。
+
+## 2026-04-28 第一批底座主线实现批次归档
+
+### 归档原因
+
+- 第一批底座主线已经完成全部实现、跨主线联调、独立 QA 与发布前门禁。
+- `current.md` 只保留当前批次真相，第一批完成长列表迁入本文件作为恢复锚点。
+- 后续主线切换到第二批合同核心主链路启动前规划核对，编码必须基于新的隔离工作区和分支推进。
+
+### 已归档任务批次
+
+- [✓] 第一批启动门禁核对：正式输入、范围边界、环境条件与验收样例已核对，报告为 [`102-01-batch1-startup-gate-check.md`](../reports/verification/102-01-batch1-startup-gate-check.md)。
+- [✓] `identity-access` 统一主体与身份协议治理：已按 TDD 完成，经历独立 QA、修复与复审，提交 `5c1322a`，验证报告为 [`102-02-identity-access-subject-protocol-implementation.md`](../reports/verification/102-02-identity-access-subject-protocol-implementation.md)。
+- [✓] `identity-access` 组织、角色、权限与数据权限：已按 TDD 完成，经历独立 QA、修复与复审，提交 `0b865ce`，验证报告为 [`102-03-identity-access-org-role-permission-implementation.md`](../reports/verification/102-03-identity-access-org-role-permission-implementation.md)。
+- [✓] `identity-access` 统一授权判定与解密下载授权：已按 TDD 完成，经历独立 QA、修复与复审，提交 `9454df9`，验证报告为 [`102-04-identity-access-authorization-decrypt-implementation.md`](../reports/verification/102-04-identity-access-authorization-decrypt-implementation.md)。
+- [✓] `agent-os` 最小 `QueryEngine / Harness Kernel`：已按 TDD 完成，经历独立 QA、修复与复审，提交 `35b1eba`，验证报告为 [`102-05-agent-os-query-engine-kernel-implementation.md`](../reports/verification/102-05-agent-os-query-engine-kernel-implementation.md)。
+- [✓] `agent-os` 工具契约、沙箱与治理挂点：已按 TDD 完成，经历独立 QA、修复与复审，提交 `84adcdb`，验证报告为 [`102-06-agent-os-tool-sandbox-governance-implementation.md`](../reports/verification/102-06-agent-os-tool-sandbox-governance-implementation.md)。
+- [✓] `integration-hub` 统一接入与适配基础：已按 TDD 完成，经历独立 QA、修复与复审，提交 `5efb748`；风险处理提交为 `f4432ac`，验证报告为 [`102-07-integration-hub-access-adapter-implementation.md`](../reports/verification/102-07-integration-hub-access-adapter-implementation.md)。
+- [✓] `integration-hub` 入站、出站、回调、补偿与对账：已按 TDD 完成，经历首次 QA、多轮修复与第五次 QA 复核，提交 `c61e0ad`，验证报告为 [`102-08-integration-hub-flow-compensation-reconciliation-implementation.md`](../reports/verification/102-08-integration-hub-flow-compensation-reconciliation-implementation.md)。
+- [✓] 第一批跨主线联调：已按 TDD 完成，经历独立 QA、修复与复审，提交 `c867d03`，验证报告为 [`102-09-batch1-cross-line-integration-implementation.md`](../reports/verification/102-09-batch1-cross-line-integration-implementation.md)。
+- [✓] 第一批质量审查与发布前门禁：独立 QA 结论为通过，没有问题，提交 `b529fc2`，报告为 [`102-10-batch1-release-gate-qa.md`](../reports/qa/102-10-batch1-release-gate-qa.md)。
+
+### 已知风险处置
+
+- [✓] `integration-hub` 第七项第二次 QA 报告中的生产级签名与密钥托管、可配置重放窗口、`request_digest` 业务等价边界不回阻已全绿任务。
+- [✓] 真实外部 SDK、生产密钥托管、证书链校验和密钥轮换服务后续作为安全生产化专项处理，不夹带进第八项。
+- [✓] 第八项已复核 `request_digest` 的业务字段等价规则，继续排除 `trace_id` 等追踪元数据，避免合法重试误判为幂等冲突。
+
+### 迁移说明
+
+- 第一批底座主线不再写入 `current.md`。
+- 如需恢复第一批执行背景，读取 [`102-01-batch-1-foundations-implementation-plan.md`](../superpowers/plans/102-01-batch-1-foundations-implementation-plan.md)、各验证报告与发布前门禁报告。

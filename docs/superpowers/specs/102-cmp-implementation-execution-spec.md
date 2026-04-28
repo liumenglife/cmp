@@ -18,7 +18,7 @@
 ### 2.2 实现设计依据
 
 - 总平台正式实施入口：[`docs/technicals/implementation-plan.md`](../../technicals/implementation-plan.md)
-- 第一批底座主线正式计划：[`docs/superpowers/plans/2026-04-26-batch-1-foundations-implementation-plan.md`](../plans/2026-04-26-batch-1-foundations-implementation-plan.md)
+- 第一批底座主线正式计划：[`docs/superpowers/plans/102-01-batch-1-foundations-implementation-plan.md`](../plans/102-01-batch-1-foundations-implementation-plan.md)
 - 第一批三条主线的 `Architecture Design`、`API Design`、`Detailed Design`、`Implementation Plan` 及其 `special-designs/` 目录。
 
 ### 2.3 第一批主线基准
