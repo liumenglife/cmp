@@ -23,7 +23,7 @@ mvn -Dtest=Batch2CoreChainEndToEndTests test
 关键失败证据：
 
 ```text
-Failures: 
+Failures:
   Batch2CoreChainEndToEndTests.runsMinimumContractDocumentApprovalDetailChainWithBusinessSamples:72 No value at JSON path "$.approval_summary.process_version_id"
 ```
 
@@ -42,7 +42,7 @@ mvn -Dtest=Batch2CoreChainEndToEndTests test
 关键失败证据：
 
 ```text
-Failures: 
+Failures:
   Batch2CoreChainEndToEndTests.closesKeyExceptionLoopsForDocumentApprovalCallbackWritebackAndOrganizationResolution:115 Status expected:<503> but was:<201>
   Batch2CoreChainEndToEndTests.runsMinimumContractDocumentApprovalDetailChainWithBusinessSamples:72 No value at JSON path "$.approval_summary.process_version_id"
 ```
