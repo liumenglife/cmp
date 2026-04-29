@@ -1,5 +1,6 @@
 package com.cmp.platform.corechain;
 
+import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -91,6 +92,30 @@ class CoreChainController {
     @GetMapping("/api/document-center/events")
     Map<String, Object> documentCenterEvents(@RequestParam(required = false) String consumer_scope) {
         return service.documentCenterEvents(consumer_scope);
+    }
+
+    @PostMapping("/api/intelligent-applications/ocr/jobs")
+    ResponseEntity<Map<String, Object>> createOcrJob(@RequestHeader(value = "X-CMP-Permissions", required = false) String permissions,
+                                                      @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+                                                      @RequestBody Map<String, Object> request) {
+        return service.createOcrJob(permissions, idempotencyKey, request);
+    }
+
+    @GetMapping("/api/intelligent-applications/ocr/jobs/{ocrJobId}")
+    Map<String, Object> ocrJob(@PathVariable String ocrJobId) {
+        return service.ocrJob(ocrJobId);
+    }
+
+    @GetMapping("/api/intelligent-applications/ocr/results/{resultId}")
+    Map<String, Object> ocrResult(@PathVariable String resultId) {
+        return service.ocrResult(resultId);
+    }
+
+    @GetMapping("/api/intelligent-applications/ocr/results")
+    Map<String, Object> ocrResults(@RequestParam(required = false) String document_asset_id,
+                                   @RequestParam(required = false) String document_version_id,
+                                   @RequestParam(required = false, defaultValue = "false") boolean default_only) {
+        return service.ocrResults(document_asset_id, document_version_id, default_only);
     }
 
     @GetMapping("/api/document-center/assets")
@@ -420,6 +445,12 @@ class CoreChainService {
     private final Map<String, List<Map<String, Object>>> contractClassificationChains = new ConcurrentHashMap<>();
     private final Map<String, Map<String, Object>> contractSemanticReferenceRefs = new ConcurrentHashMap<>();
     private final List<Map<String, Object>> documentConsumerEvents = new ArrayList<>();
+    private final Map<String, OcrJobState> ocrJobs = new ConcurrentHashMap<>();
+    private final Map<String, String> ocrJobByIdempotency = new ConcurrentHashMap<>();
+    private final Map<String, OcrResultState> ocrResults = new ConcurrentHashMap<>();
+    private final Map<String, String> currentOcrResultByDocumentVersion = new ConcurrentHashMap<>();
+    private final Map<String, List<Map<String, Object>>> ocrAuditEvents = new ConcurrentHashMap<>();
+    private final Map<String, List<Map<String, Object>>> ocrRetryFacts = new ConcurrentHashMap<>();
     private final List<Map<String, Object>> lifecycleTimelineEvents = new ArrayList<>();
     private final List<Map<String, Object>> lifecycleAuditEvents = new ArrayList<>();
     private final JdbcTemplate jdbcTemplate;
@@ -509,6 +540,7 @@ class CoreChainService {
         DocumentAssetState updated = new DocumentAssetState(asset.documentAssetId(), versionId, asset.ownerType(), asset.ownerId(), asset.documentRole(), asset.documentTitle(),
                 asset.documentStatus(), "PENDING", asset.previewStatus(), versionNo, copyEvents(asset.auditRecords()));
         updated.auditRecords().add(event("DOCUMENT_VERSION_APPENDED", versionId, text(request, "trace_id", null)));
+        supersedeOcrResultsForVersionSwitch(asset, versionId, text(request, "trace_id", null));
         documentAssets.put(documentAssetId, updated);
         refreshContractDocumentRef(updated, text(request, "trace_id", null));
         acceptEncryptionCheckIn(documentAssetId, versionId, "NEW_VERSION", request, false);
@@ -554,6 +586,9 @@ class CoreChainService {
     Map<String, Object> activateDocumentVersion(String documentVersionId, Map<String, Object> request) {
         DocumentVersionState version = requireDocumentVersion(documentVersionId);
         DocumentAssetState asset = requireDocumentAsset(version.documentAssetId());
+        if (!documentVersionId.equals(asset.currentVersionId())) {
+            supersedeOcrResultsForVersionSwitch(asset, documentVersionId, text(request, "trace_id", null));
+        }
         DocumentAssetState updated = new DocumentAssetState(asset.documentAssetId(), documentVersionId, asset.ownerType(), asset.ownerId(), asset.documentRole(), asset.documentTitle(),
                 asset.documentStatus(), asset.encryptionStatus(), asset.previewStatus(), asset.latestVersionNo(), copyEvents(asset.auditRecords()));
         updated.auditRecords().add(event("DOCUMENT_VERSION_ACTIVATED", documentVersionId, text(request, "trace_id", null)));
@@ -612,11 +647,164 @@ class CoreChainService {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("subscription_entry", Map.of(
                 "consumer_scope", scope,
-                "subscribed_event_types", List.of("DOCUMENT_VERSION_APPENDED", "DOCUMENT_VERSION_ACTIVATED"),
+                "subscribed_event_types", List.of("DOCUMENT_VERSION_APPENDED", "DOCUMENT_VERSION_ACTIVATED", "OCR_RESULT_READY", "OCR_RESULT_SUPERSEDED", "OCR_REBUILD_REQUESTED", "IA_SEARCH_REINDEX_REQUESTED"),
                 "subscription_status", "ACTIVE"));
         body.put("items", documentConsumerEvents.stream().map(event -> (Map<String, Object>) event).toList());
         body.put("total", documentConsumerEvents.size());
         return body;
+    }
+
+    ResponseEntity<Map<String, Object>> createOcrJob(String permissions, String idempotencyHeader, Map<String, Object> request) {
+        if (permissions == null || !permissions.contains("CONTRACT_VIEW") || !permissions.contains("OCR_CREATE")) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(error("OCR_INPUT_PERMISSION_DENIED", "缺少 OCR 创建或文档查看权限"));
+        }
+        OcrInput input = resolveOcrInput(request);
+        String jobPurpose = text(request, "job_purpose", "TEXT_EXTRACTION");
+        String idempotencyKey = text(request, "idempotency_key", idempotencyHeader == null ? "ocr-default-idem" : idempotencyHeader);
+        String idempotencyFingerprint = input.documentVersion().documentVersionId() + "|" + jobPurpose + "|" + idempotencyKey;
+        String existingJobId = ocrJobByIdempotency.get(idempotencyFingerprint);
+        if (existingJobId != null) {
+            Map<String, Object> replay = ocrJobBody(requireOcrJob(existingJobId), true);
+            return ResponseEntity.ok(replay);
+        }
+
+        String jobId = "ocr-job-" + UUID.randomUUID();
+        String traceId = text(request, "trace_id", "trace-" + UUID.randomUUID());
+        String actorId = text(request, "actor_id", "system");
+        String contentFingerprint = contentFingerprint(input.documentVersion());
+        int maxAttempts = intValue(request, "max_attempt_no", 3);
+        String platformJobId = createPlatformJob("IA_OCR_RECOGNITION", "intelligent-applications", "intelligent-applications",
+                "OCR_JOB", jobId, "CONTRACT", input.asset().ownerId(), traceId, "ia-ocr-runner");
+        OcrJobState accepted = new OcrJobState(jobId, input.asset().ownerId(), input.asset().documentAssetId(), input.documentVersion().documentVersionId(),
+                contentFingerprint, jobPurpose, "ACCEPTED", json(Map.of("language_hints", listStrings(request.get("language_hints")))), "OCR_BASELINE",
+                "OCR_BASELINE_TEXT", 0, maxAttempts, null, null, null, idempotencyKey, traceId, actorId, platformJobId, Instant.now().toString(), Instant.now().toString());
+        ocrJobs.put(jobId, accepted);
+        ocrJobByIdempotency.put(idempotencyFingerprint, jobId);
+        persistOcrJob(accepted);
+        appendOcrAudit(accepted, null, "OCR_JOB_CREATED", "ACCEPTED", null);
+
+        OcrJobState completed = executeOcrJob(accepted, request);
+        HttpStatus status = existingJobId == null ? HttpStatus.CREATED : HttpStatus.OK;
+        return ResponseEntity.status(status).body(ocrJobBody(completed, false));
+    }
+
+    Map<String, Object> ocrJob(String ocrJobId) {
+        return ocrJobBody(requireOcrJob(ocrJobId), false);
+    }
+
+    Map<String, Object> ocrResult(String resultId) {
+        return ocrResultBody(requireOcrResult(resultId));
+    }
+
+    Map<String, Object> ocrResults(String documentAssetId, String documentVersionId, boolean defaultOnly) {
+        List<Map<String, Object>> items = ocrResults.values().stream()
+                .filter(result -> documentAssetId == null || documentAssetId.equals(result.documentAssetId()))
+                .filter(result -> documentVersionId == null || documentVersionId.equals(result.documentVersionId()))
+                .filter(result -> !defaultOnly || result.defaultConsumable())
+                .map(this::ocrResultBody)
+                .toList();
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("items", items);
+        body.put("total", items.size());
+        return body;
+    }
+
+    private OcrJobState executeOcrJob(OcrJobState job, Map<String, Object> request) {
+        int simulatedFailures = intValue(request, "simulate_engine_failure_count", 0);
+        List<Map<String, Object>> retries = new ArrayList<>();
+        for (int attempt = 1; attempt <= Math.min(simulatedFailures, job.maxAttemptNo()); attempt++) {
+            Map<String, Object> retry = appendOcrRetry(job, attempt, "ENGINE_TEMPORARY_UNAVAILABLE", "OCR 引擎临时不可用", true);
+            retries.add(retry);
+            appendOcrAudit(job, null, "OCR_ENGINE_RETRY", "RETRYING", "OCR 引擎临时不可用");
+        }
+        int attemptNo = Math.min(simulatedFailures + 1, job.maxAttemptNo());
+        if (simulatedFailures >= job.maxAttemptNo() || bool(request, "simulate_engine_permanent_failure", false)) {
+            String resultId = "ocr-result-" + UUID.randomUUID();
+            OcrResultState failed = failedOcrResult(job, resultId);
+            ocrResults.put(resultId, failed);
+            persistOcrResult(failed);
+            OcrJobState updated = updateOcrJob(job, "FAILED", attemptNo, resultId, "ENGINE_FAILED", "OCR 引擎失败达到上限");
+            appendOcrAudit(updated, failed, "OCR_RESULT_FAILED", "FAILED", "OCR 引擎失败达到上限");
+            return updated;
+        }
+
+        OcrEngineAdapter adapter = new BaselineOcrEngineAdapter();
+        OcrResultState result = adapter.recognize(job, requireContract(job.contractId()).contractName(), bool(request, "simulate_partial_result", false));
+        ocrResults.put(result.ocrResultAggregateId(), result);
+        currentOcrResultByDocumentVersion.put(result.documentVersionId(), result.ocrResultAggregateId());
+        persistOcrResult(result);
+        persistOcrResultParts(result);
+        OcrJobState updated = updateOcrJob(job, "SUCCEEDED", attemptNo, result.ocrResultAggregateId(), null, null);
+        appendOcrAudit(updated, result, "OCR_RESULT_" + result.resultStatus(), result.resultStatus(), null);
+        appendDocumentConsumerEvent("OCR_RESULT_" + result.resultStatus(), requireDocumentAsset(result.documentAssetId()), result.documentVersionId(), job.traceId());
+        appendDocumentConsumerEvent("IA_SEARCH_REINDEX_REQUESTED", requireDocumentAsset(result.documentAssetId()), result.documentVersionId(), job.traceId());
+        createPlatformJob("IA_SEARCH_REINDEX", "intelligent-applications", "intelligent-applications", "OCR_RESULT", result.ocrResultAggregateId(), "CONTRACT", result.contractId(), job.traceId(), "ia-search-reindex-runner");
+        return updated;
+    }
+
+    private OcrInput resolveOcrInput(Map<String, Object> request) {
+        String documentVersionId = text(request, "document_version_id", null);
+        String documentAssetId = text(request, "document_asset_id", null);
+        if (documentVersionId == null && documentAssetId == null) {
+            throw new IllegalArgumentException("document_asset_id 或 document_version_id 必须提供一个");
+        }
+        if (documentVersionId == null) {
+            DocumentAssetState asset = requireDocumentAsset(documentAssetId);
+            documentVersionId = asset.currentVersionId();
+        }
+        DocumentVersionState version = requireDocumentVersion(documentVersionId);
+        DocumentAssetState asset = requireDocumentAsset(version.documentAssetId());
+        if (documentAssetId != null && !documentAssetId.equals(asset.documentAssetId())) {
+            throw new IllegalArgumentException("document_asset_id 与 document_version_id 不匹配");
+        }
+        if (!"ACTIVE".equals(documentVersionBody(version).get("version_status"))) {
+            throw new IllegalArgumentException("仅允许基于当前受控版本创建 OCR 作业");
+        }
+        return new OcrInput(asset, version);
+    }
+
+    private OcrJobState updateOcrJob(OcrJobState job, String status, int attemptNo, String resultId, String failureCode, String failureReason) {
+        OcrJobState updated = new OcrJobState(job.ocrJobId(), job.contractId(), job.documentAssetId(), job.documentVersionId(), job.inputContentFingerprint(),
+                job.jobPurpose(), status, job.languageHintJson(), job.qualityProfileCode(), job.engineRouteCode(), attemptNo, job.maxAttemptNo(), resultId,
+                failureCode, failureReason, job.idempotencyKey(), job.traceId(), job.actorId(), job.platformJobId(), job.createdAt(), Instant.now().toString());
+        ocrJobs.put(updated.ocrJobId(), updated);
+        jdbcTemplate.update("""
+                update ia_ocr_job
+                set job_status = ?, current_attempt_no = ?, result_aggregate_id = ?, failure_code = ?, failure_reason = ?, updated_at = ?
+                where ocr_job_id = ?
+                """, status, attemptNo, resultId, failureCode, failureReason, Timestamp.from(Instant.now()), job.ocrJobId());
+        return updated;
+    }
+
+    private OcrResultState failedOcrResult(OcrJobState job, String resultId) {
+        return new OcrResultState(resultId, job.ocrJobId(), job.contractId(), job.documentAssetId(), job.documentVersionId(), "FAILED", "ocr-result-v1",
+                job.qualityProfileCode(), "ocr://text/" + resultId, List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), List.of(), 0.0,
+                job.inputContentFingerprint(), null, false, Instant.now().toString(), Instant.now().toString());
+    }
+
+    private void supersedeOcrResultsForVersionSwitch(DocumentAssetState oldAsset, String newDocumentVersionId, String traceId) {
+        List<OcrResultState> resultsToSupersede = ocrResults.values().stream()
+                .filter(result -> oldAsset.documentAssetId().equals(result.documentAssetId()))
+                .filter(OcrResultState::defaultConsumable)
+                .filter(result -> "READY".equals(result.resultStatus()) || "PARTIAL".equals(result.resultStatus()))
+                .toList();
+        for (OcrResultState result : resultsToSupersede) {
+            OcrResultState superseded = new OcrResultState(result.ocrResultAggregateId(), result.ocrJobId(), result.contractId(), result.documentAssetId(), result.documentVersionId(),
+                    "SUPERSEDED", result.resultSchemaVersion(), result.qualityProfileCode(), result.fullTextRef(), result.textLayer(), result.layoutBlocks(),
+                    result.tableRegions(), result.sealRegions(), result.fieldCandidates(), result.languageSegments(), result.pageSummary(), result.qualityScore(),
+                    result.contentFingerprint(), null, false, result.createdAt(), Instant.now().toString());
+            ocrResults.put(superseded.ocrResultAggregateId(), superseded);
+            currentOcrResultByDocumentVersion.remove(superseded.documentVersionId());
+            jdbcTemplate.update("""
+                    update ia_ocr_result_aggregate
+                    set result_status = 'SUPERSEDED', default_consumable = false, updated_at = ?
+                    where ocr_result_aggregate_id = ?
+                    """, Timestamp.from(Instant.now()), superseded.ocrResultAggregateId());
+            appendOcrAudit(requireOcrJob(superseded.ocrJobId()), superseded, "OCR_RESULT_SUPERSEDED", "SUPERSEDED", null);
+            appendDocumentConsumerEvent("OCR_RESULT_SUPERSEDED", oldAsset, superseded.documentVersionId(), traceId);
+        }
+        appendDocumentConsumerEvent("OCR_REBUILD_REQUESTED", oldAsset, newDocumentVersionId, traceId);
+        createPlatformJob("IA_OCR_REBUILD", "document-center", "intelligent-applications", "DOCUMENT_VERSION", newDocumentVersionId, "CONTRACT", oldAsset.ownerId(), traceId, "ia-ocr-rebuild-runner");
     }
 
     Map<String, Object> createProcessDefinition(Map<String, Object> request) {
@@ -3205,7 +3393,16 @@ class CoreChainService {
         binding.put("binding_code", bindingCode);
         binding.put("document_asset_id", asset.documentAssetId());
         binding.put("document_version_id", asset.currentVersionId());
-        binding.put("binding_status", "READY");
+        String resultId = "OCR".equals(capabilityCode) ? currentOcrResultByDocumentVersion.get(asset.currentVersionId()) : null;
+        binding.put("binding_status", "OCR".equals(capabilityCode) && resultId == null ? "PENDING" : "READY");
+        if (resultId != null) {
+            OcrResultState result = requireOcrResult(resultId);
+            binding.put("result_aggregate_id", result.ocrResultAggregateId());
+            binding.put("result_status", result.resultStatus());
+            binding.put("quality_profile_code", result.qualityProfileCode());
+            binding.put("quality_score", result.qualityScore());
+            binding.put("compensation_status", "BOUND");
+        }
         binding.put("source_of_truth", "document-center");
         return binding;
     }
@@ -3223,6 +3420,213 @@ class CoreChainService {
         event.put("trace_id", traceId);
         event.put("occurred_at", Instant.now().toString());
         documentConsumerEvents.add(event);
+    }
+
+    private Map<String, Object> ocrJobBody(OcrJobState job, boolean replayed) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("ocr_job_id", job.ocrJobId());
+        body.put("contract_id", job.contractId());
+        body.put("document_asset_id", job.documentAssetId());
+        body.put("document_version_id", job.documentVersionId());
+        body.put("input_content_fingerprint", job.inputContentFingerprint());
+        body.put("job_purpose", job.jobPurpose());
+        body.put("job_status", job.jobStatus());
+        body.put("quality_profile_code", job.qualityProfileCode());
+        body.put("engine_route", Map.of("engine_route_code", job.engineRouteCode(), "engine_profile_code", "GENERAL_TEXT", "capability_tags", List.of("TEXT", "LAYOUT", "TABLE", "SEAL", "FIELD", "LANGUAGE")));
+        body.put("current_attempt_no", job.currentAttemptNo());
+        body.put("max_attempt_no", job.maxAttemptNo());
+        body.put("ocr_result_aggregate_id", job.resultAggregateId());
+        body.put("failure_code", job.failureCode());
+        body.put("failure_reason", job.failureReason());
+        body.put("idempotency_replayed", replayed);
+        body.put("task_center_ref", Map.of("platform_job_id", job.platformJobId(), "job_type", "IA_OCR_RECOGNITION", "job_status", "PENDING"));
+        if (job.resultAggregateId() != null) {
+            body.put("result", ocrResultBody(requireOcrResult(job.resultAggregateId())));
+        }
+        body.put("retry_facts", ocrRetryFacts.getOrDefault(job.ocrJobId(), List.of()));
+        body.put("audit_events", ocrAuditEvents.getOrDefault(job.ocrJobId(), List.of()));
+        body.put("trace_id", job.traceId());
+        return body;
+    }
+
+    private Map<String, Object> ocrResultBody(OcrResultState result) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("ocr_result_aggregate_id", result.ocrResultAggregateId());
+        body.put("ocr_job_id", result.ocrJobId());
+        body.put("contract_id", result.contractId());
+        body.put("document_asset_id", result.documentAssetId());
+        body.put("document_version_id", result.documentVersionId());
+        body.put("result_status", result.resultStatus());
+        body.put("result_schema_version", result.resultSchemaVersion());
+        body.put("quality_profile_code", result.qualityProfileCode());
+        body.put("full_text_ref", result.fullTextRef());
+        body.put("text_layer", Map.of("pages", result.textLayer()));
+        body.put("layout_blocks", result.layoutBlocks());
+        body.put("table_regions", result.tableRegions());
+        body.put("seal_regions", result.sealRegions());
+        body.put("field_candidates", result.fieldCandidates());
+        body.put("language_segments", result.languageSegments());
+        body.put("page_summary", result.pageSummary());
+        body.put("quality_score", result.qualityScore());
+        body.put("content_fingerprint", result.contentFingerprint());
+        body.put("superseded_by_result_id", result.supersededByResultId());
+        body.put("default_consumable", result.defaultConsumable());
+        return body;
+    }
+
+    private void persistOcrJob(OcrJobState job) {
+        Instant now = Instant.now();
+        jdbcTemplate.update("""
+                insert into ia_ocr_job
+                (ocr_job_id, contract_id, document_asset_id, document_version_id, input_content_fingerprint, job_purpose, job_status,
+                 language_hint_json, quality_profile_code, engine_route_code, current_attempt_no, max_attempt_no, result_aggregate_id,
+                 failure_code, failure_reason, idempotency_key, trace_id, created_at, updated_at)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, job.ocrJobId(), job.contractId(), job.documentAssetId(), job.documentVersionId(), job.inputContentFingerprint(), job.jobPurpose(),
+                job.jobStatus(), job.languageHintJson(), job.qualityProfileCode(), job.engineRouteCode(), job.currentAttemptNo(), job.maxAttemptNo(),
+                job.resultAggregateId(), job.failureCode(), job.failureReason(), job.idempotencyKey(), job.traceId(), Timestamp.from(now), Timestamp.from(now));
+    }
+
+    private void persistOcrResult(OcrResultState result) {
+        Instant now = Instant.now();
+        jdbcTemplate.update("""
+                insert into ia_ocr_result_aggregate
+                (ocr_result_aggregate_id, ocr_job_id, contract_id, document_asset_id, document_version_id, result_status, result_schema_version,
+                 quality_profile_code, full_text_ref, page_summary_json, layout_block_ref, field_candidate_ref, language_segment_ref,
+                 table_payload_ref, seal_payload_ref, citation_payload_ref, quality_score, content_fingerprint, superseded_by_result_id,
+                 default_consumable, created_at, updated_at)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, result.ocrResultAggregateId(), result.ocrJobId(), result.contractId(), result.documentAssetId(), result.documentVersionId(), result.resultStatus(),
+                result.resultSchemaVersion(), result.qualityProfileCode(), result.fullTextRef(), json(result.pageSummary()), "ocr://layout/" + result.ocrResultAggregateId(),
+                "ocr://fields/" + result.ocrResultAggregateId(), "ocr://language/" + result.ocrResultAggregateId(), "ocr://tables/" + result.ocrResultAggregateId(),
+                "ocr://seals/" + result.ocrResultAggregateId(), "ocr://citations/" + result.ocrResultAggregateId(), result.qualityScore(), result.contentFingerprint(),
+                result.supersededByResultId(), result.defaultConsumable(), Timestamp.from(now), Timestamp.from(now));
+    }
+
+    private void persistOcrResultParts(OcrResultState result) {
+        for (Map<String, Object> page : result.textLayer()) {
+            jdbcTemplate.update("""
+                    insert into ia_ocr_text_layer
+                    (text_layer_id, ocr_result_aggregate_id, page_no, text_content, bbox_json, confidence_score, language_code, source_engine_code)
+                    values (?, ?, ?, ?, ?, ?, ?, ?)
+                    """, text(page, "text_layer_id", "ocr-text-" + UUID.randomUUID()), result.ocrResultAggregateId(), intValue(page, "page_no", 1),
+                    text(page, "text", ""), json(page.get("bbox")), doubleValue(page, "confidence_score", 0.95), text(page, "language_code", "zh-CN"), text(page, "source_engine_code", "OCR_BASELINE"));
+        }
+        for (Map<String, Object> block : result.layoutBlocks()) {
+            jdbcTemplate.update("""
+                    insert into ia_ocr_layout_block
+                    (layout_block_id, ocr_result_aggregate_id, page_no, block_type, text_excerpt, bbox_json, reading_order, confidence_score, parent_block_id, source_engine_code)
+                    values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, text(block, "layout_block_id", "ocr-layout-" + UUID.randomUUID()), result.ocrResultAggregateId(), intValue(block, "page_no", 1),
+                    text(block, "block_type", "PARAGRAPH"), text(block, "text_excerpt", null), json(block.get("bbox")), intValue(block, "reading_order", 1),
+                    doubleValue(block, "confidence_score", 0.94), text(block, "parent_block_id", null), text(block, "source_engine_code", "OCR_BASELINE"));
+        }
+        for (Map<String, Object> table : result.tableRegions()) {
+            jdbcTemplate.update("""
+                    insert into ia_ocr_table_region
+                    (table_region_id, ocr_result_aggregate_id, page_no, bbox_json, row_count, column_count, cell_list_json, header_candidate_list_json, table_confidence_score)
+                    values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, text(table, "table_region_id", "ocr-table-" + UUID.randomUUID()), result.ocrResultAggregateId(), intValue(table, "page_no", 1),
+                    json(table.get("bbox")), intValue(table, "row_count", 1), intValue(table, "column_count", 1), json(table.get("cell_list")),
+                    json(table.get("header_candidate_list")), doubleValue(table, "table_confidence_score", 0.92));
+        }
+        for (Map<String, Object> seal : result.sealRegions()) {
+            jdbcTemplate.update("""
+                    insert into ia_ocr_seal_region
+                    (seal_region_id, ocr_result_aggregate_id, page_no, bbox_json, seal_text_candidate, seal_shape, color_hint, overlap_signature_flag, confidence_score)
+                    values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, text(seal, "seal_region_id", "ocr-seal-" + UUID.randomUUID()), result.ocrResultAggregateId(), intValue(seal, "page_no", 1),
+                    json(seal.get("bbox")), text(seal, "seal_text_candidate", null), text(seal, "seal_shape", "UNKNOWN"), text(seal, "color_hint", null),
+                    bool(seal, "overlap_signature_flag", false), doubleValue(seal, "confidence_score", 0.9));
+        }
+        for (Map<String, Object> field : result.fieldCandidates()) {
+            jdbcTemplate.update("""
+                    insert into ia_ocr_field_candidate
+                    (field_candidate_id, ocr_result_aggregate_id, field_type, candidate_value, normalized_value, source_layout_block_id, page_no,
+                     bbox_json, confidence_score, quality_profile_code, field_threshold_code, evidence_text, candidate_status)
+                    values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, text(field, "field_candidate_id", "ocr-field-" + UUID.randomUUID()), result.ocrResultAggregateId(), text(field, "field_type", "CONTRACT_NO"),
+                    text(field, "candidate_value", ""), text(field, "normalized_value", null), text(field, "source_layout_block_id", null), intValue(field, "page_no", 1),
+                    json(field.get("bbox")), doubleValue(field, "confidence_score", 0.9), result.qualityProfileCode(), text(field, "field_threshold_code", "contract_no_min_field_confidence_score"),
+                    text(field, "evidence_text", null), text(field, "candidate_status", "CANDIDATE"));
+        }
+        for (Map<String, Object> segment : result.languageSegments()) {
+            jdbcTemplate.update("""
+                    insert into ia_ocr_language_segment
+                    (language_segment_id, ocr_result_aggregate_id, page_no, layout_block_id, language_code, text_range_json, bbox_json, confidence_score, normalization_profile_code)
+                    values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """, text(segment, "language_segment_id", "ocr-lang-" + UUID.randomUUID()), result.ocrResultAggregateId(), intValue(segment, "page_no", 1),
+                    text(segment, "layout_block_id", null), text(segment, "language_code", "zh-CN"), json(segment.get("text_range")), json(segment.get("bbox")),
+                    doubleValue(segment, "confidence_score", 0.96), text(segment, "normalization_profile_code", "I18N_BASELINE"));
+        }
+    }
+
+    private Map<String, Object> appendOcrRetry(OcrJobState job, int attemptNo, String failureCode, String failureReason, boolean retryable) {
+        String retryFactId = "ocr-retry-" + UUID.randomUUID();
+        Map<String, Object> fact = new LinkedHashMap<>();
+        fact.put("retry_fact_id", retryFactId);
+        fact.put("ocr_job_id", job.ocrJobId());
+        fact.put("attempt_no", attemptNo);
+        fact.put("failure_code", failureCode);
+        fact.put("failure_reason", failureReason);
+        fact.put("retryable", retryable);
+        fact.put("trace_id", job.traceId());
+        fact.put("created_at", Instant.now().toString());
+        ocrRetryFacts.computeIfAbsent(job.ocrJobId(), ignored -> new ArrayList<>()).add(fact);
+        jdbcTemplate.update("""
+                insert into ia_ocr_retry_fact
+                (retry_fact_id, ocr_job_id, attempt_no, failure_code, failure_reason, retryable, next_retry_after, trace_id, created_at)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, retryFactId, job.ocrJobId(), attemptNo, failureCode, failureReason, retryable, Timestamp.from(Instant.now().plusSeconds(30L * attemptNo)), job.traceId(), Timestamp.from(Instant.now()));
+        return fact;
+    }
+
+    private Map<String, Object> appendOcrAudit(OcrJobState job, OcrResultState result, String actionType, String resultStatus, String failureReason) {
+        String auditId = "ocr-audit-" + UUID.randomUUID();
+        String resultId = result == null ? job.resultAggregateId() : result.ocrResultAggregateId();
+        Map<String, Object> audit = new LinkedHashMap<>();
+        audit.put("audit_event_id", auditId);
+        audit.put("ocr_job_id", job.ocrJobId());
+        audit.put("ocr_result_aggregate_id", resultId);
+        audit.put("contract_id", job.contractId());
+        audit.put("document_asset_id", job.documentAssetId());
+        audit.put("document_version_id", job.documentVersionId());
+        audit.put("content_fingerprint", job.inputContentFingerprint());
+        audit.put("actor_id", job.actorId());
+        audit.put("trace_id", job.traceId());
+        audit.put("action_type", actionType);
+        audit.put("result_status", resultStatus);
+        audit.put("failure_reason", failureReason);
+        audit.put("occurred_at", Instant.now().toString());
+        ocrAuditEvents.computeIfAbsent(job.ocrJobId(), ignored -> new ArrayList<>()).add(audit);
+        requireDocumentAsset(job.documentAssetId()).auditRecords().add(new LinkedHashMap<>(audit));
+        jdbcTemplate.update("""
+                insert into ia_ocr_audit_event
+                (audit_event_id, ocr_job_id, ocr_result_aggregate_id, contract_id, document_asset_id, document_version_id,
+                 content_fingerprint, actor_id, trace_id, action_type, result_status, failure_reason, occurred_at)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, auditId, job.ocrJobId(), resultId, job.contractId(), job.documentAssetId(), job.documentVersionId(), job.inputContentFingerprint(),
+                job.actorId(), job.traceId(), actionType, resultStatus, failureReason, Timestamp.from(Instant.now()));
+        return audit;
+    }
+
+    private String createPlatformJob(String jobType, String sourceModule, String consumerModule, String resourceType, String resourceId,
+                                     String businessObjectType, String businessObjectId, String traceId, String runnerCode) {
+        String platformJobId = "platform-job-" + UUID.randomUUID();
+        Instant now = Instant.now();
+        jdbcTemplate.update("""
+                insert into platform_job
+                (platform_job_id, job_type, job_status, source_module, consumer_module, resource_type, resource_id,
+                 business_object_type, business_object_id, priority, attempt_no, max_attempts, runner_code, trace_id, created_at, updated_at)
+                values (?, ?, 'PENDING', ?, ?, ?, ?, ?, ?, 50, 0, 3, ?, ?, ?, ?)
+                """, platformJobId, jobType, sourceModule, consumerModule, resourceType, resourceId, businessObjectType, businessObjectId,
+                runnerCode, traceId, Timestamp.from(now), Timestamp.from(now));
+        return platformJobId;
+    }
+
+    private String contentFingerprint(DocumentVersionState version) {
+        String seed = version.documentVersionId() + ":" + version.fileUploadToken() + ":" + version.versionNo();
+        return "sha256:" + Integer.toHexString(seed.hashCode());
     }
 
     private Map<String, Object> ledgerBody(ContractState contract) {
@@ -3717,6 +4121,22 @@ class CoreChainService {
         return version;
     }
 
+    private OcrJobState requireOcrJob(String ocrJobId) {
+        OcrJobState job = ocrJobs.get(ocrJobId);
+        if (job == null) {
+            throw new IllegalArgumentException("ocr_job_id 不存在: " + ocrJobId);
+        }
+        return job;
+    }
+
+    private OcrResultState requireOcrResult(String resultId) {
+        OcrResultState result = ocrResults.get(resultId);
+        if (result == null) {
+            throw new IllegalArgumentException("ocr_result_aggregate_id 不存在: " + resultId);
+        }
+        return result;
+    }
+
     private void refreshContractDocumentRef(DocumentAssetState asset, String traceId) {
         if (!"CONTRACT".equals(asset.ownerType())) {
             return;
@@ -3858,6 +4278,11 @@ class CoreChainService {
         return value == null ? defaultValue : Integer.parseInt(value.toString());
     }
 
+    private double doubleValue(Map<String, Object> request, String field, double defaultValue) {
+        Object value = request.get(field);
+        return value == null ? defaultValue : Double.parseDouble(value.toString());
+    }
+
     private String text(Map<String, Object> request, String field, String defaultValue) {
         Object value = request.get(field);
         return value == null || value.toString().isBlank() ? defaultValue : value.toString();
@@ -3872,6 +4297,130 @@ class CoreChainService {
         } catch (JsonProcessingException exception) {
             throw new IllegalArgumentException("生命周期摘要无法序列化", exception);
         }
+    }
+
+    private String json(Object value) {
+        if (value == null) {
+            return "{}";
+        }
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (JsonProcessingException exception) {
+            throw new IllegalArgumentException("对象无法序列化", exception);
+        }
+    }
+
+    private interface OcrEngineAdapter {
+        OcrResultState recognize(OcrJobState job, String contractName, boolean partialResult);
+    }
+
+    private static class BaselineOcrEngineAdapter implements OcrEngineAdapter {
+        @Override
+        public OcrResultState recognize(OcrJobState job, String contractName, boolean partialResult) {
+            String resultId = "ocr-result-" + UUID.randomUUID();
+            String layoutBlockId = "ocr-layout-" + UUID.randomUUID();
+            Map<String, Object> bbox = bbox(0, 0, 900, 120);
+            Map<String, Object> page = new LinkedHashMap<>();
+            page.put("text_layer_id", "ocr-text-" + UUID.randomUUID());
+            page.put("page_no", 1);
+            page.put("text", contractName + " 示例识别文本");
+            page.put("bbox", bbox);
+            page.put("confidence_score", partialResult ? 0.72 : 0.96);
+            page.put("language_code", "zh-CN");
+            page.put("source_engine_code", "OCR_BASELINE");
+
+            Map<String, Object> block = new LinkedHashMap<>();
+            block.put("layout_block_id", layoutBlockId);
+            block.put("page_no", 1);
+            block.put("block_type", "PARAGRAPH");
+            block.put("text_excerpt", contractName + " 示例识别文本");
+            block.put("bbox", bbox);
+            block.put("reading_order", 1);
+            block.put("confidence_score", partialResult ? 0.72 : 0.94);
+            block.put("source_engine_code", "OCR_BASELINE");
+
+            Map<String, Object> table = new LinkedHashMap<>();
+            table.put("table_region_id", "ocr-table-" + UUID.randomUUID());
+            table.put("page_no", 1);
+            table.put("bbox", bbox(0, 160, 600, 260));
+            table.put("row_count", 1);
+            table.put("column_count", 2);
+            table.put("cell_list", List.of(Map.of("row", 1, "column", 1, "text", "合同编号", "confidence_score", 0.93)));
+            table.put("header_candidate_list", List.of("合同编号"));
+            table.put("table_confidence_score", partialResult ? 0.7 : 0.92);
+
+            Map<String, Object> seal = new LinkedHashMap<>();
+            seal.put("seal_region_id", "ocr-seal-" + UUID.randomUUID());
+            seal.put("page_no", 1);
+            seal.put("bbox", bbox(650, 700, 220, 220));
+            seal.put("seal_text_candidate", "合同专用章");
+            seal.put("seal_shape", "ROUND");
+            seal.put("color_hint", "RED");
+            seal.put("overlap_signature_flag", false);
+            seal.put("confidence_score", partialResult ? 0.68 : 0.91);
+
+            Map<String, Object> field = new LinkedHashMap<>();
+            field.put("field_candidate_id", "ocr-field-" + UUID.randomUUID());
+            field.put("field_type", "CONTRACT_NO");
+            field.put("candidate_value", "CMP-OCR-001");
+            field.put("normalized_value", "CMP-OCR-001");
+            field.put("source_layout_block_id", layoutBlockId);
+            field.put("page_no", 1);
+            field.put("bbox", bbox(120, 20, 200, 30));
+            field.put("confidence_score", partialResult ? 0.67 : 0.9);
+            field.put("field_threshold_code", "contract_no_min_field_confidence_score");
+            field.put("evidence_text", "合同编号 CMP-OCR-001");
+            field.put("candidate_status", partialResult ? "LOW_CONFIDENCE" : "CANDIDATE");
+
+            Map<String, Object> segment = new LinkedHashMap<>();
+            segment.put("language_segment_id", "ocr-lang-" + UUID.randomUUID());
+            segment.put("page_no", 1);
+            segment.put("layout_block_id", layoutBlockId);
+            segment.put("language_code", "zh-CN");
+            segment.put("text_range", Map.of("start", 0, "end", contractName.length()));
+            segment.put("bbox", bbox);
+            segment.put("confidence_score", 0.96);
+            segment.put("normalization_profile_code", "I18N_BASELINE");
+
+            List<Map<String, Object>> pageSummary = List.of(Map.of("page_no", 1, "page_width", 1000, "page_height", 1400, "rotation", 0, "quality", partialResult ? "LOW" : "GOOD"));
+            String status = partialResult ? "PARTIAL" : "READY";
+            double qualityScore = partialResult ? 0.71 : 0.96;
+            return new OcrResultState(resultId, job.ocrJobId(), job.contractId(), job.documentAssetId(), job.documentVersionId(), status,
+                    "ocr-result-v1", job.qualityProfileCode(), "ocr://text/" + resultId, List.of(page), List.of(block), List.of(table), List.of(seal),
+                    List.of(field), List.of(segment), pageSummary, qualityScore, job.inputContentFingerprint(), null, true, Instant.now().toString(), Instant.now().toString());
+        }
+
+        private static Map<String, Object> bbox(int x, int y, int width, int height) {
+            Map<String, Object> bbox = new LinkedHashMap<>();
+            bbox.put("x", x);
+            bbox.put("y", y);
+            bbox.put("width", width);
+            bbox.put("height", height);
+            bbox.put("unit", "PIXEL");
+            bbox.put("page_width", 1000);
+            bbox.put("page_height", 1400);
+            bbox.put("rotation", 0);
+            return bbox;
+        }
+    }
+
+    private record OcrInput(DocumentAssetState asset, DocumentVersionState documentVersion) {
+    }
+
+    private record OcrJobState(String ocrJobId, String contractId, String documentAssetId, String documentVersionId,
+                               String inputContentFingerprint, String jobPurpose, String jobStatus, String languageHintJson,
+                               String qualityProfileCode, String engineRouteCode, int currentAttemptNo, int maxAttemptNo,
+                               String resultAggregateId, String failureCode, String failureReason, String idempotencyKey,
+                               String traceId, String actorId, String platformJobId, String createdAt, String updatedAt) {
+    }
+
+    private record OcrResultState(String ocrResultAggregateId, String ocrJobId, String contractId, String documentAssetId,
+                                  String documentVersionId, String resultStatus, String resultSchemaVersion, String qualityProfileCode,
+                                  String fullTextRef, List<Map<String, Object>> textLayer, List<Map<String, Object>> layoutBlocks,
+                                  List<Map<String, Object>> tableRegions, List<Map<String, Object>> sealRegions,
+                                  List<Map<String, Object>> fieldCandidates, List<Map<String, Object>> languageSegments,
+                                  List<Map<String, Object>> pageSummary, double qualityScore, String contentFingerprint,
+                                  String supersededByResultId, boolean defaultConsumable, String createdAt, String updatedAt) {
     }
 
     private record ContractState(String contractId, String contractNo, String contractName, String contractStatus,

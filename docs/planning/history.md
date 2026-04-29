@@ -279,3 +279,23 @@
 
 - 第四批启动门禁不再作为未完成任务处理。
 - 第四批下一功能点为“文字识别稳定输入闭环”，继续以 [`102-04-batch-4-intelligent-applications-implementation-plan.md`](../superpowers/plans/102-04-batch-4-intelligent-applications-implementation-plan.md) 为执行依据。
+
+## 2026-04-29 第四批文字识别稳定输入闭环阶段性归档
+
+### 归档原因
+
+- 第四批文字识别稳定输入闭环已经完成实现、修复、独立质量审查复审与完整验证。
+- `current.md` 继续维护第四批后续功能点推进状态，本节记录已经全绿的文字识别完成事实。
+
+### 已归档任务批次
+
+- [✓] 文字识别稳定输入闭环：已按测试驱动开发完成，支持基于文档中心受控版本创建作业、固化文档版本和内容指纹、输入权限校验、幂等、引擎适配边界、失败重试、结果归一、`READY` / `PARTIAL` / `FAILED` / `SUPERSEDED` 状态、版本切换失效、审计、文档中心能力挂接补偿和搜索补索引事件。
+- [✓] 文字识别首次质量审查：结论为不通过，问题为 `PARTIAL` 与 `FAILED` 结果状态缺少测试驱动证据。
+- [✓] 文字识别问题修复：已补齐低质量 `PARTIAL` 状态与最终失败 `FAILED` 状态测试证据，未修改生产代码。
+- [✓] 文字识别复审：独立质量审查结论为通过，没问题。
+- [✓] 文字识别完整验证：修复后 `./scripts/verify-all.sh` 通过，后端 139 个测试通过，前端检查、测试、构建通过，容器健康检查通过并完成清理。
+
+### 迁移说明
+
+- 第四批文字识别稳定输入闭环不再作为未完成任务处理。
+- 第四批下一功能点为“全文检索与索引重建”，继续以 [`102-04-batch-4-intelligent-applications-implementation-plan.md`](../superpowers/plans/102-04-batch-4-intelligent-applications-implementation-plan.md) 为执行依据。

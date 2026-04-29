@@ -25,7 +25,7 @@
 
 ## 当前阶段
 
-- 阶段：第四批启动门禁核验与缺口修复已完成，独立质量审查通过，准备进入文字识别稳定输入闭环。
+- 阶段：第四批文字识别稳定输入闭环已完成，独立质量审查复审通过，准备进入全文检索与索引重建。
 - 分支：`feature/batch4-intelligent-enhancement-capabilities`。
 - 隔离工作区：`.worktrees/feature/batch4-intelligent-enhancement-capabilities`。
 - 规格：[`102-cmp-implementation-execution-spec.md`](../superpowers/specs/102-cmp-implementation-execution-spec.md)。
@@ -35,7 +35,7 @@
 
 - [✓] 第四批工作树与分支创建。
 - [✓] 第四批启动门禁核验与基线验证：基线验证通过；六项上游可消费性缺口已按测试驱动开发修复，独立质量审查结论为通过，没问题。
-- [ ] 文字识别稳定输入闭环。
+- [✓] 文字识别稳定输入闭环：已通过独立质量审查复审，没问题。
 - [ ] 全文检索与索引重建。
 - [ ] 智能辅助应用与输出护栏。
 - [ ] 智能推荐、候选排序与质量评估。
@@ -64,6 +64,8 @@
 - [✓] 第四批启动门禁初次核验不通过，报告为 [`102-19-batch4-startup-gate-baseline-verification.md`](../reports/verification/102-19-batch4-startup-gate-baseline-verification.md)。
 - [✓] 第四批启动门禁六项上游可消费性缺口已完成修复，独立质量审查结论为通过，没问题。
 - [✓] 修复后完整验证已通过：`./scripts/verify-all.sh`，后端 134 个测试通过，前端检查、测试、构建通过，容器健康检查通过并完成清理。
+- [✓] 文字识别稳定输入闭环已完成实现、问题修复与独立质量审查复审，结论为通过，没问题。
+- [✓] 文字识别稳定输入闭环完整验证已通过：`./scripts/verify-all.sh`，后端 139 个测试通过，前端检查、测试、构建通过，容器健康检查通过并完成清理。
 
 ## 已完成里程碑
 
@@ -84,7 +86,7 @@
 
 ## 下一步唯一动作
 
-- 在 `.worktrees/feature/batch4-intelligent-enhancement-capabilities` 派发实现子代理，按测试驱动开发推进文字识别稳定输入闭环。
+- 在 `.worktrees/feature/batch4-intelligent-enhancement-capabilities` 派发实现子代理，按测试驱动开发推进全文检索与索引重建。
 
 ## 恢复提示
 
