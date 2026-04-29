@@ -1214,6 +1214,16 @@ class CoreChainService {
         String documentVersionId = text(request, "document_version_id", null);
         DocumentAssetState asset = requireDocumentAsset(documentAssetId);
         EncryptionSecurityBindingState binding = requireEncryptionBindingByDocumentAsset(documentAssetId);
+        ContractState contract = requireContract(asset.ownerId());
+        if ("TERMINATED".equals(contract.contractStatus()) || "ARCHIVED".equals(contract.contractStatus())) {
+            Map<String, Object> audit = encryptionAudit("DOWNLOAD_EXPORT_DENIED", "REJECTED", binding.securityBindingId(), documentAssetId, documentVersionId,
+                    asset.ownerId(), "USER", text(request, "requested_by", null), text(request, "requested_department_id", null), null, text(request, "trace_id", null));
+            asset.auditRecords().add(audit);
+            Map<String, Object> body = error("CONTRACT_ARCHIVED_CONTROLLED_ACCESS_RESTRICTED", "合同终止或归档后不允许普通明文导出");
+            body.put("contract_status", contract.contractStatus());
+            body.put("audit_event", audit);
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(body);
+        }
         if (!"ENCRYPTED".equals(binding.encryptionStatus()) || !documentVersionId.equals(binding.currentVersionId())) {
             Map<String, Object> body = error("DOWNLOAD_DOCUMENT_NOT_READY", "文档未处于可授权下载状态");
             return ResponseEntity.status(HttpStatus.CONFLICT).body(body);
@@ -2075,7 +2085,15 @@ class CoreChainService {
         body.put("owner_user_id", node.ownerUserId());
         body.put("owner_org_unit_id", node.ownerOrgUnitId());
         body.put("document_ref", node.documentRef());
+        body.put("task_center_ref", taskCenterRef("task-center-" + node.performanceNodeId(), "COMPLETED".equals(node.nodeStatus()) ? "COMPLETED" : "PUBLISHED"));
         return body;
+    }
+
+    private Map<String, Object> taskCenterRef(String taskCenterTaskId, String status) {
+        Map<String, Object> ref = new LinkedHashMap<>();
+        ref.put("task_center_task_id", taskCenterTaskId);
+        ref.put("task_center_status", status);
+        return ref;
     }
 
     private Map<String, Object> performanceDocumentRef(String contractId, String nodeId, Map<String, Object> request) {
@@ -2251,6 +2269,7 @@ class CoreChainService {
         ref.put("workflow_instance_id", workflowInstanceId);
         ref.put("process_purpose", processPurpose);
         ref.put("process_status_snapshot", status);
+        ref.put("task_center_ref", taskCenterRef("task-center-" + workflowInstanceId, "PUBLISHED"));
         return ref;
     }
 

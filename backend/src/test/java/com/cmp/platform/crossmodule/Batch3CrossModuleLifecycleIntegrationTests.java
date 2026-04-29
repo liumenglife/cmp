@@ -42,7 +42,20 @@ class Batch3CrossModuleLifecycleIntegrationTests {
                 .andExpect(jsonPath("$.approval_instance_master_copy").doesNotExist())
                 .andReturn().getResponse().getContentAsString();
         String signatureRequestId = jsonString(signatureRequest, "signature_request_id");
-        String sessionId = createSignatureSession(signatureRequestId, "trace-xm-sign-session");
+        String signatureSession = createSignatureSession(signatureRequestId, "trace-xm-sign-session");
+        String sessionId = jsonString(signatureSession, "signature_session_id");
+        assertThat(signatureSession).contains("task_center_ref");
+        assertThat(signatureSession).contains("task_center_task_id");
+        String approvalProcess = startApprovalTaskCenterFlow(contractId, "trace-xm-task-master");
+        String approvalProcessId = jsonString(approvalProcess, "process_id");
+        mockMvc.perform(get("/api/approval-engine/tasks")
+                        .param("process_id", approvalProcessId)
+                        .param("task_status", "PENDING_ACTION"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].task_center_ref.task_center_task_id").exists())
+                .andExpect(jsonPath("$.items[0].resolver_snapshot.resolved_assignee_list").exists())
+                .andExpect(jsonPath("$.items[0].task_center_ref.resolver_snapshot").doesNotExist())
+                .andExpect(jsonPath("$.items[0].task_center_ref.candidate_list").doesNotExist());
         sign(sessionId, "u-signer-a", 1, "trace-xm-sign-a");
         sign(sessionId, "u-signer-b", 2, "trace-xm-sign-b");
 
@@ -97,6 +110,9 @@ class Batch3CrossModuleLifecycleIntegrationTests {
                                 {"performance_record_id":"%s","node_type":"DELIVERY","node_name":"跨模块交付节点","milestone_code":"DELIVERY_ACCEPTED","trace_id":"trace-xm-performance-node"}
                                 """.formatted(performanceRecordId)))
                 .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.task_center_ref.task_center_task_id").exists())
+                .andExpect(jsonPath("$.task_center_ref.node_name").doesNotExist())
+                .andExpect(jsonPath("$.task_center_ref.owner_user_id").doesNotExist())
                 .andReturn().getResponse().getContentAsString(), "performance_node_id");
         mockMvc.perform(patch("/api/contracts/{contract_id}/performance-nodes/{node_id}", contractId, nodeId)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -113,6 +129,8 @@ class Batch3CrossModuleLifecycleIntegrationTests {
                                 {"change_type":"AMOUNT","change_reason":"跨模块变更","change_summary":"金额调整","effective_date":"2026-06-01","supplemental_document_asset_id":"%s","supplemental_document_version_id":"%s","workflow_instance_id":"wf-xm-change","operator_user_id":"u-change","trace_id":"trace-xm-change-apply"}
                                 """.formatted(jsonString(changeDocument, "document_asset_id"), jsonString(changeDocument, "document_version_id"))))
                 .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.process_ref.task_center_ref.task_center_task_id").exists())
+                .andExpect(jsonPath("$.process_ref.task_center_ref.process_purpose").doesNotExist())
                 .andReturn().getResponse().getContentAsString();
         mockMvc.perform(post("/api/contracts/{contract_id}/changes/{change_id}/approval-results", contractId, jsonString(change, "change_id"))
                         .contentType(MediaType.APPLICATION_JSON)
@@ -128,6 +146,8 @@ class Batch3CrossModuleLifecycleIntegrationTests {
                                 {"termination_type":"MUTUAL_AGREEMENT","termination_reason":"跨模块终止","termination_summary":"结算后归档","requested_termination_date":"2026-07-01","settlement_summary":"尾款结清","material_document_asset_id":"%s","material_document_version_id":"%s","workflow_instance_id":"wf-xm-term","operator_user_id":"u-term","trace_id":"trace-xm-term-apply"}
                                 """.formatted(jsonString(terminationDocument, "document_asset_id"), jsonString(terminationDocument, "document_version_id"))))
                 .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.process_ref.task_center_ref.task_center_task_id").exists())
+                .andExpect(jsonPath("$.process_ref.task_center_ref.process_purpose").doesNotExist())
                 .andReturn().getResponse().getContentAsString();
         mockMvc.perform(post("/api/contracts/{contract_id}/terminations/{termination_id}/approval-results", contractId, jsonString(termination, "termination_id"))
                         .contentType(MediaType.APPLICATION_JSON)
@@ -177,6 +197,17 @@ class Batch3CrossModuleLifecycleIntegrationTests {
                                 """.formatted(approved.documentAssetId(), approved.documentVersionId())))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.error_code").value("CONTRACT_ARCHIVED_CONTROLLED_ACCESS_RESTRICTED"));
+        mockMvc.perform(post("/api/encrypted-documents/download-jobs")
+                        .header("X-CMP-Permissions", "CONTRACT_VIEW")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"document_asset_id":"%s","document_version_id":"%s","requested_by":"u-download","requested_department_id":"dept-cross","download_reason":"归档后不应允许普通明文导出","request_idempotency_key":"trace-xm-download-after-archive","trace_id":"trace-xm-download-after-archive"}
+                                """.formatted(approved.documentAssetId(), approved.documentVersionId())))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error_code").value("CONTRACT_ARCHIVED_CONTROLLED_ACCESS_RESTRICTED"))
+                .andExpect(jsonPath("$.contract_status").value("ARCHIVED"))
+                .andExpect(jsonPath("$.audit_event.event_type").value("DOWNLOAD_EXPORT_DENIED"))
+                .andExpect(jsonPath("$.audit_event.trace_id").value("trace-xm-download-after-archive"));
 
         mockMvc.perform(get("/api/contracts/{contract_id}", contractId))
                 .andExpect(status().isOk())
@@ -202,7 +233,8 @@ class Batch3CrossModuleLifecycleIntegrationTests {
                         .param("contract_id", contractId))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.items[?(@.event_type == 'DECRYPT_ACCESS_CONSUMED')]").isNotEmpty())
-                .andExpect(jsonPath("$.items[?(@.event_type == 'DOWNLOAD_READY')]").isNotEmpty());
+                .andExpect(jsonPath("$.items[?(@.event_type == 'DOWNLOAD_READY')]").isNotEmpty())
+                .andExpect(jsonPath("$.items[?(@.event_type == 'DOWNLOAD_EXPORT_DENIED' && @.trace_id == 'trace-xm-download-after-archive')]").isNotEmpty());
     }
 
     private ApprovedContract createApprovedContract(String contractName, String tracePrefix) throws Exception {
@@ -243,14 +275,42 @@ class Batch3CrossModuleLifecycleIntegrationTests {
     }
 
     private String createSignatureSession(String signatureRequestId, String traceId) throws Exception {
-        String session = mockMvc.perform(post("/api/signature-requests/{signature_request_id}/sessions", signatureRequestId)
+        return mockMvc.perform(post("/api/signature-requests/{signature_request_id}/sessions", signatureRequestId)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
                                 {"sign_order_mode":"SEQUENTIAL","signer_list":[{"signer_type":"USER","signer_id":"u-signer-a"},{"signer_type":"USER","signer_id":"u-signer-b"}],"trace_id":"%s"}
                                 """.formatted(traceId)))
                 .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.task_center_items[0].task_center_task_id").exists())
+                .andExpect(jsonPath("$.assignment_list[0].task_center_ref.task_center_task_id").exists())
+                .andExpect(jsonPath("$.task_center_items[0].signer_snapshot").doesNotExist())
                 .andReturn().getResponse().getContentAsString();
-        return jsonString(session, "signature_session_id");
+    }
+
+    private String startApprovalTaskCenterFlow(String contractId, String tracePrefix) throws Exception {
+        String definition = mockMvc.perform(post("/api/approval-engine/process-definitions")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"process_code":"XM_TASK_MASTER_%s","process_name":"跨模块任务主真相审批","business_type":"CONTRACT","approval_mode":"CMP","operator_user_id":"u-workflow-admin","organization_binding_required":true,"definition_payload":{"nodes":[{"node_key":"review","node_name":"跨模块审批","node_type":"APPROVAL","participant_mode":"SINGLE","bindings":[{"binding_type":"USER","binding_object_id":"u-task-approver","binding_object_name":"任务审批人"}]}]}}
+                                """.formatted(tracePrefix)))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        String definitionId = jsonString(definition, "definition_id");
+        String published = mockMvc.perform(post("/api/approval-engine/process-definitions/{definition_id}/publish", definitionId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"version_note":"跨模块任务引用断言","operator_user_id":"u-workflow-admin","trace_id":"%s-publish"}
+                                """.formatted(tracePrefix)))
+                .andExpect(status().isOk())
+                .andReturn().getResponse().getContentAsString();
+        return mockMvc.perform(post("/api/approval-engine/processes")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"contract_id":"%s","version_id":"%s","approval_mode":"CMP","starter_user_id":"u-cross-owner","business_context":{"business_title":"跨模块任务引用断言"},"trace_id":"%s-start"}
+                                """.formatted(contractId, jsonString(published, "version_id"), tracePrefix)))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.task_center_items[0].task_center_ref.task_center_task_id").exists())
+                .andReturn().getResponse().getContentAsString();
     }
 
     private void sign(String sessionId, String signerId, int sequence, String traceId) throws Exception {
