@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -208,8 +209,104 @@ class CoreChainController {
 
     @PostMapping("/api/contracts/{contractId}/paper-signature-records")
     ResponseEntity<Map<String, Object>> createPaperSignatureRecord(@PathVariable String contractId,
-                                                                   @RequestBody Map<String, Object> request) {
+                                                                    @RequestBody Map<String, Object> request) {
         return service.createPaperSignatureRecord(contractId, request);
+    }
+
+    @PostMapping("/api/encrypted-documents/check-ins")
+    ResponseEntity<Map<String, Object>> acceptEncryptionCheckIn(@RequestBody Map<String, Object> request) {
+        return service.acceptEncryptionCheckInResponse(request);
+    }
+
+    @PostMapping("/api/encrypted-documents/access")
+    ResponseEntity<Map<String, Object>> requestDecryptAccess(@RequestHeader(value = "X-CMP-Permissions", required = false) String permissions,
+                                                             @RequestBody Map<String, Object> request) {
+        return service.requestDecryptAccess(permissions, request);
+    }
+
+    @PostMapping("/api/encrypted-documents/access/{decryptAccessId}/expire")
+    ResponseEntity<Map<String, Object>> expireDecryptAccess(@PathVariable String decryptAccessId,
+                                                            @RequestBody(required = false) Map<String, Object> request) {
+        return ResponseEntity.ok(service.expireDecryptAccess(decryptAccessId, request == null ? Map.of() : request));
+    }
+
+    @PostMapping("/api/encrypted-documents/access/{decryptAccessId}/revoke")
+    ResponseEntity<Map<String, Object>> revokeDecryptAccess(@PathVariable String decryptAccessId,
+                                                            @RequestBody(required = false) Map<String, Object> request) {
+        return ResponseEntity.ok(service.revokeDecryptAccess(decryptAccessId, request == null ? Map.of() : request));
+    }
+
+    @PostMapping("/api/encrypted-documents/access/{decryptAccessId}/consume")
+    ResponseEntity<Map<String, Object>> consumeDecryptAccess(@PathVariable String decryptAccessId,
+                                                              @RequestBody(required = false) Map<String, Object> request) {
+        return service.consumeDecryptAccess(decryptAccessId, request == null ? Map.of() : request);
+    }
+
+    @PostMapping("/api/encrypted-documents/download-authorizations")
+    ResponseEntity<Map<String, Object>> grantDownloadAuthorization(@RequestHeader(value = "X-CMP-Permissions", required = false) String permissions,
+                                                                   @RequestBody Map<String, Object> request) {
+        return service.grantDownloadAuthorization(permissions, request);
+    }
+
+    @PostMapping("/api/encrypted-documents/download-authorizations/{authorizationId}/revoke")
+    ResponseEntity<Map<String, Object>> revokeDownloadAuthorization(@PathVariable String authorizationId,
+                                                                    @RequestHeader(value = "X-CMP-Permissions", required = false) String permissions,
+                                                                    @RequestBody(required = false) Map<String, Object> request) {
+        return service.revokeDownloadAuthorization(authorizationId, permissions, request == null ? Map.of() : request);
+    }
+
+    @PostMapping("/api/encrypted-documents/download-authorizations/explain")
+    ResponseEntity<Map<String, Object>> explainDownloadAuthorization(@RequestBody Map<String, Object> request) {
+        return service.explainDownloadAuthorization(request);
+    }
+
+    @PostMapping("/api/encrypted-documents/download-jobs")
+    ResponseEntity<Map<String, Object>> createDecryptDownloadJob(@RequestHeader(value = "X-CMP-Permissions", required = false) String permissions,
+                                                                 @RequestBody Map<String, Object> request) {
+        return service.createDecryptDownloadJob(permissions, request);
+    }
+
+    @PostMapping("/api/encrypted-documents/download-jobs/{jobId}/deliver")
+    ResponseEntity<Map<String, Object>> deliverDecryptDownloadJob(@PathVariable String jobId,
+                                                                   @RequestBody(required = false) Map<String, Object> request) {
+        return service.deliverDecryptDownloadJob(jobId, request == null ? Map.of() : request);
+    }
+
+    @PostMapping("/api/encrypted-documents/download-jobs/{jobId}/expire")
+    ResponseEntity<Map<String, Object>> expireDecryptDownloadJob(@PathVariable String jobId,
+                                                                  @RequestBody(required = false) Map<String, Object> request) {
+        return service.expireDecryptDownloadJob(jobId, request == null ? Map.of() : request);
+    }
+
+    @PostMapping("/api/contracts/{contractId}/performance-records")
+    ResponseEntity<Map<String, Object>> createPerformanceRecord(@PathVariable String contractId,
+                                                                @RequestBody Map<String, Object> request) {
+        return service.createPerformanceRecord(contractId, request);
+    }
+
+    @GetMapping("/api/contracts/{contractId}/performance-overview")
+    Map<String, Object> performanceOverview(@PathVariable String contractId) {
+        return service.performanceOverview(contractId);
+    }
+
+    @PostMapping("/api/contracts/{contractId}/performance-nodes")
+    ResponseEntity<Map<String, Object>> createPerformanceNode(@PathVariable String contractId,
+                                                              @RequestBody Map<String, Object> request) {
+        return service.createPerformanceNode(contractId, request);
+    }
+
+    @PatchMapping("/api/contracts/{contractId}/performance-nodes/{nodeId}")
+    ResponseEntity<Map<String, Object>> updatePerformanceNode(@PathVariable String contractId,
+                                                              @PathVariable String nodeId,
+                                                              @RequestBody Map<String, Object> request) {
+        return service.updatePerformanceNode(contractId, nodeId, request);
+    }
+
+    @GetMapping("/api/encrypted-documents/audit-events")
+    Map<String, Object> encryptedDocumentAuditEvents(@RequestParam(required = false) String document_asset_id,
+                                                     @RequestParam(required = false) String contract_id,
+                                                     @RequestParam(required = false) String event_type) {
+        return service.encryptedDocumentAuditEvents(document_asset_id, contract_id, event_type);
     }
 }
 
@@ -232,6 +329,26 @@ class CoreChainService {
     private final Map<String, SignatureResultState> signatureResults = new ConcurrentHashMap<>();
     private final Map<String, PaperRecordState> paperRecords = new ConcurrentHashMap<>();
     private final Map<String, Map<String, Object>> signatureSummaries = new ConcurrentHashMap<>();
+    private final Map<String, EncryptionSecurityBindingState> encryptionSecurityBindings = new ConcurrentHashMap<>();
+    private final Map<String, String> encryptionBindingByDocumentAsset = new ConcurrentHashMap<>();
+    private final Map<String, EncryptionCheckInState> encryptionCheckIns = new ConcurrentHashMap<>();
+    private final Map<String, String> encryptionCheckInByVersionTrigger = new ConcurrentHashMap<>();
+    private final Map<String, DecryptAccessState> decryptAccesses = new ConcurrentHashMap<>();
+    private final Map<String, DownloadAuthorizationState> downloadAuthorizations = new ConcurrentHashMap<>();
+    private final Map<String, DecryptDownloadJobState> decryptDownloadJobs = new ConcurrentHashMap<>();
+    private final List<Map<String, Object>> encryptedDocumentAuditRecords = new ArrayList<>();
+    private final Map<String, PerformanceRecordState> performanceRecords = new ConcurrentHashMap<>();
+    private final Map<String, String> performanceRecordByContract = new ConcurrentHashMap<>();
+    private final Map<String, PerformanceNodeState> performanceNodes = new ConcurrentHashMap<>();
+    private final Map<String, Map<String, Object>> performanceSummaries = new ConcurrentHashMap<>();
+    private final Map<String, Map<String, Object>> lifecycleSummaries = new ConcurrentHashMap<>();
+    private final List<Map<String, Object>> lifecycleTimelineEvents = new ArrayList<>();
+    private final List<Map<String, Object>> lifecycleAuditEvents = new ArrayList<>();
+    private final JdbcTemplate jdbcTemplate;
+
+    CoreChainService(JdbcTemplate jdbcTemplate) {
+        this.jdbcTemplate = jdbcTemplate;
+    }
 
     Map<String, Object> createContract(Map<String, Object> request) {
         String contractId = "ctr-" + UUID.randomUUID();
@@ -282,17 +399,19 @@ class CoreChainService {
         String documentRole = normalizeDocumentRole(text(request, "document_role", text(request, "document_kind", "MAIN_BODY")));
         DocumentAssetState asset = new DocumentAssetState(documentAssetId, documentVersionId, text(request, "owner_type", "CONTRACT"), contractId,
                 documentRole,
-                text(request, "document_title", text(request, "document_name", null)), "FIRST_VERSION_WRITTEN", "NOT_REQUIRED", "NOT_GENERATED", 1, auditRecords);
+                text(request, "document_title", text(request, "document_name", null)), "FIRST_VERSION_WRITTEN", "PENDING", "NOT_GENERATED", 1, auditRecords);
         documentAssets.put(documentAssetId, asset);
         documentVersions.put(documentVersionId, new DocumentVersionState(documentVersionId, documentAssetId, 1, null, null,
                 text(request, "version_label", "V1"), "首版写入", "ACTIVE", text(request, "file_upload_token", null), text(request, "source_channel", "MANUAL_UPLOAD")));
 
         bindContractDocument(contract, asset, text(request, "trace_id", null));
+        acceptEncryptionCheckIn(documentAssetId, documentVersionId, "NEW_VERSION", request, false);
+        DocumentAssetState currentAsset = requireDocumentAsset(documentAssetId);
 
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("contract_id", contractId);
-        body.putAll(documentAssetBody(asset));
-        body.put("document_version_id", asset.currentVersionId());
+        body.putAll(documentAssetBody(currentAsset));
+        body.put("document_version_id", currentAsset.currentVersionId());
         return body;
     }
 
@@ -306,10 +425,11 @@ class CoreChainService {
         documentVersions.put(versionId, version);
 
         DocumentAssetState updated = new DocumentAssetState(asset.documentAssetId(), versionId, asset.ownerType(), asset.ownerId(), asset.documentRole(), asset.documentTitle(),
-                asset.documentStatus(), asset.encryptionStatus(), asset.previewStatus(), versionNo, copyEvents(asset.auditRecords()));
+                asset.documentStatus(), "PENDING", asset.previewStatus(), versionNo, copyEvents(asset.auditRecords()));
         updated.auditRecords().add(event("DOCUMENT_VERSION_APPENDED", versionId, text(request, "trace_id", null)));
         documentAssets.put(documentAssetId, updated);
         refreshContractDocumentRef(updated, text(request, "trace_id", null));
+        acceptEncryptionCheckIn(documentAssetId, versionId, "NEW_VERSION", request, false);
         return documentVersionBody(version);
     }
 
@@ -868,6 +988,236 @@ class CoreChainService {
         return ResponseEntity.status(HttpStatus.CREATED).body(body);
     }
 
+    ResponseEntity<Map<String, Object>> acceptEncryptionCheckInResponse(Map<String, Object> request) {
+        String documentAssetId = text(request, "document_asset_id", null);
+        String documentVersionId = text(request, "document_version_id", null);
+        String triggerType = text(request, "trigger_type", "NEW_VERSION");
+        Map<String, Object> body = acceptEncryptionCheckIn(documentAssetId, documentVersionId, triggerType, request, true);
+        return ResponseEntity.ok(body);
+    }
+
+    ResponseEntity<Map<String, Object>> requestDecryptAccess(String permissions, Map<String, Object> request) {
+        String scene = text(request, "access_scene", null);
+        String documentAssetId = text(request, "document_asset_id", null);
+        String documentVersionId = text(request, "document_version_id", null);
+        String traceId = text(request, "trace_id", null);
+        DocumentAssetState asset = requireDocumentAsset(documentAssetId);
+        EncryptionSecurityBindingState binding = requireEncryptionBindingByDocumentAsset(documentAssetId);
+        if ("EXTERNAL_DOWNLOAD".equals(scene)) {
+            Map<String, Object> body = error("PLAINTEXT_EXPORT_NOT_ALLOWED", "默认路径不允许平台外明文外放");
+            Map<String, Object> audit = encryptionAudit("DECRYPT_ACCESS_DENIED", "REJECTED", binding.securityBindingId(), documentAssetId, documentVersionId,
+                    asset.ownerId(), text(request, "access_subject_type", "USER"), text(request, "access_subject_id", null), text(request, "actor_department_id", null), null, traceId);
+            body.put("audit_event", audit);
+            asset.auditRecords().add(audit);
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(body);
+        }
+        if (!allowedAccessScene(scene)) {
+            Map<String, Object> audit = encryptionAudit("DECRYPT_ACCESS_DENIED", "REJECTED", binding.securityBindingId(), documentAssetId, documentVersionId,
+                    asset.ownerId(), text(request, "access_subject_type", "USER"), text(request, "access_subject_id", null), text(request, "actor_department_id", null), null, traceId);
+            Map<String, Object> body = error("CONTROLLED_ACCESS_SCENE_DENIED", "受控读取场景不在允许白名单内");
+            body.put("audit_event", audit);
+            asset.auditRecords().add(audit);
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(body);
+        }
+        if (permissions == null || !permissions.contains("CONTRACT_VIEW") || !"ENCRYPTED".equals(binding.encryptionStatus())
+                || !documentVersionId.equals(binding.currentVersionId())) {
+            Map<String, Object> audit = encryptionAudit("DECRYPT_ACCESS_DENIED", "REJECTED", binding.securityBindingId(), documentAssetId, documentVersionId,
+                    asset.ownerId(), text(request, "access_subject_type", "USER"), text(request, "access_subject_id", null), text(request, "actor_department_id", null), null, traceId);
+            Map<String, Object> body = error("CONTROLLED_ACCESS_DENIED", "受控读取访问被拒绝");
+            body.put("audit_event", audit);
+            asset.auditRecords().add(audit);
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(body);
+        }
+
+        String decryptAccessId = "ed-access-" + UUID.randomUUID();
+        String ticket = "ed-ticket-" + UUID.randomUUID();
+        String mode = consumptionMode(scene);
+        String expiresAt = Instant.now().plusSeconds(intValue(request, "ttl_seconds", 300)).toString();
+        DecryptAccessState access = new DecryptAccessState(decryptAccessId, binding.securityBindingId(), documentAssetId, documentVersionId,
+                asset.ownerId(), scene, text(request, "access_subject_type", "USER"), text(request, "access_subject_id", null),
+                text(request, "actor_department_id", null), "APPROVED", "POLICY_ALLOWED", ticket, expiresAt, mode,
+                text(request, "trace_id", null), null);
+        decryptAccesses.put(decryptAccessId, access);
+        Map<String, Object> audit = encryptionAudit("DECRYPT_ACCESS_APPROVED", "SUCCESS", binding.securityBindingId(), documentAssetId, documentVersionId,
+                asset.ownerId(), access.accessSubjectType(), access.accessSubjectId(), access.actorDepartmentId(), decryptAccessId, traceId);
+        asset.auditRecords().add(audit);
+        return ResponseEntity.status(HttpStatus.CREATED).body(decryptAccessBody(access, audit));
+    }
+
+    Map<String, Object> expireDecryptAccess(String decryptAccessId, Map<String, Object> request) {
+        DecryptAccessState access = requireDecryptAccess(decryptAccessId);
+        DecryptAccessState updated = updateDecryptAccessResult(access, "EXPIRED", "TICKET_EXPIRED");
+        Map<String, Object> audit = auditDecryptAccessLifecycle(updated, "DECRYPT_ACCESS_EXPIRED", text(request, "trace_id", null));
+        return decryptAccessBody(updated, audit);
+    }
+
+    Map<String, Object> revokeDecryptAccess(String decryptAccessId, Map<String, Object> request) {
+        DecryptAccessState access = requireDecryptAccess(decryptAccessId);
+        DecryptAccessState updated = updateDecryptAccessResult(access, "REVOKED", "TICKET_REVOKED");
+        Map<String, Object> audit = auditDecryptAccessLifecycle(updated, "DECRYPT_ACCESS_REVOKED", text(request, "trace_id", null));
+        return decryptAccessBody(updated, audit);
+    }
+
+    ResponseEntity<Map<String, Object>> consumeDecryptAccess(String decryptAccessId, Map<String, Object> request) {
+        DecryptAccessState access = requireDecryptAccess(decryptAccessId);
+        if (!access.accessTicket().equals(text(request, "access_ticket", null))) {
+            Map<String, Object> audit = encryptionAudit("DECRYPT_ACCESS_DENIED", "REJECTED", access.securityBindingId(), access.documentAssetId(), access.documentVersionId(),
+                    access.contractId(), access.accessSubjectType(), access.accessSubjectId(), access.actorDepartmentId(), access.decryptAccessId(), text(request, "trace_id", null));
+            requireDocumentAsset(access.documentAssetId()).auditRecords().add(audit);
+            Map<String, Object> body = error("ACCESS_TICKET_INVALID", "访问票据无效");
+            body.put("audit_event", audit);
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(body);
+        }
+        if ("EXPIRED".equals(access.accessResult())) {
+            return ResponseEntity.status(HttpStatus.GONE).body(error("ACCESS_TICKET_EXPIRED", "访问票据已过期"));
+        }
+        if ("REVOKED".equals(access.accessResult())) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(error("ACCESS_TICKET_REVOKED", "访问票据已撤销"));
+        }
+        if (Instant.now().isAfter(Instant.parse(access.ticketExpiresAt()))) {
+            DecryptAccessState expired = updateDecryptAccessResult(access, "EXPIRED", "TICKET_EXPIRED");
+            Map<String, Object> audit = auditDecryptAccessLifecycle(expired, "DECRYPT_ACCESS_EXPIRED", text(request, "trace_id", null));
+            Map<String, Object> body = error("ACCESS_TICKET_EXPIRED", "访问票据已过期");
+            body.put("audit_event", audit);
+            return ResponseEntity.status(HttpStatus.GONE).body(body);
+        }
+        DecryptAccessState updated = new DecryptAccessState(access.decryptAccessId(), access.securityBindingId(), access.documentAssetId(),
+                access.documentVersionId(), access.contractId(), access.accessScene(), access.accessSubjectType(), access.accessSubjectId(),
+                access.actorDepartmentId(), access.accessResult(), access.decisionReasonCode(), access.accessTicket(), access.ticketExpiresAt(),
+                access.consumptionMode(), access.traceId(), Instant.now().toString());
+        decryptAccesses.put(decryptAccessId, updated);
+        Map<String, Object> body = decryptAccessBody(updated, auditDecryptAccessLifecycle(updated, "DECRYPT_ACCESS_CONSUMED", text(request, "trace_id", null)));
+        body.put("consume_result", "CONSUMED");
+        return ResponseEntity.ok(body);
+    }
+
+    ResponseEntity<Map<String, Object>> grantDownloadAuthorization(String permissions, Map<String, Object> request) {
+        if (permissions == null || !permissions.contains("ENCRYPTED_DOCUMENT_AUTH_MANAGE")) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(error("PERMISSION_DENIED", "缺少解密下载授权管理权限"));
+        }
+        Instant now = Instant.now();
+        Instant startAt = now.plusSeconds(intValue(request, "effective_start_offset_seconds", 0));
+        Instant endAt = now.plusSeconds(intValue(request, "effective_end_offset_seconds", 3600));
+        String status = now.isAfter(endAt) ? "EXPIRED" : "ACTIVE";
+        String authorizationId = "ed-auth-" + UUID.randomUUID();
+        DownloadAuthorizationState authorization = new DownloadAuthorizationState(authorizationId, text(request, "authorization_name", null), status,
+                text(request, "subject_type", "USER"), text(request, "subject_id", null), text(request, "scope_type", "GLOBAL"),
+                text(request, "scope_value", "*"), bool(request, "download_reason_required", true), startAt.toString(), endAt.toString(),
+                intValue(request, "priority_no", 0), text(request, "granted_by", null), null, null, authorizationPolicySnapshot(request));
+        downloadAuthorizations.put(authorizationId, authorization);
+        Map<String, Object> audit = authorizationAudit(authorization, "DOWNLOAD_AUTH_GRANTED", "SUCCESS", text(request, "trace_id", null));
+        appendAuthorizationAuditToScopedAssets(authorization, audit);
+        return ResponseEntity.status(HttpStatus.CREATED).body(downloadAuthorizationBody(authorization, audit));
+    }
+
+    ResponseEntity<Map<String, Object>> revokeDownloadAuthorization(String authorizationId, String permissions, Map<String, Object> request) {
+        if (permissions == null || !permissions.contains("ENCRYPTED_DOCUMENT_AUTH_MANAGE")) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(error("PERMISSION_DENIED", "缺少解密下载授权管理权限"));
+        }
+        DownloadAuthorizationState authorization = requireDownloadAuthorization(authorizationId);
+        DownloadAuthorizationState revoked = new DownloadAuthorizationState(authorization.authorizationId(), authorization.authorizationName(), "REVOKED",
+                authorization.subjectType(), authorization.subjectId(), authorization.scopeType(), authorization.scopeValue(), authorization.downloadReasonRequired(),
+                authorization.effectiveStartAt(), authorization.effectiveEndAt(), authorization.priorityNo(), authorization.grantedBy(),
+                text(request, "revoked_by", null), Instant.now().toString(), authorization.policySnapshot());
+        downloadAuthorizations.put(authorizationId, revoked);
+        Map<String, Object> audit = authorizationAudit(revoked, "DOWNLOAD_AUTH_REVOKED", "SUCCESS", text(request, "trace_id", null));
+        appendAuthorizationAuditToScopedAssets(revoked, audit);
+        return ResponseEntity.ok(downloadAuthorizationBody(revoked, audit));
+    }
+
+    ResponseEntity<Map<String, Object>> explainDownloadAuthorization(Map<String, Object> request) {
+        DocumentAssetState asset = requireDocumentAsset(text(request, "document_asset_id", null));
+        AuthorizationDecision decision = evaluateDownloadAuthorization(request, asset, text(request, "trace_id", null), true);
+        if (decision.authorization() == null) {
+            Map<String, Object> body = error("DOWNLOAD_AUTHORIZATION_DENIED", "未命中有效解密下载授权");
+            body.put("decision", "DENIED");
+            body.put("reason_code", "DOWNLOAD_AUTHORIZATION_NOT_FOUND");
+            body.put("audit_event", decision.auditEvent());
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(body);
+        }
+        return ResponseEntity.ok(downloadAuthorizationDecisionBody(decision));
+    }
+
+    ResponseEntity<Map<String, Object>> createDecryptDownloadJob(String permissions, Map<String, Object> request) {
+        if (permissions == null || !permissions.contains("CONTRACT_VIEW")) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(error("PERMISSION_DENIED", "缺少合同查看权限"));
+        }
+        String documentAssetId = text(request, "document_asset_id", null);
+        String documentVersionId = text(request, "document_version_id", null);
+        DocumentAssetState asset = requireDocumentAsset(documentAssetId);
+        EncryptionSecurityBindingState binding = requireEncryptionBindingByDocumentAsset(documentAssetId);
+        if (!"ENCRYPTED".equals(binding.encryptionStatus()) || !documentVersionId.equals(binding.currentVersionId())) {
+            Map<String, Object> body = error("DOWNLOAD_DOCUMENT_NOT_READY", "文档未处于可授权下载状态");
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(body);
+        }
+        AuthorizationDecision decision = evaluateDownloadAuthorization(request, asset, text(request, "trace_id", null), true);
+        if (decision.authorization() == null) {
+            Map<String, Object> body = error("DOWNLOAD_AUTHORIZATION_DENIED", "未命中有效解密下载授权");
+            body.put("audit_event", decision.auditEvent());
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(body);
+        }
+
+        String jobId = "ed-download-job-" + UUID.randomUUID();
+        boolean failed = bool(request, "simulate_export_failure", false);
+        String status = failed ? "FAILED" : "READY";
+        String token = "ed-download-token-" + UUID.randomUUID();
+        String artifactRef = "ed-package-" + UUID.randomUUID();
+        DecryptDownloadJobState job = new DecryptDownloadJobState(jobId, binding.securityBindingId(), decision.authorization().authorizationId(),
+                documentAssetId, documentVersionId, asset.ownerId(), text(request, "requested_by", null), text(request, "requested_department_id", null),
+                text(request, "download_reason", null), text(request, "request_idempotency_key", null), status, decision.snapshot(), artifactRef,
+                "明文导出-" + documentVersionId + ".bin", token, Instant.now().plusSeconds(intValue(request, "download_ttl_seconds", 600)).toString(),
+                failed ? 1 : 0, "cmp-task-" + UUID.randomUUID(), failed ? "EXPORT_GENERATION_FAILED" : "EXPORT_READY",
+                failed ? "导出生成失败，已创建补偿任务" : "明文导出包已生成", Instant.now().toString(), failed ? null : Instant.now().toString());
+        decryptDownloadJobs.put(jobId, job);
+        Map<String, Object> audit = encryptionAudit(failed ? "DOWNLOAD_EXPORT_FAILED" : "DOWNLOAD_READY", failed ? "FAILED" : "SUCCESS",
+                binding.securityBindingId(), documentAssetId, documentVersionId, asset.ownerId(), "USER", job.requestedBy(), job.requestedDepartmentId(), jobId,
+                text(request, "trace_id", null));
+        asset.auditRecords().add(audit);
+        Map<String, Object> body = decryptDownloadJobBody(job, audit);
+        if (failed) {
+            body.put("compensation_task", compensationTask("ED_DECRYPT_DOWNLOAD_EXPORT", asset.ownerId(), jobId, text(request, "trace_id", null)));
+            return ResponseEntity.status(HttpStatus.ACCEPTED).body(body);
+        }
+        return ResponseEntity.status(HttpStatus.CREATED).body(body);
+    }
+
+    ResponseEntity<Map<String, Object>> deliverDecryptDownloadJob(String jobId, Map<String, Object> request) {
+        DecryptDownloadJobState job = requireDecryptDownloadJob(jobId);
+        ResponseEntity<Map<String, Object>> conflict = rejectDownloadJobTransitionUnlessReady(job, "DELIVERED");
+        if (conflict != null) {
+            return conflict;
+        }
+        DecryptDownloadJobState delivered = updateDecryptDownloadJobStatus(job, "DELIVERED", "DOWNLOAD_DELIVERED", "明文导出已交付");
+        Map<String, Object> audit = auditDownloadJob(delivered, "DOWNLOAD_DELIVERED", "SUCCESS", text(request, "trace_id", null));
+        return ResponseEntity.ok(decryptDownloadJobBody(delivered, audit));
+    }
+
+    ResponseEntity<Map<String, Object>> expireDecryptDownloadJob(String jobId, Map<String, Object> request) {
+        DecryptDownloadJobState job = requireDecryptDownloadJob(jobId);
+        ResponseEntity<Map<String, Object>> conflict = rejectDownloadJobTransitionUnlessReady(job, "EXPIRED");
+        if (conflict != null) {
+            return conflict;
+        }
+        DecryptDownloadJobState expired = updateDecryptDownloadJobStatus(job, "EXPIRED", "DOWNLOAD_EXPIRED", "下载入口已过期回收");
+        Map<String, Object> audit = auditDownloadJob(expired, "DOWNLOAD_EXPIRED", "SUCCESS", text(request, "trace_id", null));
+        return ResponseEntity.ok(decryptDownloadJobBody(expired, audit));
+    }
+
+    Map<String, Object> encryptedDocumentAuditEvents(String documentAssetId, String contractId, String eventType) {
+        DocumentAssetState scopedAsset = documentAssetId == null ? null : requireDocumentAsset(documentAssetId);
+        List<Map<String, Object>> items = encryptedDocumentAuditRecords.stream()
+                .filter(event -> documentAssetId == null
+                        || documentAssetId.equals(text(event, "document_asset_id", null))
+                        || scopedAsset.ownerId().equals(text(event, "contract_id", null)))
+                .filter(event -> contractId == null || contractId.equals(text(event, "contract_id", null)))
+                .filter(event -> eventType == null || eventType.equals(text(event, "event_type", null)))
+                .toList();
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("items", items);
+        body.put("total", items.size());
+        return body;
+    }
+
     Map<String, Object> contractMaster(String contractId) {
         return contractBody(requireContract(contractId));
     }
@@ -890,8 +1240,152 @@ class CoreChainService {
         body.put("document_summary", contract.currentDocument() == null ? null : documentBody(contract.currentDocument()));
         body.put("attachment_summaries", contract.attachments().stream().map(this::documentBody).toList());
         body.put("approval_summary", contract.approvalSummary());
-        body.put("timeline_summary", contract.events());
+        body.put("lifecycle_summary", lifecycleSummaries.get(contractId));
+        body.put("timeline_summary", combinedTimeline(contract));
+        body.put("audit_record", combinedAudit(contract));
         return body;
+    }
+
+    ResponseEntity<Map<String, Object>> createPerformanceRecord(String contractId, Map<String, Object> request) {
+        ContractState contract = requireContract(contractId);
+        if (!"SIGNED".equals(contract.contractStatus()) && !"PERFORMED".equals(contract.contractStatus())) {
+            return ResponseEntity.status(HttpStatus.CONFLICT)
+                    .body(error("CONTRACT_NOT_EFFECTIVE_FOR_PERFORMANCE", "合同未签章或未生效，不能创建正式履约记录"));
+        }
+        String existingId = performanceRecordByContract.get(contractId);
+        if (existingId != null) {
+            return ResponseEntity.ok(performanceRecordBody(requirePerformanceRecord(existingId), contract.contractStatus()));
+        }
+
+        String recordId = "perf-rec-" + UUID.randomUUID();
+        PerformanceRecordState record = new PerformanceRecordState(recordId, contractId, "IN_PROGRESS", 0, "LOW",
+                text(request, "owner_user_id", contract.ownerUserId()), text(request, "owner_org_unit_id", contract.ownerOrgUnitId()),
+                0, 0, null, "履约已启动", "PERFORMANCE_STARTED", Instant.now().toString(), Instant.now().toString());
+        performanceRecords.put(recordId, record);
+        performanceRecordByContract.put(contractId, recordId);
+        persistPerformanceRecord(record);
+        Map<String, Object> summary = refreshPerformanceSummary(contractId, "PERFORMANCE_STARTED");
+        lifecycleSummaries.put(contractId, lifecycleSummary(contractId, summary));
+        appendLifecycleTimeline(contractId, "PERFORMANCE_STARTED", "PERFORMANCE_RECORD", recordId, "PERFORMANCE_STARTED",
+                text(request, "operator_user_id", record.ownerUserId()), "SUCCESS", null, text(request, "trace_id", null));
+        appendLifecycleAudit(contractId, "PERFORMANCE_RECORD_CREATED", "PERFORMANCE_RECORD", recordId,
+                text(request, "operator_user_id", record.ownerUserId()), "SUCCESS", "ADMITTED", null, text(request, "trace_id", null));
+        appendContractEvent(contractId, "PERFORMANCE_STARTED", recordId, text(request, "trace_id", null), null);
+        return ResponseEntity.status(HttpStatus.CREATED).body(performanceRecordBody(record, contract.contractStatus()));
+    }
+
+    Map<String, Object> performanceOverview(String contractId) {
+        requireContract(contractId);
+        PerformanceRecordState record = performanceRecordForContract(contractId);
+        List<Map<String, Object>> nodes = performanceNodes.values().stream()
+                .filter(node -> contractId.equals(node.contractId()))
+                .map(this::performanceNodeBody)
+                .toList();
+        List<Map<String, Object>> documentRefs = nodes.stream()
+                .map(node -> map(node.get("document_ref")))
+                .filter(ref -> !ref.isEmpty())
+                .toList();
+        Map<String, Object> summary = performanceSummaries.get(contractId);
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("contract_id", contractId);
+        body.put("performance_record", record == null ? null : performanceRecordBody(record, requireContract(contractId).contractStatus()));
+        body.put("nodes", nodes);
+        body.put("document_refs", documentRefs);
+        body.put("risk_summary", summary == null ? null : summary.get("risk_summary"));
+        body.put("performance_summary", summary);
+        return body;
+    }
+
+    ResponseEntity<Map<String, Object>> createPerformanceNode(String contractId, Map<String, Object> request) {
+        requireContract(contractId);
+        PerformanceRecordState record = performanceRecordForContract(contractId);
+        if (record == null) {
+            ResponseEntity<Map<String, Object>> created = createPerformanceRecord(contractId, request);
+            if (!created.getStatusCode().is2xxSuccessful()) {
+                return created;
+            }
+            record = performanceRecordForContract(contractId);
+        }
+        String requestedRecordId = text(request, "performance_record_id", record.performanceRecordId());
+        if (!record.performanceRecordId().equals(requestedRecordId)) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(error("PERFORMANCE_RECORD_CONTRACT_MISMATCH", "履约记录未绑定当前合同"));
+        }
+
+        String nodeId = "perf-node-" + UUID.randomUUID();
+        Map<String, Object> documentRef = performanceDocumentRef(contractId, nodeId, request);
+        PerformanceNodeState node = new PerformanceNodeState(nodeId, record.performanceRecordId(), contractId,
+                text(request, "node_type", "GENERAL"), text(request, "node_name", "履约节点"), text(request, "milestone_code", null),
+                text(request, "planned_at", null), text(request, "due_at", null), null, "PENDING", intValue(request, "progress_percent", 0),
+                text(request, "risk_level", "LOW"), intValue(request, "issue_count", 0), false, text(request, "result_summary", null), null,
+                text(request, "owner_user_id", record.ownerUserId()), text(request, "owner_org_unit_id", record.ownerOrgUnitId()), documentRef);
+        performanceNodes.put(nodeId, node);
+        persistPerformanceNode(node);
+        persistPerformanceDocumentRef(documentRef);
+        Map<String, Object> summary = refreshPerformanceSummary(contractId, node.milestoneCode());
+        lifecycleSummaries.put(contractId, lifecycleSummary(contractId, summary));
+        appendLifecycleTimeline(contractId, "PERFORMANCE_NODE_CREATED", "PERFORMANCE_NODE", nodeId, node.milestoneCode(),
+                text(request, "operator_user_id", node.ownerUserId()), "SUCCESS", lifecycleDocumentRefId(documentRef), text(request, "trace_id", null));
+        appendLifecycleAudit(contractId, "PERFORMANCE_NODE_CREATED", "PERFORMANCE_NODE", nodeId,
+                text(request, "operator_user_id", node.ownerUserId()), "SUCCESS", "CREATED", lifecycleDocumentRefId(documentRef), text(request, "trace_id", null));
+        appendContractEvent(contractId, "PERFORMANCE_NODE_CREATED", nodeId, text(request, "trace_id", null), null);
+        Map<String, Object> body = performanceNodeBody(node);
+        body.put("performance_summary", summary);
+        return ResponseEntity.status(HttpStatus.CREATED).body(body);
+    }
+
+    ResponseEntity<Map<String, Object>> updatePerformanceNode(String contractId, String nodeId, Map<String, Object> request) {
+        PerformanceNodeState node = requirePerformanceNode(nodeId);
+        if (!contractId.equals(node.contractId())) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(error("PERFORMANCE_NODE_CONTRACT_MISMATCH", "履约节点未绑定当前合同"));
+        }
+        String previousRisk = node.riskLevel();
+        String nodeStatus = text(request, "node_status", node.nodeStatus());
+        String riskLevel = text(request, "risk_level", node.riskLevel());
+        int progressPercent = intValue(request, "progress_percent", node.progressPercent());
+        int issueCount = intValue(request, "issue_count", node.issueCount());
+        ResponseEntity<Map<String, Object>> stateRejection = validatePerformanceNodeChange(node, nodeStatus, progressPercent, riskLevel, issueCount, request);
+        if (stateRejection != null) {
+            return stateRejection;
+        }
+        boolean overdue = node.overdue() || bool(request, "is_overdue", "OVERDUE".equals(nodeStatus)) || "OVERDUE".equals(nodeStatus);
+        PerformanceNodeState updated = new PerformanceNodeState(node.performanceNodeId(), node.performanceRecordId(), node.contractId(),
+                node.nodeType(), node.nodeName(), node.milestoneCode(), node.plannedAt(), node.dueAt(), text(request, "actual_at", node.actualAt()),
+                nodeStatus, progressPercent, riskLevel, issueCount,
+                overdue, text(request, "result_summary", node.resultSummary()), Instant.now().toString(), node.ownerUserId(), node.ownerOrgUnitId(), node.documentRef());
+        performanceNodes.put(nodeId, updated);
+        persistPerformanceNode(updated);
+
+        String milestoneCode = "COMPLETED".equals(nodeStatus) ? "PERFORMANCE_COMPLETED" : updated.milestoneCode();
+        Map<String, Object> summary = refreshPerformanceSummary(contractId, milestoneCode);
+        lifecycleSummaries.put(contractId, lifecycleSummary(contractId, summary));
+        String actorUserId = text(request, "operator_user_id", updated.ownerUserId());
+        String documentRefId = lifecycleDocumentRefId(updated.documentRef());
+        if (!previousRisk.equals(riskLevel)) {
+            appendLifecycleAudit(contractId, "PERFORMANCE_RISK_CHANGED", "PERFORMANCE_NODE", nodeId,
+                    actorUserId, "SUCCESS", riskLevel, documentRefId, text(request, "trace_id", null));
+            appendContractEvent(contractId, "PERFORMANCE_RISK_CHANGED", nodeId, text(request, "trace_id", null), null);
+        }
+        if (overdue || "OVERDUE".equals(nodeStatus)) {
+            appendLifecycleTimeline(contractId, "PERFORMANCE_NODE_OVERDUE", "PERFORMANCE_NODE", nodeId, updated.milestoneCode(),
+                    actorUserId, "OVERDUE", documentRefId, text(request, "trace_id", null));
+            appendContractEvent(contractId, "PERFORMANCE_NODE_OVERDUE", nodeId, text(request, "trace_id", null), null);
+        }
+        if ("COMPLETED".equals(summary.get("performance_status"))) {
+            appendLifecycleTimeline(contractId, "PERFORMANCE_COMPLETED", "PERFORMANCE_NODE", nodeId, "PERFORMANCE_COMPLETED",
+                    actorUserId, "COMPLETED", documentRefId, text(request, "trace_id", null));
+            appendLifecycleAudit(contractId, "PERFORMANCE_COMPLETION_CONFIRMED", "PERFORMANCE_NODE", nodeId,
+                    actorUserId, "SUCCESS", "COMPLETED", documentRefId, text(request, "trace_id", null));
+            appendContractEvent(contractId, "PERFORMANCE_COMPLETED", nodeId, text(request, "trace_id", null), "PERFORMED");
+        } else {
+            appendLifecycleTimeline(contractId, "PERFORMANCE_PROGRESS_UPDATED", "PERFORMANCE_NODE", nodeId, updated.milestoneCode(),
+                    actorUserId, summary.get("performance_status").toString(), documentRefId, text(request, "trace_id", null));
+            appendContractEvent(contractId, "PERFORMANCE_PROGRESS_UPDATED", nodeId, text(request, "trace_id", null), null);
+        }
+
+        Map<String, Object> body = performanceNodeBody(updated);
+        body.put("performance_summary", summary);
+        return ResponseEntity.ok(body);
     }
 
     Map<String, Object> batch3SharedContract() {
@@ -1276,6 +1770,721 @@ class CoreChainService {
         return ref;
     }
 
+    private Map<String, Object> performanceRecordBody(PerformanceRecordState record, String sourceContractStatus) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("performance_record_id", record.performanceRecordId());
+        body.put("contract_id", record.contractId());
+        body.put("performance_status", record.performanceStatus());
+        body.put("progress_percent", record.progressPercent());
+        body.put("risk_level", record.riskLevel());
+        body.put("owner_user_id", record.ownerUserId());
+        body.put("owner_org_unit_id", record.ownerOrgUnitId());
+        body.put("open_node_count", record.openNodeCount());
+        body.put("overdue_node_count", record.overdueNodeCount());
+        body.put("latest_due_at", record.latestDueAt());
+        body.put("summary_text", record.summaryText());
+        body.put("latest_milestone_code", record.latestMilestoneCode());
+        body.put("source_contract_status", sourceContractStatus);
+        return body;
+    }
+
+    private Map<String, Object> performanceNodeBody(PerformanceNodeState node) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("performance_node_id", node.performanceNodeId());
+        body.put("performance_record_id", node.performanceRecordId());
+        body.put("contract_id", node.contractId());
+        body.put("node_type", node.nodeType());
+        body.put("node_name", node.nodeName());
+        body.put("milestone_code", node.milestoneCode());
+        body.put("planned_at", node.plannedAt());
+        body.put("due_at", node.dueAt());
+        body.put("actual_at", node.actualAt());
+        body.put("node_status", node.nodeStatus());
+        body.put("progress_percent", node.progressPercent());
+        body.put("risk_level", node.riskLevel());
+        body.put("issue_count", node.issueCount());
+        body.put("is_overdue", node.overdue());
+        body.put("result_summary", node.resultSummary());
+        body.put("last_result_at", node.lastResultAt());
+        body.put("owner_user_id", node.ownerUserId());
+        body.put("owner_org_unit_id", node.ownerOrgUnitId());
+        body.put("document_ref", node.documentRef());
+        return body;
+    }
+
+    private Map<String, Object> performanceDocumentRef(String contractId, String nodeId, Map<String, Object> request) {
+        String documentAssetId = text(request, "evidence_document_asset_id", null);
+        String documentVersionId = text(request, "evidence_document_version_id", null);
+        if (documentAssetId == null && documentVersionId == null) {
+            return null;
+        }
+        DocumentAssetState asset = requireDocumentAsset(documentAssetId);
+        DocumentVersionState version = requireDocumentVersion(documentVersionId);
+        if (!contractId.equals(asset.ownerId()) || !asset.documentAssetId().equals(version.documentAssetId())) {
+            throw new IllegalArgumentException("履约凭证必须引用当前合同的文档中心版本");
+        }
+        Map<String, Object> ref = new LinkedHashMap<>();
+        ref.put("lifecycle_document_ref_id", "cl-doc-ref-" + UUID.randomUUID());
+        ref.put("contract_id", contractId);
+        ref.put("source_resource_type", "PERFORMANCE_NODE");
+        ref.put("source_resource_id", nodeId);
+        ref.put("document_role", "PERFORMANCE_EVIDENCE");
+        ref.put("document_asset_id", documentAssetId);
+        ref.put("document_version_id", documentVersionId);
+        ref.put("is_primary", true);
+        return ref;
+    }
+
+    private Map<String, Object> refreshPerformanceSummary(String contractId, String milestoneCode) {
+        PerformanceRecordState record = performanceRecordForContract(contractId);
+        List<PerformanceNodeState> nodes = performanceNodes.values().stream()
+                .filter(node -> contractId.equals(node.contractId()))
+                .toList();
+        int nodeCount = nodes.size();
+        int completedCount = (int) nodes.stream().filter(node -> "COMPLETED".equals(node.nodeStatus())).count();
+        int overdueCount = (int) nodes.stream().filter(node -> node.overdue() || "OVERDUE".equals(node.nodeStatus())).count();
+        int openCount = nodeCount - completedCount;
+        int progress = nodeCount == 0 ? 0 : nodes.stream().mapToInt(PerformanceNodeState::progressPercent).sum() / nodeCount;
+        String riskLevel = nodes.stream().map(PerformanceNodeState::riskLevel).reduce("LOW", this::higherRisk);
+        int issueCount = nodes.stream().mapToInt(PerformanceNodeState::issueCount).sum();
+        boolean completionReady = nodeCount > 0 && completedCount == nodeCount && overdueCount == 0
+                && issueCount == 0 && "LOW".equals(riskLevel) && progress == 100;
+        String status = completionReady ? "COMPLETED" : (overdueCount > 0 || "HIGH".equals(riskLevel) || issueCount > 0 ? "AT_RISK" : "IN_PROGRESS");
+        String latestDueAt = nodes.stream().map(PerformanceNodeState::dueAt).filter(value -> value != null && !value.isBlank()).min(String::compareTo).orElse(null);
+        String latestMilestone = "COMPLETED".equals(status) ? "PERFORMANCE_COMPLETED" : (milestoneCode == null ? "PERFORMANCE_STARTED" : milestoneCode);
+        String summaryText = switch (status) {
+            case "COMPLETED" -> "履约已完成";
+            case "AT_RISK" -> "履约存在风险";
+            default -> "履约进行中";
+        };
+
+        if (record != null) {
+            PerformanceRecordState updated = new PerformanceRecordState(record.performanceRecordId(), record.contractId(), status, progress, riskLevel,
+                    record.ownerUserId(), record.ownerOrgUnitId(), openCount, overdueCount, latestDueAt, summaryText, latestMilestone,
+                    Instant.now().toString(), Instant.now().toString());
+            performanceRecords.put(record.performanceRecordId(), updated);
+            persistPerformanceRecord(updated);
+        }
+
+        Map<String, Object> riskSummary = new LinkedHashMap<>();
+        riskSummary.put("risk_level", riskLevel);
+        riskSummary.put("overdue_node_count", overdueCount);
+        riskSummary.put("issue_count", issueCount);
+
+        Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("contract_id", contractId);
+        summary.put("performance_record_id", record == null ? null : record.performanceRecordId());
+        summary.put("performance_status", status);
+        summary.put("progress_percent", progress);
+        summary.put("open_node_count", openCount);
+        summary.put("overdue_node_count", overdueCount);
+        summary.put("risk_summary", riskSummary);
+        summary.put("latest_milestone_code", latestMilestone);
+        summary.put("summary_text", summaryText);
+        summary.put("last_contract_writeback_at", Instant.now().toString());
+        performanceSummaries.put(contractId, summary);
+        persistLifecycleSummary(contractId, summary);
+        return summary;
+    }
+
+    private Map<String, Object> lifecycleSummary(String contractId, Map<String, Object> performanceSummary) {
+        Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("contract_id", contractId);
+        summary.put("current_stage", "PERFORMANCE");
+        summary.put("stage_status", performanceSummary.get("performance_status"));
+        summary.put("performance_summary", performanceSummary);
+        summary.put("risk_summary", performanceSummary.get("risk_summary"));
+        summary.put("latest_milestone_code", performanceSummary.get("latest_milestone_code"));
+        summary.put("latest_milestone_at", Instant.now().toString());
+        summary.put("summary_version", "cl-summary-v1");
+        return summary;
+    }
+
+    private ResponseEntity<Map<String, Object>> validatePerformanceNodeChange(PerformanceNodeState current, String nextStatus,
+                                                                               int progressPercent, String riskLevel, int issueCount,
+                                                                               Map<String, Object> request) {
+        if (!List.of("PENDING", "IN_PROGRESS", "OVERDUE", "COMPLETED").contains(nextStatus)) {
+            return ResponseEntity.unprocessableEntity().body(error("PERFORMANCE_NODE_STATUS_INVALID", "履约节点状态不在允许范围内"));
+        }
+        if (!List.of("LOW", "MEDIUM", "HIGH").contains(riskLevel)) {
+            return ResponseEntity.unprocessableEntity().body(error("PERFORMANCE_RISK_LEVEL_INVALID", "履约风险等级不在允许范围内"));
+        }
+        if (progressPercent < 0 || progressPercent > 100) {
+            return ResponseEntity.unprocessableEntity().body(error("PERFORMANCE_PROGRESS_INVALID", "履约进度必须在 0 到 100 之间"));
+        }
+        if (issueCount < 0) {
+            return ResponseEntity.unprocessableEntity().body(error("PERFORMANCE_ISSUE_COUNT_INVALID", "履约问题数量不能为负数"));
+        }
+        if ("COMPLETED".equals(current.nodeStatus()) && !"COMPLETED".equals(nextStatus)) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(error("PERFORMANCE_NODE_TRANSITION_INVALID", "已完成履约节点不允许回退"));
+        }
+        boolean legalTransition = current.nodeStatus().equals(nextStatus)
+                || switch (current.nodeStatus()) {
+                    case "PENDING" -> List.of("IN_PROGRESS", "OVERDUE", "COMPLETED").contains(nextStatus);
+                    case "IN_PROGRESS" -> List.of("OVERDUE", "COMPLETED").contains(nextStatus);
+                    case "OVERDUE" -> List.of("IN_PROGRESS", "COMPLETED").contains(nextStatus);
+                    default -> false;
+                };
+        if (!legalTransition) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(error("PERFORMANCE_NODE_TRANSITION_INVALID", "履约节点状态迁移不合法"));
+        }
+        if ("COMPLETED".equals(nextStatus)) {
+            String actualAt = text(request, "actual_at", current.actualAt());
+            boolean overdueFact = current.overdue() || "OVERDUE".equals(current.nodeStatus()) || bool(request, "is_overdue", false);
+            boolean completionBlocked = progressPercent != 100 || !"LOW".equals(riskLevel) || issueCount != 0
+                    || overdueFact || actualAt == null || actualAt.isBlank();
+            if (completionBlocked) {
+                Map<String, Object> body = error("PERFORMANCE_COMPLETION_BLOCKED", "履约完成必须满足进度、风险、问题、逾期和实际完成时间校验");
+                body.put("required_progress_percent", 100);
+                body.put("required_risk_level", "LOW");
+                body.put("required_issue_count", 0);
+                return ResponseEntity.status(HttpStatus.CONFLICT).body(body);
+            }
+        }
+        return null;
+    }
+
+    private List<Map<String, Object>> lifecycleTimeline(String contractId) {
+        return lifecycleTimelineEvents.stream()
+                .filter(event -> contractId.equals(text(event, "contract_id", null)))
+                .toList();
+    }
+
+    private List<Map<String, Object>> combinedTimeline(ContractState contract) {
+        List<Map<String, Object>> events = nonLifecycleContractEvents(contract.events());
+        events.addAll(lifecycleTimeline(contract.contractId()));
+        return events;
+    }
+
+    private List<Map<String, Object>> lifecycleAudit(String contractId) {
+        return lifecycleAuditEvents.stream()
+                .filter(event -> contractId.equals(text(event, "contract_id", null)))
+                .toList();
+    }
+
+    private List<Map<String, Object>> combinedAudit(ContractState contract) {
+        List<Map<String, Object>> events = nonLifecycleContractEvents(contract.events());
+        events.addAll(lifecycleAudit(contract.contractId()));
+        return events;
+    }
+
+    private List<Map<String, Object>> nonLifecycleContractEvents(List<Map<String, Object>> events) {
+        return new ArrayList<>(events.stream()
+                .filter(event -> !text(event, "event_type", "").startsWith("PERFORMANCE_"))
+                .map(LinkedHashMap::new)
+                .map(event -> (Map<String, Object>) event)
+                .toList());
+    }
+
+    private void persistPerformanceRecord(PerformanceRecordState record) {
+        jdbcTemplate.update("DELETE FROM cl_performance_record WHERE performance_record_id = ?", record.performanceRecordId());
+        jdbcTemplate.update("""
+                INSERT INTO cl_performance_record (performance_record_id, contract_id, performance_status, progress_percent, risk_level, owner_user_id, owner_org_unit_id, open_node_count, overdue_node_count, latest_due_at, summary_text, latest_milestone_code, last_evaluated_at, last_writeback_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, record.performanceRecordId(), record.contractId(), record.performanceStatus(), record.progressPercent(), record.riskLevel(),
+                record.ownerUserId(), record.ownerOrgUnitId(), record.openNodeCount(), record.overdueNodeCount(), record.latestDueAt(),
+                record.summaryText(), record.latestMilestoneCode(), record.lastEvaluatedAt(), record.lastWritebackAt());
+    }
+
+    private void persistPerformanceNode(PerformanceNodeState node) {
+        jdbcTemplate.update("DELETE FROM cl_performance_node WHERE performance_node_id = ?", node.performanceNodeId());
+        jdbcTemplate.update("""
+                INSERT INTO cl_performance_node (performance_node_id, performance_record_id, contract_id, node_type, node_name, milestone_code, planned_at, due_at, actual_at, node_status, progress_percent, risk_level, issue_count, is_overdue, result_summary, last_result_at, owner_user_id, owner_org_unit_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, node.performanceNodeId(), node.performanceRecordId(), node.contractId(), node.nodeType(), node.nodeName(), node.milestoneCode(),
+                node.plannedAt(), node.dueAt(), node.actualAt(), node.nodeStatus(), node.progressPercent(), node.riskLevel(), node.issueCount(),
+                node.overdue(), node.resultSummary(), node.lastResultAt(), node.ownerUserId(), node.ownerOrgUnitId());
+    }
+
+    private void persistLifecycleSummary(String contractId, Map<String, Object> summary) {
+        Map<String, Object> riskSummary = map(summary.get("risk_summary"));
+        jdbcTemplate.update("DELETE FROM cl_lifecycle_summary WHERE contract_id = ?", contractId);
+        jdbcTemplate.update("""
+                INSERT INTO cl_lifecycle_summary (contract_id, current_stage, stage_status, performance_record_id, performance_status, progress_percent, risk_level, open_node_count, overdue_node_count, issue_count, latest_milestone_code, latest_milestone_at, summary_version, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, contractId, "PERFORMANCE", text(summary, "performance_status", null), text(summary, "performance_record_id", null),
+                text(summary, "performance_status", null), intValue(summary, "progress_percent", 0), text(riskSummary, "risk_level", "LOW"),
+                intValue(summary, "open_node_count", 0), intValue(summary, "overdue_node_count", 0), intValue(riskSummary, "issue_count", 0),
+                text(summary, "latest_milestone_code", null), Instant.now().toString(), "cl-summary-v1", Instant.now().toString());
+    }
+
+    private void persistPerformanceDocumentRef(Map<String, Object> documentRef) {
+        if (documentRef == null || documentRef.isEmpty()) {
+            return;
+        }
+        jdbcTemplate.update("DELETE FROM cl_lifecycle_document_ref WHERE lifecycle_document_ref_id = ?", text(documentRef, "lifecycle_document_ref_id", null));
+        jdbcTemplate.update("""
+                INSERT INTO cl_lifecycle_document_ref (lifecycle_document_ref_id, contract_id, source_resource_type, source_resource_id, document_role, document_asset_id, document_version_id, is_primary, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, text(documentRef, "lifecycle_document_ref_id", null), text(documentRef, "contract_id", null),
+                text(documentRef, "source_resource_type", null), text(documentRef, "source_resource_id", null), text(documentRef, "document_role", null),
+                text(documentRef, "document_asset_id", null), text(documentRef, "document_version_id", null), bool(documentRef, "is_primary", true), Instant.now().toString());
+    }
+
+    private String lifecycleDocumentRefId(Map<String, Object> documentRef) {
+        return documentRef == null || documentRef.isEmpty() ? null : text(documentRef, "lifecycle_document_ref_id", null);
+    }
+
+    private void appendLifecycleTimeline(String contractId, String eventType, String sourceResourceType, String sourceResourceId,
+                                         String milestoneCode, String actorUserId, String eventResult, String documentRefId, String traceId) {
+        String eventId = "cl-time-" + UUID.randomUUID();
+        String dedupeKey = dedupeKey("timeline", eventType, sourceResourceId, traceId);
+        Map<String, Object> event = lifecycleEvent(eventId, contractId, eventType, sourceResourceType, sourceResourceId, milestoneCode,
+                dedupeKey, actorUserId, eventResult, documentRefId, traceId);
+        lifecycleTimelineEvents.add(event);
+        jdbcTemplate.update("""
+                INSERT INTO cl_lifecycle_timeline_event (timeline_event_id, contract_id, event_type, source_resource_type, source_resource_id, milestone_code, dedupe_key, actor_user_id, event_result, related_document_ref_id, trace_id, occurred_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, eventId, contractId, eventType, sourceResourceType, sourceResourceId, milestoneCode, dedupeKey, actorUserId,
+                eventResult, documentRefId, traceId, text(event, "occurred_at", null));
+    }
+
+    private void appendLifecycleAudit(String contractId, String eventType, String sourceResourceType, String sourceResourceId,
+                                      String actorUserId, String resultStatus, String eventResult, String documentRefId, String traceId) {
+        String eventId = "cl-audit-" + UUID.randomUUID();
+        String dedupeKey = dedupeKey("audit", eventType, sourceResourceId, traceId);
+        Map<String, Object> event = lifecycleEvent(eventId, contractId, eventType, sourceResourceType, sourceResourceId, null,
+                dedupeKey, actorUserId, eventResult, documentRefId, traceId);
+        event.put("result_status", resultStatus);
+        lifecycleAuditEvents.add(event);
+        jdbcTemplate.update("""
+                INSERT INTO cl_lifecycle_audit_event (audit_event_id, contract_id, event_type, source_resource_type, source_resource_id, actor_user_id, result_status, event_result, dedupe_key, related_document_ref_id, trace_id, occurred_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, eventId, contractId, eventType, sourceResourceType, sourceResourceId, actorUserId, resultStatus, eventResult,
+                dedupeKey, documentRefId, traceId, text(event, "occurred_at", null));
+    }
+
+    private Map<String, Object> lifecycleEvent(String eventId, String contractId, String eventType, String sourceResourceType,
+                                               String sourceResourceId, String milestoneCode, String dedupeKey, String actorUserId,
+                                               String eventResult, String documentRefId, String traceId) {
+        Map<String, Object> event = new LinkedHashMap<>();
+        event.put("event_id", eventId);
+        event.put("contract_id", contractId);
+        event.put("event_type", eventType);
+        event.put("source_resource_type", sourceResourceType);
+        event.put("source_resource_id", sourceResourceId);
+        event.put("milestone_code", milestoneCode);
+        event.put("dedupe_key", dedupeKey);
+        event.put("actor_user_id", actorUserId);
+        event.put("event_result", eventResult);
+        event.put("related_document_ref_id", documentRefId);
+        event.put("trace_id", traceId);
+        event.put("occurred_at", Instant.now().toString());
+        return event;
+    }
+
+    private String dedupeKey(String scope, String eventType, String sourceResourceId, String traceId) {
+        return scope + ":" + eventType + ":" + sourceResourceId + ":" + (traceId == null ? UUID.randomUUID() : traceId);
+    }
+
+    private String higherRisk(String left, String right) {
+        return riskRank(right) > riskRank(left) ? right : left;
+    }
+
+    private int riskRank(String riskLevel) {
+        return switch (riskLevel) {
+            case "HIGH" -> 3;
+            case "MEDIUM" -> 2;
+            default -> 1;
+        };
+    }
+
+    private void appendContractEvent(String contractId, String eventType, String objectId, String traceId, String nextContractStatus) {
+        ContractState contract = requireContract(contractId);
+        ContractState updated = new ContractState(contract.contractId(), contract.contractNo(), contract.contractName(),
+                nextContractStatus == null ? contract.contractStatus() : nextContractStatus,
+                contract.ownerOrgUnitId(), contract.ownerUserId(), contract.amount(), contract.currency(), contract.currentDocument(),
+                copyDocuments(contract.attachments()), contract.approvalSummary(), contract.processId(), copyEvents(contract.events()));
+        updated.events().add(event(eventType, objectId, traceId));
+        contracts.put(contractId, updated);
+    }
+
+    private PerformanceRecordState performanceRecordForContract(String contractId) {
+        String recordId = performanceRecordByContract.get(contractId);
+        return recordId == null ? null : performanceRecords.get(recordId);
+    }
+
+    private Map<String, Object> acceptEncryptionCheckIn(String documentAssetId, String documentVersionId, String triggerType,
+                                                        Map<String, Object> request, boolean replayAsIdempotent) {
+        DocumentAssetState asset = requireDocumentAsset(documentAssetId);
+        DocumentVersionState version = requireDocumentVersion(documentVersionId);
+        if (!documentAssetId.equals(version.documentAssetId())) {
+            throw new IllegalArgumentException("document_version_id 未绑定目标文档资产");
+        }
+        String indexKey = documentVersionId + ":" + triggerType;
+        String existingCheckInId = encryptionCheckInByVersionTrigger.get(indexKey);
+        if (existingCheckInId != null) {
+            return encryptionCheckInBody(requireEncryptionCheckIn(existingCheckInId), true);
+        }
+
+        EncryptionSecurityBindingState binding = findOrCreateEncryptionBinding(asset, documentVersionId);
+        String checkInId = "ed-check-in-" + UUID.randomUUID();
+        String jobId = "cmp-task-" + UUID.randomUUID();
+        boolean failed = bool(request, "simulate_encryption_failure", false);
+        String status = failed ? "FAILED_RETRYABLE" : "SUCCEEDED";
+        String resultStatus = failed ? "REJECTED" : "ENCRYPTED";
+        String resultCode = failed ? "ENCRYPTION_TASK_FAILED" : "ENCRYPTION_COMPLETED";
+        EncryptionCheckInState checkIn = new EncryptionCheckInState(checkInId, binding.securityBindingId(), documentAssetId, documentVersionId,
+                asset.ownerId(), triggerType, status, resultStatus, indexKey, resultCode, failed ? "自动加密任务失败，文档真相保持不变" : "自动加密完成",
+                jobId, Instant.now().toString(), Instant.now().toString());
+        encryptionCheckIns.put(checkInId, checkIn);
+        encryptionCheckInByVersionTrigger.put(indexKey, checkInId);
+
+        EncryptionSecurityBindingState updatedBinding = new EncryptionSecurityBindingState(binding.securityBindingId(), documentAssetId, documentVersionId,
+                asset.ownerId(), failed ? "FAILED" : "ENCRYPTED", "PLATFORM_CONTROLLED", "AUTHORIZED_ONLY", checkInId,
+                failed ? binding.lastSuccessfulEncryptedVersionId() : documentVersionId, Instant.now().toString(), binding.securityVersionNo() + 1);
+        encryptionSecurityBindings.put(updatedBinding.securityBindingId(), updatedBinding);
+
+        List<Map<String, Object>> audits = copyEvents(asset.auditRecords());
+        audits.add(encryptionAudit("CHECK_IN_ACCEPTED", "SUCCESS", updatedBinding.securityBindingId(), documentAssetId, documentVersionId,
+                asset.ownerId(), "SYSTEM", "encrypted-document", null, checkInId, text(request, "trace_id", null)));
+        audits.add(encryptionAudit(failed ? "ENCRYPT_FAILED" : "ENCRYPT_SUCCEEDED", failed ? "FAILED" : "SUCCESS", updatedBinding.securityBindingId(), documentAssetId,
+                documentVersionId, asset.ownerId(), "SYSTEM", "encrypted-document", null, checkInId, text(request, "trace_id", null)));
+        documentAssets.put(documentAssetId, new DocumentAssetState(asset.documentAssetId(), asset.currentVersionId(), asset.ownerType(), asset.ownerId(),
+                asset.documentRole(), asset.documentTitle(), asset.documentStatus(), failed ? "FAILED" : "ENCRYPTED", asset.previewStatus(),
+                asset.latestVersionNo(), audits));
+
+        Map<String, Object> body = encryptionCheckInBody(checkIn, replayAsIdempotent && existingCheckInId != null);
+        body.put("security_binding", securityBindingBody(updatedBinding));
+        return body;
+    }
+
+    private EncryptionSecurityBindingState findOrCreateEncryptionBinding(DocumentAssetState asset, String documentVersionId) {
+        String existingBindingId = encryptionBindingByDocumentAsset.get(asset.documentAssetId());
+        if (existingBindingId != null) {
+            EncryptionSecurityBindingState existing = requireEncryptionBinding(existingBindingId);
+            EncryptionSecurityBindingState updated = new EncryptionSecurityBindingState(existing.securityBindingId(), existing.documentAssetId(), documentVersionId,
+                    existing.contractId(), "PENDING", existing.internalAccessMode(), existing.downloadControlMode(), existing.latestCheckInId(),
+                    existing.lastSuccessfulEncryptedVersionId(), existing.lastSecurityEventAt(), existing.securityVersionNo() + 1);
+            encryptionSecurityBindings.put(updated.securityBindingId(), updated);
+            return updated;
+        }
+        String bindingId = "ed-bind-" + UUID.randomUUID();
+        EncryptionSecurityBindingState binding = new EncryptionSecurityBindingState(bindingId, asset.documentAssetId(), documentVersionId,
+                asset.ownerId(), "PENDING", "PLATFORM_CONTROLLED", "AUTHORIZED_ONLY", null, null, Instant.now().toString(), 1);
+        encryptionSecurityBindings.put(bindingId, binding);
+        encryptionBindingByDocumentAsset.put(asset.documentAssetId(), bindingId);
+        return binding;
+    }
+
+    private Map<String, Object> securityBindingBody(EncryptionSecurityBindingState binding) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("security_binding_id", binding.securityBindingId());
+        body.put("document_asset_id", binding.documentAssetId());
+        body.put("current_version_id", binding.currentVersionId());
+        body.put("contract_id", binding.contractId());
+        body.put("encryption_status", binding.encryptionStatus());
+        body.put("internal_access_mode", binding.internalAccessMode());
+        body.put("download_control_mode", binding.downloadControlMode());
+        body.put("last_successful_encrypted_version_id", binding.lastSuccessfulEncryptedVersionId());
+        body.put("security_version_no", binding.securityVersionNo());
+        if (binding.latestCheckInId() != null) {
+            body.put("latest_check_in", encryptionCheckInBody(requireEncryptionCheckIn(binding.latestCheckInId()), false));
+        }
+        return body;
+    }
+
+    private Map<String, Object> encryptionCheckInBody(EncryptionCheckInState checkIn, boolean idempotencyReplayed) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("check_in_id", checkIn.checkInId());
+        body.put("security_binding_id", checkIn.securityBindingId());
+        body.put("document_asset_id", checkIn.documentAssetId());
+        body.put("document_version_id", checkIn.documentVersionId());
+        body.put("contract_id", checkIn.contractId());
+        body.put("trigger_type", checkIn.triggerType());
+        body.put("check_in_status", checkIn.checkInStatus());
+        body.put("encryption_result_status", checkIn.encryptionResultStatus());
+        body.put("idempotency_key", checkIn.idempotencyKey());
+        body.put("result_code", checkIn.resultCode());
+        body.put("result_message", checkIn.resultMessage());
+        body.put("platform_job_ref", Map.of("platform_job_id", checkIn.platformJobId(), "job_type", "ED_ENCRYPTION_CHECK_IN", "job_status", checkIn.checkInStatus()));
+        body.put("accepted_at", checkIn.acceptedAt());
+        body.put("completed_at", checkIn.completedAt());
+        if (idempotencyReplayed) {
+            body.put("idempotency_replayed", true);
+        }
+        return body;
+    }
+
+    private String consumptionMode(String scene) {
+        return switch (scene) {
+            case "SIGNATURE", "ARCHIVE" -> "INTERNAL_HANDLE";
+            case "SEARCH", "AI" -> "TEMP_TEXT";
+            default -> "STREAM";
+        };
+    }
+
+    private boolean allowedAccessScene(String scene) {
+        return List.of("PREVIEW", "SIGNATURE", "ARCHIVE", "SEARCH", "AI").contains(scene);
+    }
+
+    private Map<String, Object> decryptAccessBody(DecryptAccessState access, Map<String, Object> audit) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("decrypt_access_id", access.decryptAccessId());
+        body.put("security_binding_id", access.securityBindingId());
+        body.put("document_asset_id", access.documentAssetId());
+        body.put("document_version_id", access.documentVersionId());
+        body.put("contract_id", access.contractId());
+        body.put("access_scene", access.accessScene());
+        body.put("access_subject_type", access.accessSubjectType());
+        body.put("access_subject_id", access.accessSubjectId());
+        body.put("access_result", access.accessResult());
+        body.put("decision_reason_code", access.decisionReasonCode());
+        body.put("access_ticket", access.accessTicket());
+        body.put("ticket_expires_at", access.ticketExpiresAt());
+        body.put("consumption_mode", access.consumptionMode());
+        body.put("controlled_read_handle", Map.of(
+                "handle_id", "ed-handle-" + access.decryptAccessId(),
+                "handle_status", access.accessResult(),
+                "plaintext_export_allowed", false,
+                "cache_policy", "NO_PERSISTENT_PLAINTEXT"));
+        body.put("audit_event", audit);
+        return body;
+    }
+
+    private DecryptAccessState updateDecryptAccessResult(DecryptAccessState access, String accessResult, String reasonCode) {
+        DecryptAccessState updated = new DecryptAccessState(access.decryptAccessId(), access.securityBindingId(), access.documentAssetId(),
+                access.documentVersionId(), access.contractId(), access.accessScene(), access.accessSubjectType(), access.accessSubjectId(),
+                access.actorDepartmentId(), accessResult, reasonCode, access.accessTicket(), access.ticketExpiresAt(), access.consumptionMode(),
+                access.traceId(), access.consumedAt());
+        decryptAccesses.put(updated.decryptAccessId(), updated);
+        return updated;
+    }
+
+    private Map<String, Object> auditDecryptAccessLifecycle(DecryptAccessState access, String eventType, String traceId) {
+        Map<String, Object> audit = encryptionAudit(eventType, "SUCCESS", access.securityBindingId(), access.documentAssetId(), access.documentVersionId(),
+                access.contractId(), access.accessSubjectType(), access.accessSubjectId(), access.actorDepartmentId(), access.decryptAccessId(), traceId);
+        requireDocumentAsset(access.documentAssetId()).auditRecords().add(audit);
+        return audit;
+    }
+
+    private Map<String, Object> encryptionAudit(String eventType, String eventResult, String securityBindingId, String documentAssetId,
+                                                 String documentVersionId, String contractId, String actorType, String actorId,
+                                                 String actorDepartmentId, String relatedResourceId, String traceId) {
+        Map<String, Object> audit = new LinkedHashMap<>();
+        audit.put("audit_event_id", "ed-audit-" + UUID.randomUUID());
+        audit.put("event_type", eventType);
+        audit.put("event_result", eventResult);
+        audit.put("security_binding_id", securityBindingId);
+        audit.put("document_asset_id", documentAssetId);
+        audit.put("document_version_id", documentVersionId);
+        audit.put("contract_id", contractId);
+        audit.put("actor_type", actorType);
+        audit.put("actor_id", actorId);
+        audit.put("actor_department_id", actorDepartmentId);
+        audit.put("related_resource_type", relatedResourceId == null ? null : "ENCRYPTED_DOCUMENT_RUNTIME");
+        audit.put("related_resource_id", relatedResourceId);
+        audit.put("trace_id", traceId);
+        audit.put("occurred_at", Instant.now().toString());
+        encryptedDocumentAuditRecords.add(audit);
+        return audit;
+    }
+
+    private AuthorizationDecision evaluateDownloadAuthorization(Map<String, Object> request, DocumentAssetState asset, String traceId, boolean writeAudit) {
+        String userId = text(request, "requester_user_id", text(request, "requested_by", null));
+        String departmentId = text(request, "requester_department_id", text(request, "requested_department_id", null));
+        String documentVersionId = text(request, "document_version_id", asset.currentVersionId());
+        EncryptionSecurityBindingState binding = requireEncryptionBindingByDocumentAsset(asset.documentAssetId());
+        DownloadAuthorizationState matched = downloadAuthorizations.values().stream()
+                .filter(this::isDownloadAuthorizationActiveNow)
+                .filter(auth -> authorizationSubjectMatches(auth, userId, departmentId))
+                .filter(auth -> authorizationScopeMatches(auth, asset))
+                .sorted((left, right) -> {
+                    int priority = Integer.compare(right.priorityNo(), left.priorityNo());
+                    if (priority != 0) {
+                        return priority;
+                    }
+                    return Integer.compare(subjectRank(right.subjectType()), subjectRank(left.subjectType()));
+                })
+                .findFirst()
+                .orElse(null);
+        Map<String, Object> audit = encryptionAudit(matched == null ? "DOWNLOAD_AUTH_DENIED" : "DOWNLOAD_AUTH_HIT", matched == null ? "REJECTED" : "SUCCESS",
+                binding.securityBindingId(), asset.documentAssetId(), documentVersionId, asset.ownerId(), "USER", userId, departmentId,
+                matched == null ? null : matched.authorizationId(), traceId);
+        if (writeAudit) {
+            asset.auditRecords().add(audit);
+        }
+        return new AuthorizationDecision(matched, matched == null ? null : authorizationSnapshot(matched, asset, userId, departmentId, documentVersionId), audit);
+    }
+
+    private boolean isDownloadAuthorizationActiveNow(DownloadAuthorizationState authorization) {
+        Instant now = Instant.now();
+        return "ACTIVE".equals(authorization.authorizationStatus())
+                && !now.isBefore(Instant.parse(authorization.effectiveStartAt()))
+                && !now.isAfter(Instant.parse(authorization.effectiveEndAt()));
+    }
+
+    private boolean authorizationSubjectMatches(DownloadAuthorizationState authorization, String userId, String departmentId) {
+        return switch (authorization.subjectType()) {
+            case "USER" -> authorization.subjectId().equals(userId);
+            case "DEPARTMENT" -> authorization.subjectId().equals(departmentId);
+            default -> false;
+        };
+    }
+
+    private boolean authorizationScopeMatches(DownloadAuthorizationState authorization, DocumentAssetState asset) {
+        return switch (authorization.scopeType()) {
+            case "GLOBAL" -> "*".equals(authorization.scopeValue());
+            case "CONTRACT" -> authorization.scopeValue().equals(asset.ownerId());
+            case "DOCUMENT_ROLE" -> authorization.scopeValue().equals(asset.documentRole());
+            case "ORG_SCOPE" -> authorization.scopeValue().equals(asset.ownerId());
+            default -> false;
+        };
+    }
+
+    private int subjectRank(String subjectType) {
+        return "USER".equals(subjectType) ? 2 : 1;
+    }
+
+    private Map<String, Object> authorizationPolicySnapshot(Map<String, Object> request) {
+        String scopeType = text(request, "scope_type", "GLOBAL");
+        String scopeValue = text(request, "scope_value", "*");
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("scope_expression", Map.of(
+                "expression_code", scopeType + ":" + scopeValue,
+                "scope_type", scopeType,
+                "scope_value", scopeValue,
+                "expression_version", 1));
+        snapshot.put("download_reason_required", bool(request, "download_reason_required", true));
+        return snapshot;
+    }
+
+    private Map<String, Object> authorizationSnapshot(DownloadAuthorizationState authorization, DocumentAssetState asset,
+                                                      String userId, String departmentId, String documentVersionId) {
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("authorization_id", authorization.authorizationId());
+        snapshot.put("subject_type", authorization.subjectType());
+        snapshot.put("subject_id", authorization.subjectId());
+        snapshot.put("requester_user_id", userId);
+        snapshot.put("requester_department_id", departmentId);
+        snapshot.put("document_asset_id", asset.documentAssetId());
+        snapshot.put("document_version_id", documentVersionId);
+        snapshot.put("contract_id", asset.ownerId());
+        snapshot.put("scope_type", authorization.scopeType());
+        snapshot.put("scope_value", authorization.scopeValue());
+        snapshot.put("priority_no", authorization.priorityNo());
+        snapshot.put("policy_snapshot", authorization.policySnapshot());
+        snapshot.put("frozen_at", Instant.now().toString());
+        return snapshot;
+    }
+
+    private Map<String, Object> downloadAuthorizationBody(DownloadAuthorizationState authorization, Map<String, Object> audit) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("authorization_id", authorization.authorizationId());
+        body.put("authorization_name", authorization.authorizationName());
+        body.put("authorization_status", authorization.authorizationStatus());
+        body.put("subject_type", authorization.subjectType());
+        body.put("subject_id", authorization.subjectId());
+        body.put("scope_type", authorization.scopeType());
+        body.put("scope_value", authorization.scopeValue());
+        body.put("download_reason_required", authorization.downloadReasonRequired());
+        body.put("effective_start_at", authorization.effectiveStartAt());
+        body.put("effective_end_at", authorization.effectiveEndAt());
+        body.put("priority_no", authorization.priorityNo());
+        body.put("granted_by", authorization.grantedBy());
+        body.put("revoked_by", authorization.revokedBy());
+        body.put("revoked_at", authorization.revokedAt());
+        body.put("policy_snapshot", authorization.policySnapshot());
+        body.put("audit_event", audit);
+        return body;
+    }
+
+    private Map<String, Object> downloadAuthorizationDecisionBody(AuthorizationDecision decision) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("decision", "ALLOWED");
+        body.put("reason_code", "DOWNLOAD_AUTHORIZATION_MATCHED");
+        body.put("matched_authorization", downloadAuthorizationBody(decision.authorization(), null));
+        body.put("authorization_snapshot", decision.snapshot());
+        body.put("explanation", Map.of(
+                "subject_type", decision.authorization().subjectType(),
+                "scope_type", decision.authorization().scopeType(),
+                "priority_no", decision.authorization().priorityNo(),
+                "matched_by", decision.authorization().subjectType() + "+" + decision.authorization().scopeType()));
+        body.put("audit_event", decision.auditEvent());
+        return body;
+    }
+
+    private Map<String, Object> authorizationAudit(DownloadAuthorizationState authorization, String eventType, String result, String traceId) {
+        Map<String, Object> audit = encryptionAudit(eventType, result, null, null, null, contractIdForAuthorizationScope(authorization), "USER",
+                authorization.grantedBy() == null ? authorization.revokedBy() : authorization.grantedBy(), null, authorization.authorizationId(), traceId);
+        audit.put("subject_type", authorization.subjectType());
+        audit.put("subject_id", authorization.subjectId());
+        audit.put("scope_type", authorization.scopeType());
+        audit.put("scope_value", authorization.scopeValue());
+        return audit;
+    }
+
+    private String contractIdForAuthorizationScope(DownloadAuthorizationState authorization) {
+        return "CONTRACT".equals(authorization.scopeType()) ? authorization.scopeValue() : null;
+    }
+
+    private void appendAuthorizationAuditToScopedAssets(DownloadAuthorizationState authorization, Map<String, Object> audit) {
+        if (!"CONTRACT".equals(authorization.scopeType())) {
+            return;
+        }
+        documentAssets.values().stream()
+                .filter(asset -> authorization.scopeValue().equals(asset.ownerId()))
+                .forEach(asset -> asset.auditRecords().add(new LinkedHashMap<>(audit)));
+    }
+
+    private Map<String, Object> decryptDownloadJobBody(DecryptDownloadJobState job, Map<String, Object> audit) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("decrypt_download_job_id", job.decryptDownloadJobId());
+        body.put("security_binding_id", job.securityBindingId());
+        body.put("authorization_id", job.authorizationId());
+        body.put("document_asset_id", job.documentAssetId());
+        body.put("document_version_id", job.documentVersionId());
+        body.put("contract_id", job.contractId());
+        body.put("requested_by", job.requestedBy());
+        body.put("requested_department_id", job.requestedDepartmentId());
+        body.put("download_reason", job.downloadReason());
+        body.put("job_status", job.jobStatus());
+        body.put("authorization_snapshot", job.authorizationSnapshot());
+        body.put("export_artifact_ref", job.exportArtifactRef());
+        body.put("export_file_name", job.exportFileName());
+        body.put("download_url_token", job.downloadUrlToken());
+        body.put("download_expires_at", job.downloadExpiresAt());
+        body.put("result_code", job.resultCode());
+        body.put("result_message", job.resultMessage());
+        body.put("platform_job_ref", Map.of("platform_job_id", job.platformJobId(), "job_type", "ED_DECRYPT_DOWNLOAD_EXPORT", "job_status", job.jobStatus()));
+        body.put("download_url", Map.of("token", job.downloadUrlToken(), "expires_at", job.downloadExpiresAt()));
+        body.put("export_artifact", Map.of(
+                "package_id", job.exportArtifactRef(),
+                "artifact_status", "EXPIRED".equals(job.jobStatus()) ? "EXPIRED" : job.jobStatus(),
+                "export_file_name", job.exportFileName(),
+                "plaintext_detached_usable", true,
+                "document_center_truth_replaced", false));
+        body.put("audit_event", audit);
+        return body;
+    }
+
+    private DecryptDownloadJobState updateDecryptDownloadJobStatus(DecryptDownloadJobState job, String status, String resultCode, String resultMessage) {
+        DecryptDownloadJobState updated = new DecryptDownloadJobState(job.decryptDownloadJobId(), job.securityBindingId(), job.authorizationId(),
+                job.documentAssetId(), job.documentVersionId(), job.contractId(), job.requestedBy(), job.requestedDepartmentId(), job.downloadReason(),
+                job.requestIdempotencyKey(), status, job.authorizationSnapshot(), job.exportArtifactRef(), job.exportFileName(), job.downloadUrlToken(),
+                job.downloadExpiresAt(), job.attemptCount(), job.platformJobId(), resultCode, resultMessage, job.requestedAt(), Instant.now().toString());
+        decryptDownloadJobs.put(updated.decryptDownloadJobId(), updated);
+        return updated;
+    }
+
+    private ResponseEntity<Map<String, Object>> rejectDownloadJobTransitionUnlessReady(DecryptDownloadJobState job, String targetStatus) {
+        if ("READY".equals(job.jobStatus())) {
+            return null;
+        }
+        Map<String, Object> body = error("DOWNLOAD_JOB_STATUS_CONFLICT", "仅 READY 下载作业允许流转到 " + targetStatus);
+        body.put("current_job_status", job.jobStatus());
+        body.put("requested_job_status", targetStatus);
+        body.put("decrypt_download_job_id", job.decryptDownloadJobId());
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(body);
+    }
+
+    private Map<String, Object> auditDownloadJob(DecryptDownloadJobState job, String eventType, String eventResult, String traceId) {
+        Map<String, Object> audit = encryptionAudit(eventType, eventResult, job.securityBindingId(), job.documentAssetId(), job.documentVersionId(),
+                job.contractId(), "USER", job.requestedBy(), job.requestedDepartmentId(), job.decryptDownloadJobId(), traceId);
+        requireDocumentAsset(job.documentAssetId()).auditRecords().add(audit);
+        return audit;
+    }
+
     private Map<String, Object> contractBody(ContractState contract) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("contract_id", contract.contractId());
@@ -1292,6 +2501,7 @@ class CoreChainService {
         body.put("timeline_event", contract.events());
         body.put("audit_record", contract.events());
         body.put("signature_summary", signatureSummaries.get(contract.contractId()));
+        body.put("performance_summary", performanceSummaries.get(contract.contractId()));
         return body;
     }
 
@@ -1376,6 +2586,10 @@ class CoreChainService {
         body.put("encryption_status", asset.encryptionStatus());
         body.put("preview_status", asset.previewStatus());
         body.put("binding_summary", bindingSummary);
+        String securityBindingId = encryptionBindingByDocumentAsset.get(asset.documentAssetId());
+        if (securityBindingId != null) {
+            body.put("security_binding_summary", securityBindingBody(requireEncryptionBinding(securityBindingId)));
+        }
         body.put("audit_record", asset.auditRecords());
         return body;
     }
@@ -1655,6 +2869,12 @@ class CoreChainService {
             case "APPROVAL_APPROVED" -> "审批通过并回写合同状态";
             case "APPROVAL_REJECTED" -> "审批驳回并回写合同状态";
             case "APPROVAL_TERMINATED" -> "审批终止并回写合同状态";
+            case "PERFORMANCE_STARTED" -> "履约已启动并写入生命周期摘要";
+            case "PERFORMANCE_NODE_CREATED" -> "履约节点已创建";
+            case "PERFORMANCE_PROGRESS_UPDATED" -> "履约进展已更新";
+            case "PERFORMANCE_NODE_OVERDUE" -> "履约节点已逾期";
+            case "PERFORMANCE_RISK_CHANGED" -> "履约风险已变化";
+            case "PERFORMANCE_COMPLETED" -> "履约已完成并回写合同摘要";
             default -> "审批回写进入补偿";
         };
     }
@@ -1674,6 +2894,22 @@ class CoreChainService {
             throw new IllegalArgumentException("contract_id 不存在: " + contractId);
         }
         return contract;
+    }
+
+    private PerformanceRecordState requirePerformanceRecord(String performanceRecordId) {
+        PerformanceRecordState record = performanceRecords.get(performanceRecordId);
+        if (record == null) {
+            throw new IllegalArgumentException("performance_record_id 不存在: " + performanceRecordId);
+        }
+        return record;
+    }
+
+    private PerformanceNodeState requirePerformanceNode(String performanceNodeId) {
+        PerformanceNodeState node = performanceNodes.get(performanceNodeId);
+        if (node == null) {
+            throw new IllegalArgumentException("performance_node_id 不存在: " + performanceNodeId);
+        }
+        return node;
     }
 
     private SignatureRequestState requireSignatureRequest(String signatureRequestId) {
@@ -1698,6 +2934,54 @@ class CoreChainService {
             throw new IllegalArgumentException("document_asset_id 不存在: " + documentAssetId);
         }
         return asset;
+    }
+
+    private EncryptionSecurityBindingState requireEncryptionBinding(String securityBindingId) {
+        EncryptionSecurityBindingState binding = encryptionSecurityBindings.get(securityBindingId);
+        if (binding == null) {
+            throw new IllegalArgumentException("security_binding_id 不存在: " + securityBindingId);
+        }
+        return binding;
+    }
+
+    private EncryptionSecurityBindingState requireEncryptionBindingByDocumentAsset(String documentAssetId) {
+        String bindingId = encryptionBindingByDocumentAsset.get(documentAssetId);
+        if (bindingId == null) {
+            throw new IllegalArgumentException("document_asset_id 未纳入加密治理: " + documentAssetId);
+        }
+        return requireEncryptionBinding(bindingId);
+    }
+
+    private EncryptionCheckInState requireEncryptionCheckIn(String checkInId) {
+        EncryptionCheckInState checkIn = encryptionCheckIns.get(checkInId);
+        if (checkIn == null) {
+            throw new IllegalArgumentException("check_in_id 不存在: " + checkInId);
+        }
+        return checkIn;
+    }
+
+    private DecryptAccessState requireDecryptAccess(String decryptAccessId) {
+        DecryptAccessState access = decryptAccesses.get(decryptAccessId);
+        if (access == null) {
+            throw new IllegalArgumentException("decrypt_access_id 不存在: " + decryptAccessId);
+        }
+        return access;
+    }
+
+    private DownloadAuthorizationState requireDownloadAuthorization(String authorizationId) {
+        DownloadAuthorizationState authorization = downloadAuthorizations.get(authorizationId);
+        if (authorization == null) {
+            throw new IllegalArgumentException("authorization_id 不存在: " + authorizationId);
+        }
+        return authorization;
+    }
+
+    private DecryptDownloadJobState requireDecryptDownloadJob(String jobId) {
+        DecryptDownloadJobState job = decryptDownloadJobs.get(jobId);
+        if (job == null) {
+            throw new IllegalArgumentException("decrypt_download_job_id 不存在: " + jobId);
+        }
+        return job;
     }
 
     private DocumentVersionState requireDocumentVersion(String documentVersionId) {
@@ -1930,8 +3214,64 @@ class CoreChainService {
     }
 
     private record PaperRecordState(String paperRecordId, String contractId, String signatureRequestId, String recordStatus,
-                                    String recordedSignDate, String paperDocumentAssetId, String paperDocumentVersionId,
-                                    String confirmedBy, String confirmedAt, Map<String, Object> paperScanBinding,
-                                    Map<String, Object> signatureSummary) {
+                                     String recordedSignDate, String paperDocumentAssetId, String paperDocumentVersionId,
+                                     String confirmedBy, String confirmedAt, Map<String, Object> paperScanBinding,
+                                     Map<String, Object> signatureSummary) {
+    }
+
+    private record PerformanceRecordState(String performanceRecordId, String contractId, String performanceStatus,
+                                          int progressPercent, String riskLevel, String ownerUserId, String ownerOrgUnitId,
+                                          int openNodeCount, int overdueNodeCount, String latestDueAt, String summaryText,
+                                          String latestMilestoneCode, String lastEvaluatedAt, String lastWritebackAt) {
+    }
+
+    private record PerformanceNodeState(String performanceNodeId, String performanceRecordId, String contractId,
+                                        String nodeType, String nodeName, String milestoneCode, String plannedAt,
+                                        String dueAt, String actualAt, String nodeStatus, int progressPercent,
+                                        String riskLevel, int issueCount, boolean overdue, String resultSummary,
+                                        String lastResultAt, String ownerUserId, String ownerOrgUnitId,
+                                        Map<String, Object> documentRef) {
+    }
+
+    private record EncryptionSecurityBindingState(String securityBindingId, String documentAssetId, String currentVersionId,
+                                                  String contractId, String encryptionStatus, String internalAccessMode,
+                                                  String downloadControlMode, String latestCheckInId,
+                                                  String lastSuccessfulEncryptedVersionId, String lastSecurityEventAt,
+                                                  int securityVersionNo) {
+    }
+
+    private record EncryptionCheckInState(String checkInId, String securityBindingId, String documentAssetId,
+                                          String documentVersionId, String contractId, String triggerType,
+                                          String checkInStatus, String encryptionResultStatus, String idempotencyKey,
+                                          String resultCode, String resultMessage, String platformJobId,
+                                          String acceptedAt, String completedAt) {
+    }
+
+    private record DecryptAccessState(String decryptAccessId, String securityBindingId, String documentAssetId,
+                                       String documentVersionId, String contractId, String accessScene,
+                                       String accessSubjectType, String accessSubjectId, String actorDepartmentId,
+                                       String accessResult, String decisionReasonCode, String accessTicket,
+                                       String ticketExpiresAt, String consumptionMode, String traceId,
+                                       String consumedAt) {
+    }
+
+    private record DownloadAuthorizationState(String authorizationId, String authorizationName, String authorizationStatus,
+                                              String subjectType, String subjectId, String scopeType, String scopeValue,
+                                              boolean downloadReasonRequired, String effectiveStartAt, String effectiveEndAt,
+                                              int priorityNo, String grantedBy, String revokedBy, String revokedAt,
+                                              Map<String, Object> policySnapshot) {
+    }
+
+    private record DecryptDownloadJobState(String decryptDownloadJobId, String securityBindingId, String authorizationId,
+                                           String documentAssetId, String documentVersionId, String contractId,
+                                           String requestedBy, String requestedDepartmentId, String downloadReason,
+                                           String requestIdempotencyKey, String jobStatus, Map<String, Object> authorizationSnapshot,
+                                           String exportArtifactRef, String exportFileName, String downloadUrlToken,
+                                           String downloadExpiresAt, int attemptCount, String platformJobId,
+                                           String resultCode, String resultMessage, String requestedAt, String completedAt) {
+    }
+
+    private record AuthorizationDecision(DownloadAuthorizationState authorization, Map<String, Object> snapshot,
+                                         Map<String, Object> auditEvent) {
     }
 }
