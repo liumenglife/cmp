@@ -144,3 +144,19 @@
 
 - 第三批后续功能点继续以 [`102-03-batch-3-dependent-business-capabilities-implementation-plan.md`](../superpowers/plans/102-03-batch-3-dependent-business-capabilities-implementation-plan.md) 为执行依据。
 - 已全绿的第三批第一项、第二项、第三项不再作为未完成任务处理。
+
+## 2026-04-29 第三批第四项阶段性归档
+
+### 归档原因
+
+- 第三批第四项“加密软件自动加密与平台内受控访问”已经完成实现、修复、独立质量审查复审与完整验证。
+- `current.md` 继续维护第三批后续功能点推进状态，本节记录已经全绿的第四项完成事实。
+
+### 已归档任务批次
+
+- [✓] 加密软件自动加密与平台内受控访问：已按测试驱动开发完成，首次独立质量审查结论为不通过，问题包括访问票据未校验、访问场景缺少白名单、平台外明文拒绝未持久审计；修复后独立复审结论为通过，没问题；完整验证 `./scripts/verify-all.sh` 通过。
+
+### 迁移说明
+
+- 第三批第五项“加密软件授权解密下载与高敏审计闭环”继续以 [`102-03-batch-3-dependent-business-capabilities-implementation-plan.md`](../superpowers/plans/102-03-batch-3-dependent-business-capabilities-implementation-plan.md) 为执行依据。
+- 已全绿的第三批第四项不再作为未完成任务处理。
