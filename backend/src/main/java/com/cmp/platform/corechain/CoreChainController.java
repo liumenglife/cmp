@@ -1060,6 +1060,17 @@ class CoreChainService {
         String traceId = text(request, "trace_id", null);
         DocumentAssetState asset = requireDocumentAsset(documentAssetId);
         EncryptionSecurityBindingState binding = requireEncryptionBindingByDocumentAsset(documentAssetId);
+        ContractState contract = requireContract(asset.ownerId());
+        if (("TERMINATED".equals(contract.contractStatus()) || "ARCHIVED".equals(contract.contractStatus()))
+                && !"ARCHIVE".equals(scene)) {
+            Map<String, Object> audit = encryptionAudit("DECRYPT_ACCESS_DENIED", "REJECTED", binding.securityBindingId(), documentAssetId, documentVersionId,
+                    asset.ownerId(), text(request, "access_subject_type", "USER"), text(request, "access_subject_id", null), text(request, "actor_department_id", null), null, traceId);
+            asset.auditRecords().add(audit);
+            Map<String, Object> body = error("CONTRACT_ARCHIVED_CONTROLLED_ACCESS_RESTRICTED", "合同终止或归档后仅允许归档场景受控访问");
+            body.put("contract_status", contract.contractStatus());
+            body.put("audit_event", audit);
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(body);
+        }
         if ("EXTERNAL_DOWNLOAD".equals(scene)) {
             Map<String, Object> body = error("PLAINTEXT_EXPORT_NOT_ALLOWED", "默认路径不允许平台外明文外放");
             Map<String, Object> audit = encryptionAudit("DECRYPT_ACCESS_DENIED", "REJECTED", binding.securityBindingId(), documentAssetId, documentVersionId,
@@ -2408,6 +2419,11 @@ class CoreChainService {
 
     private List<Map<String, Object>> combinedAudit(ContractState contract) {
         List<Map<String, Object>> events = nonLifecycleContractEvents(contract.events());
+        events.addAll(encryptedDocumentAuditRecords.stream()
+                .filter(event -> contract.contractId().equals(text(event, "contract_id", null)))
+                .map(LinkedHashMap::new)
+                .map(event -> (Map<String, Object>) event)
+                .toList());
         events.addAll(lifecycleAudit(contract.contractId()));
         return events;
     }
