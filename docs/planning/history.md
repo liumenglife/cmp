@@ -176,3 +176,19 @@
 
 - 第三批第六项“合同生命周期履约基础能力”继续以 [`102-03-batch-3-dependent-business-capabilities-implementation-plan.md`](../superpowers/plans/102-03-batch-3-dependent-business-capabilities-implementation-plan.md) 为执行依据。
 - 已全绿的第三批第五项不再作为未完成任务处理。
+
+## 2026-04-29 第三批第六项阶段性归档
+
+### 归档原因
+
+- 第三批第六项“合同生命周期履约基础能力”已经完成实现、修复、独立质量审查复审与完整验证。
+- `current.md` 继续维护第三批后续功能点推进状态，本节记录已经全绿的第六项完成事实。
+
+### 已归档任务批次
+
+- [✓] 合同生命周期履约基础能力：已按测试驱动开发完成，首次独立质量审查结论为不通过，问题包括履约主记录和摘要没有持久事实、状态机允许非法完成、时间线与审计没有独立可回查事实；修复后独立复审仍发现逾期完成阻断和状态机测试覆盖不足；二次修复后独立复审结论为通过，没问题；完整验证 `./scripts/verify-all.sh` 通过。
+
+### 迁移说明
+
+- 第三批第七项“合同生命周期变更、终止与归档能力”继续以 [`102-03-batch-3-dependent-business-capabilities-implementation-plan.md`](../superpowers/plans/102-03-batch-3-dependent-business-capabilities-implementation-plan.md) 为执行依据。
+- 已全绿的第三批第六项不再作为未完成任务处理。
