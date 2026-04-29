@@ -156,6 +156,22 @@ class Batch3CrossModuleLifecycleIntegrationTests {
                                 """))
                 .andExpect(status().isOk());
 
+        mockMvc.perform(post("/api/encrypted-documents/download-jobs")
+                        .header("X-CMP-Permissions", "CONTRACT_VIEW")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"document_asset_id":"%s","document_version_id":"%s","requested_by":"u-download","requested_department_id":"dept-cross","download_reason":"终止后归档前不应允许普通明文导出","request_idempotency_key":"trace-xm-download-after-terminated","trace_id":"trace-xm-download-after-terminated"}
+                                """.formatted(approved.documentAssetId(), approved.documentVersionId())))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error_code").value("CONTRACT_ARCHIVED_CONTROLLED_ACCESS_RESTRICTED"))
+                .andExpect(jsonPath("$.contract_status").value("TERMINATED"))
+                .andExpect(jsonPath("$.audit_event.event_type").value("DOWNLOAD_EXPORT_DENIED"))
+                .andExpect(jsonPath("$.audit_event.trace_id").value("trace-xm-download-after-terminated"));
+        mockMvc.perform(get("/api/encrypted-documents/audit-events")
+                        .param("contract_id", contractId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[?(@.event_type == 'DOWNLOAD_EXPORT_DENIED' && @.trace_id == 'trace-xm-download-after-terminated')]").isNotEmpty());
+
         String archivePackage = createDocument(contractId, "ARCHIVE_PACKAGE", "跨模块归档封包.zip", "trace-xm-archive-package");
         String archiveManifest = createDocument(contractId, "ARCHIVE_MANIFEST", "跨模块归档清单.json", "trace-xm-archive-manifest");
         mockMvc.perform(post("/api/contracts/{contract_id}/archives", contractId)
