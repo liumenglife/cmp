@@ -277,6 +277,30 @@ class CoreChainController {
         return service.expireDecryptDownloadJob(jobId, request == null ? Map.of() : request);
     }
 
+    @PostMapping("/api/contracts/{contractId}/performance-records")
+    ResponseEntity<Map<String, Object>> createPerformanceRecord(@PathVariable String contractId,
+                                                                @RequestBody Map<String, Object> request) {
+        return service.createPerformanceRecord(contractId, request);
+    }
+
+    @GetMapping("/api/contracts/{contractId}/performance-overview")
+    Map<String, Object> performanceOverview(@PathVariable String contractId) {
+        return service.performanceOverview(contractId);
+    }
+
+    @PostMapping("/api/contracts/{contractId}/performance-nodes")
+    ResponseEntity<Map<String, Object>> createPerformanceNode(@PathVariable String contractId,
+                                                              @RequestBody Map<String, Object> request) {
+        return service.createPerformanceNode(contractId, request);
+    }
+
+    @PatchMapping("/api/contracts/{contractId}/performance-nodes/{nodeId}")
+    ResponseEntity<Map<String, Object>> updatePerformanceNode(@PathVariable String contractId,
+                                                              @PathVariable String nodeId,
+                                                              @RequestBody Map<String, Object> request) {
+        return service.updatePerformanceNode(contractId, nodeId, request);
+    }
+
     @GetMapping("/api/encrypted-documents/audit-events")
     Map<String, Object> encryptedDocumentAuditEvents(@RequestParam(required = false) String document_asset_id,
                                                      @RequestParam(required = false) String contract_id,
@@ -312,6 +336,11 @@ class CoreChainService {
     private final Map<String, DownloadAuthorizationState> downloadAuthorizations = new ConcurrentHashMap<>();
     private final Map<String, DecryptDownloadJobState> decryptDownloadJobs = new ConcurrentHashMap<>();
     private final List<Map<String, Object>> encryptedDocumentAuditRecords = new ArrayList<>();
+    private final Map<String, PerformanceRecordState> performanceRecords = new ConcurrentHashMap<>();
+    private final Map<String, String> performanceRecordByContract = new ConcurrentHashMap<>();
+    private final Map<String, PerformanceNodeState> performanceNodes = new ConcurrentHashMap<>();
+    private final Map<String, Map<String, Object>> performanceSummaries = new ConcurrentHashMap<>();
+    private final Map<String, Map<String, Object>> lifecycleSummaries = new ConcurrentHashMap<>();
 
     Map<String, Object> createContract(Map<String, Object> request) {
         String contractId = "ctr-" + UUID.randomUUID();
@@ -1203,8 +1232,122 @@ class CoreChainService {
         body.put("document_summary", contract.currentDocument() == null ? null : documentBody(contract.currentDocument()));
         body.put("attachment_summaries", contract.attachments().stream().map(this::documentBody).toList());
         body.put("approval_summary", contract.approvalSummary());
+        body.put("lifecycle_summary", lifecycleSummaries.get(contractId));
         body.put("timeline_summary", contract.events());
+        body.put("audit_record", contract.events());
         return body;
+    }
+
+    ResponseEntity<Map<String, Object>> createPerformanceRecord(String contractId, Map<String, Object> request) {
+        ContractState contract = requireContract(contractId);
+        if (!"SIGNED".equals(contract.contractStatus()) && !"PERFORMED".equals(contract.contractStatus())) {
+            return ResponseEntity.status(HttpStatus.CONFLICT)
+                    .body(error("CONTRACT_NOT_EFFECTIVE_FOR_PERFORMANCE", "合同未签章或未生效，不能创建正式履约记录"));
+        }
+        String existingId = performanceRecordByContract.get(contractId);
+        if (existingId != null) {
+            return ResponseEntity.ok(performanceRecordBody(requirePerformanceRecord(existingId), contract.contractStatus()));
+        }
+
+        String recordId = "perf-rec-" + UUID.randomUUID();
+        PerformanceRecordState record = new PerformanceRecordState(recordId, contractId, "IN_PROGRESS", 0, "LOW",
+                text(request, "owner_user_id", contract.ownerUserId()), text(request, "owner_org_unit_id", contract.ownerOrgUnitId()),
+                0, 0, null, "履约已启动", "PERFORMANCE_STARTED", Instant.now().toString(), Instant.now().toString());
+        performanceRecords.put(recordId, record);
+        performanceRecordByContract.put(contractId, recordId);
+        Map<String, Object> summary = refreshPerformanceSummary(contractId, "PERFORMANCE_STARTED");
+        lifecycleSummaries.put(contractId, lifecycleSummary(contractId, summary));
+        appendContractEvent(contractId, "PERFORMANCE_STARTED", recordId, text(request, "trace_id", null), null);
+        return ResponseEntity.status(HttpStatus.CREATED).body(performanceRecordBody(record, contract.contractStatus()));
+    }
+
+    Map<String, Object> performanceOverview(String contractId) {
+        requireContract(contractId);
+        PerformanceRecordState record = performanceRecordForContract(contractId);
+        List<Map<String, Object>> nodes = performanceNodes.values().stream()
+                .filter(node -> contractId.equals(node.contractId()))
+                .map(this::performanceNodeBody)
+                .toList();
+        List<Map<String, Object>> documentRefs = nodes.stream()
+                .map(node -> map(node.get("document_ref")))
+                .filter(ref -> !ref.isEmpty())
+                .toList();
+        Map<String, Object> summary = performanceSummaries.get(contractId);
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("contract_id", contractId);
+        body.put("performance_record", record == null ? null : performanceRecordBody(record, requireContract(contractId).contractStatus()));
+        body.put("nodes", nodes);
+        body.put("document_refs", documentRefs);
+        body.put("risk_summary", summary == null ? null : summary.get("risk_summary"));
+        body.put("performance_summary", summary);
+        return body;
+    }
+
+    ResponseEntity<Map<String, Object>> createPerformanceNode(String contractId, Map<String, Object> request) {
+        requireContract(contractId);
+        PerformanceRecordState record = performanceRecordForContract(contractId);
+        if (record == null) {
+            ResponseEntity<Map<String, Object>> created = createPerformanceRecord(contractId, request);
+            if (!created.getStatusCode().is2xxSuccessful()) {
+                return created;
+            }
+            record = performanceRecordForContract(contractId);
+        }
+        String requestedRecordId = text(request, "performance_record_id", record.performanceRecordId());
+        if (!record.performanceRecordId().equals(requestedRecordId)) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(error("PERFORMANCE_RECORD_CONTRACT_MISMATCH", "履约记录未绑定当前合同"));
+        }
+
+        String nodeId = "perf-node-" + UUID.randomUUID();
+        Map<String, Object> documentRef = performanceDocumentRef(contractId, nodeId, request);
+        PerformanceNodeState node = new PerformanceNodeState(nodeId, record.performanceRecordId(), contractId,
+                text(request, "node_type", "GENERAL"), text(request, "node_name", "履约节点"), text(request, "milestone_code", null),
+                text(request, "planned_at", null), text(request, "due_at", null), null, "PENDING", intValue(request, "progress_percent", 0),
+                text(request, "risk_level", "LOW"), intValue(request, "issue_count", 0), false, text(request, "result_summary", null), null,
+                text(request, "owner_user_id", record.ownerUserId()), text(request, "owner_org_unit_id", record.ownerOrgUnitId()), documentRef);
+        performanceNodes.put(nodeId, node);
+        Map<String, Object> summary = refreshPerformanceSummary(contractId, node.milestoneCode());
+        lifecycleSummaries.put(contractId, lifecycleSummary(contractId, summary));
+        appendContractEvent(contractId, "PERFORMANCE_NODE_CREATED", nodeId, text(request, "trace_id", null), null);
+        Map<String, Object> body = performanceNodeBody(node);
+        body.put("performance_summary", summary);
+        return ResponseEntity.status(HttpStatus.CREATED).body(body);
+    }
+
+    ResponseEntity<Map<String, Object>> updatePerformanceNode(String contractId, String nodeId, Map<String, Object> request) {
+        PerformanceNodeState node = requirePerformanceNode(nodeId);
+        if (!contractId.equals(node.contractId())) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(error("PERFORMANCE_NODE_CONTRACT_MISMATCH", "履约节点未绑定当前合同"));
+        }
+        String previousRisk = node.riskLevel();
+        String nodeStatus = text(request, "node_status", node.nodeStatus());
+        String riskLevel = text(request, "risk_level", node.riskLevel());
+        boolean overdue = bool(request, "is_overdue", "OVERDUE".equals(nodeStatus));
+        PerformanceNodeState updated = new PerformanceNodeState(node.performanceNodeId(), node.performanceRecordId(), node.contractId(),
+                node.nodeType(), node.nodeName(), node.milestoneCode(), node.plannedAt(), node.dueAt(), text(request, "actual_at", node.actualAt()),
+                nodeStatus, intValue(request, "progress_percent", node.progressPercent()), riskLevel, intValue(request, "issue_count", node.issueCount()),
+                overdue, text(request, "result_summary", node.resultSummary()), Instant.now().toString(), node.ownerUserId(), node.ownerOrgUnitId(), node.documentRef());
+        performanceNodes.put(nodeId, updated);
+
+        String milestoneCode = "COMPLETED".equals(nodeStatus) ? "PERFORMANCE_COMPLETED" : updated.milestoneCode();
+        Map<String, Object> summary = refreshPerformanceSummary(contractId, milestoneCode);
+        lifecycleSummaries.put(contractId, lifecycleSummary(contractId, summary));
+        if (!previousRisk.equals(riskLevel)) {
+            appendContractEvent(contractId, "PERFORMANCE_RISK_CHANGED", nodeId, text(request, "trace_id", null), null);
+        }
+        if (overdue || "OVERDUE".equals(nodeStatus)) {
+            appendContractEvent(contractId, "PERFORMANCE_NODE_OVERDUE", nodeId, text(request, "trace_id", null), null);
+        }
+        if ("COMPLETED".equals(summary.get("performance_status"))) {
+            appendContractEvent(contractId, "PERFORMANCE_COMPLETED", nodeId, text(request, "trace_id", null), "PERFORMED");
+        } else {
+            appendContractEvent(contractId, "PERFORMANCE_PROGRESS_UPDATED", nodeId, text(request, "trace_id", null), null);
+        }
+
+        Map<String, Object> body = performanceNodeBody(updated);
+        body.put("performance_summary", summary);
+        return ResponseEntity.ok(body);
     }
 
     Map<String, Object> batch3SharedContract() {
@@ -1587,6 +1730,158 @@ class CoreChainService {
         ref.put("document_version_id", document.documentVersionId());
         ref.put("effective_document_version_id", document.effectiveDocumentVersionId());
         return ref;
+    }
+
+    private Map<String, Object> performanceRecordBody(PerformanceRecordState record, String sourceContractStatus) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("performance_record_id", record.performanceRecordId());
+        body.put("contract_id", record.contractId());
+        body.put("performance_status", record.performanceStatus());
+        body.put("progress_percent", record.progressPercent());
+        body.put("risk_level", record.riskLevel());
+        body.put("owner_user_id", record.ownerUserId());
+        body.put("owner_org_unit_id", record.ownerOrgUnitId());
+        body.put("open_node_count", record.openNodeCount());
+        body.put("overdue_node_count", record.overdueNodeCount());
+        body.put("latest_due_at", record.latestDueAt());
+        body.put("summary_text", record.summaryText());
+        body.put("latest_milestone_code", record.latestMilestoneCode());
+        body.put("source_contract_status", sourceContractStatus);
+        return body;
+    }
+
+    private Map<String, Object> performanceNodeBody(PerformanceNodeState node) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("performance_node_id", node.performanceNodeId());
+        body.put("performance_record_id", node.performanceRecordId());
+        body.put("contract_id", node.contractId());
+        body.put("node_type", node.nodeType());
+        body.put("node_name", node.nodeName());
+        body.put("milestone_code", node.milestoneCode());
+        body.put("planned_at", node.plannedAt());
+        body.put("due_at", node.dueAt());
+        body.put("actual_at", node.actualAt());
+        body.put("node_status", node.nodeStatus());
+        body.put("progress_percent", node.progressPercent());
+        body.put("risk_level", node.riskLevel());
+        body.put("issue_count", node.issueCount());
+        body.put("is_overdue", node.overdue());
+        body.put("result_summary", node.resultSummary());
+        body.put("last_result_at", node.lastResultAt());
+        body.put("owner_user_id", node.ownerUserId());
+        body.put("owner_org_unit_id", node.ownerOrgUnitId());
+        body.put("document_ref", node.documentRef());
+        return body;
+    }
+
+    private Map<String, Object> performanceDocumentRef(String contractId, String nodeId, Map<String, Object> request) {
+        String documentAssetId = text(request, "evidence_document_asset_id", null);
+        String documentVersionId = text(request, "evidence_document_version_id", null);
+        if (documentAssetId == null && documentVersionId == null) {
+            return null;
+        }
+        DocumentAssetState asset = requireDocumentAsset(documentAssetId);
+        DocumentVersionState version = requireDocumentVersion(documentVersionId);
+        if (!contractId.equals(asset.ownerId()) || !asset.documentAssetId().equals(version.documentAssetId())) {
+            throw new IllegalArgumentException("履约凭证必须引用当前合同的文档中心版本");
+        }
+        Map<String, Object> ref = new LinkedHashMap<>();
+        ref.put("lifecycle_document_ref_id", "cl-doc-ref-" + UUID.randomUUID());
+        ref.put("contract_id", contractId);
+        ref.put("source_resource_type", "PERFORMANCE_NODE");
+        ref.put("source_resource_id", nodeId);
+        ref.put("document_role", "PERFORMANCE_EVIDENCE");
+        ref.put("document_asset_id", documentAssetId);
+        ref.put("document_version_id", documentVersionId);
+        ref.put("is_primary", true);
+        return ref;
+    }
+
+    private Map<String, Object> refreshPerformanceSummary(String contractId, String milestoneCode) {
+        PerformanceRecordState record = performanceRecordForContract(contractId);
+        List<PerformanceNodeState> nodes = performanceNodes.values().stream()
+                .filter(node -> contractId.equals(node.contractId()))
+                .toList();
+        int nodeCount = nodes.size();
+        int completedCount = (int) nodes.stream().filter(node -> "COMPLETED".equals(node.nodeStatus())).count();
+        int overdueCount = (int) nodes.stream().filter(node -> node.overdue() || "OVERDUE".equals(node.nodeStatus())).count();
+        int openCount = nodeCount - completedCount;
+        int progress = nodeCount == 0 ? 0 : nodes.stream().mapToInt(PerformanceNodeState::progressPercent).sum() / nodeCount;
+        String riskLevel = nodes.stream().map(PerformanceNodeState::riskLevel).reduce("LOW", this::higherRisk);
+        String status = nodeCount > 0 && completedCount == nodeCount ? "COMPLETED" : (overdueCount > 0 || "HIGH".equals(riskLevel) ? "AT_RISK" : "IN_PROGRESS");
+        String latestDueAt = nodes.stream().map(PerformanceNodeState::dueAt).filter(value -> value != null && !value.isBlank()).min(String::compareTo).orElse(null);
+        String latestMilestone = "COMPLETED".equals(status) ? "PERFORMANCE_COMPLETED" : (milestoneCode == null ? "PERFORMANCE_STARTED" : milestoneCode);
+        String summaryText = switch (status) {
+            case "COMPLETED" -> "履约已完成";
+            case "AT_RISK" -> "履约存在风险";
+            default -> "履约进行中";
+        };
+
+        if (record != null) {
+            PerformanceRecordState updated = new PerformanceRecordState(record.performanceRecordId(), record.contractId(), status, progress, riskLevel,
+                    record.ownerUserId(), record.ownerOrgUnitId(), openCount, overdueCount, latestDueAt, summaryText, latestMilestone,
+                    Instant.now().toString(), Instant.now().toString());
+            performanceRecords.put(record.performanceRecordId(), updated);
+        }
+
+        Map<String, Object> riskSummary = new LinkedHashMap<>();
+        riskSummary.put("risk_level", riskLevel);
+        riskSummary.put("overdue_node_count", overdueCount);
+        riskSummary.put("issue_count", nodes.stream().mapToInt(PerformanceNodeState::issueCount).sum());
+
+        Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("contract_id", contractId);
+        summary.put("performance_record_id", record == null ? null : record.performanceRecordId());
+        summary.put("performance_status", status);
+        summary.put("progress_percent", progress);
+        summary.put("open_node_count", openCount);
+        summary.put("overdue_node_count", overdueCount);
+        summary.put("risk_summary", riskSummary);
+        summary.put("latest_milestone_code", latestMilestone);
+        summary.put("summary_text", summaryText);
+        summary.put("last_contract_writeback_at", Instant.now().toString());
+        performanceSummaries.put(contractId, summary);
+        return summary;
+    }
+
+    private Map<String, Object> lifecycleSummary(String contractId, Map<String, Object> performanceSummary) {
+        Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("contract_id", contractId);
+        summary.put("current_stage", "PERFORMANCE");
+        summary.put("stage_status", performanceSummary.get("performance_status"));
+        summary.put("performance_summary", performanceSummary);
+        summary.put("risk_summary", performanceSummary.get("risk_summary"));
+        summary.put("latest_milestone_code", performanceSummary.get("latest_milestone_code"));
+        summary.put("latest_milestone_at", Instant.now().toString());
+        summary.put("summary_version", "cl-summary-v1");
+        return summary;
+    }
+
+    private String higherRisk(String left, String right) {
+        return riskRank(right) > riskRank(left) ? right : left;
+    }
+
+    private int riskRank(String riskLevel) {
+        return switch (riskLevel) {
+            case "HIGH" -> 3;
+            case "MEDIUM" -> 2;
+            default -> 1;
+        };
+    }
+
+    private void appendContractEvent(String contractId, String eventType, String objectId, String traceId, String nextContractStatus) {
+        ContractState contract = requireContract(contractId);
+        ContractState updated = new ContractState(contract.contractId(), contract.contractNo(), contract.contractName(),
+                nextContractStatus == null ? contract.contractStatus() : nextContractStatus,
+                contract.ownerOrgUnitId(), contract.ownerUserId(), contract.amount(), contract.currency(), contract.currentDocument(),
+                copyDocuments(contract.attachments()), contract.approvalSummary(), contract.processId(), copyEvents(contract.events()));
+        updated.events().add(event(eventType, objectId, traceId));
+        contracts.put(contractId, updated);
+    }
+
+    private PerformanceRecordState performanceRecordForContract(String contractId) {
+        String recordId = performanceRecordByContract.get(contractId);
+        return recordId == null ? null : performanceRecords.get(recordId);
     }
 
     private Map<String, Object> acceptEncryptionCheckIn(String documentAssetId, String documentVersionId, String triggerType,
@@ -1986,6 +2281,7 @@ class CoreChainService {
         body.put("timeline_event", contract.events());
         body.put("audit_record", contract.events());
         body.put("signature_summary", signatureSummaries.get(contract.contractId()));
+        body.put("performance_summary", performanceSummaries.get(contract.contractId()));
         return body;
     }
 
@@ -2353,6 +2649,12 @@ class CoreChainService {
             case "APPROVAL_APPROVED" -> "审批通过并回写合同状态";
             case "APPROVAL_REJECTED" -> "审批驳回并回写合同状态";
             case "APPROVAL_TERMINATED" -> "审批终止并回写合同状态";
+            case "PERFORMANCE_STARTED" -> "履约已启动并写入生命周期摘要";
+            case "PERFORMANCE_NODE_CREATED" -> "履约节点已创建";
+            case "PERFORMANCE_PROGRESS_UPDATED" -> "履约进展已更新";
+            case "PERFORMANCE_NODE_OVERDUE" -> "履约节点已逾期";
+            case "PERFORMANCE_RISK_CHANGED" -> "履约风险已变化";
+            case "PERFORMANCE_COMPLETED" -> "履约已完成并回写合同摘要";
             default -> "审批回写进入补偿";
         };
     }
@@ -2372,6 +2674,22 @@ class CoreChainService {
             throw new IllegalArgumentException("contract_id 不存在: " + contractId);
         }
         return contract;
+    }
+
+    private PerformanceRecordState requirePerformanceRecord(String performanceRecordId) {
+        PerformanceRecordState record = performanceRecords.get(performanceRecordId);
+        if (record == null) {
+            throw new IllegalArgumentException("performance_record_id 不存在: " + performanceRecordId);
+        }
+        return record;
+    }
+
+    private PerformanceNodeState requirePerformanceNode(String performanceNodeId) {
+        PerformanceNodeState node = performanceNodes.get(performanceNodeId);
+        if (node == null) {
+            throw new IllegalArgumentException("performance_node_id 不存在: " + performanceNodeId);
+        }
+        return node;
     }
 
     private SignatureRequestState requireSignatureRequest(String signatureRequestId) {
@@ -2679,6 +2997,20 @@ class CoreChainService {
                                      String recordedSignDate, String paperDocumentAssetId, String paperDocumentVersionId,
                                      String confirmedBy, String confirmedAt, Map<String, Object> paperScanBinding,
                                      Map<String, Object> signatureSummary) {
+    }
+
+    private record PerformanceRecordState(String performanceRecordId, String contractId, String performanceStatus,
+                                          int progressPercent, String riskLevel, String ownerUserId, String ownerOrgUnitId,
+                                          int openNodeCount, int overdueNodeCount, String latestDueAt, String summaryText,
+                                          String latestMilestoneCode, String lastEvaluatedAt, String lastWritebackAt) {
+    }
+
+    private record PerformanceNodeState(String performanceNodeId, String performanceRecordId, String contractId,
+                                        String nodeType, String nodeName, String milestoneCode, String plannedAt,
+                                        String dueAt, String actualAt, String nodeStatus, int progressPercent,
+                                        String riskLevel, int issueCount, boolean overdue, String resultSummary,
+                                        String lastResultAt, String ownerUserId, String ownerOrgUnitId,
+                                        Map<String, Object> documentRef) {
     }
 
     private record EncryptionSecurityBindingState(String securityBindingId, String documentAssetId, String currentVersionId,
