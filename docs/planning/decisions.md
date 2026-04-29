@@ -191,3 +191,9 @@
 - 决策：第二批合同核心主链路编码使用 `feature/contract-core-chain` 分支和 `.worktrees/feature/contract-core-chain` 隔离工作区推进。
 - 原因：第一批底座主线已合并到 `main` 并完成旧分支清理；第二批必须基于最新 `main` 启动，避免继续污染第一批收口分支。
 - 影响：第二批所有编码、验证、独立 QA 与提交均在该工作树内完成；主工作区保持 `main` 同步入口，不直接承载第二批生产代码修改。
+
+### 决策 31：第三批依赖业务能力使用独立工作树分支推进
+
+- 决策：第三批依赖主链路真相源的业务能力编码使用 `feature/batch3-dependent-business-capabilities` 分支和 `.worktrees/feature/batch3-dependent-business-capabilities` 隔离工作区推进。
+- 原因：第二批合同核心主链路已合并到 `main` 并完成清理；第三批必须基于最新 `main` 启动，围绕第二批合同、文档、审批真相源扩展电子签章、加密软件和合同生命周期能力。
+- 影响：第三批所有编码、验证、独立质量审查与提交均在该工作树内完成；主工作区保持 `main` 同步入口，不直接承载第三批生产代码修改。
