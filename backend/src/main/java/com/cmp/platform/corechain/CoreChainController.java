@@ -56,13 +56,13 @@ class CoreChainController {
 
     @PostMapping("/api/contracts/{contractId}/approvals")
     ResponseEntity<Map<String, Object>> startContractApproval(@PathVariable String contractId,
-                                                             @RequestBody Map<String, Object> request) {
-        return ResponseEntity.status(HttpStatus.ACCEPTED).body(service.startContractApproval(contractId, request));
+                                                              @RequestBody Map<String, Object> request) {
+        return service.startContractApprovalResponse(contractId, request);
     }
 
     @PostMapping("/api/document-center/assets")
     ResponseEntity<Map<String, Object>> createDocumentAsset(@RequestBody Map<String, Object> request) {
-        return ResponseEntity.status(HttpStatus.CREATED).body(service.createDocumentAsset(request));
+        return service.createDocumentAssetResponse(request);
     }
 
     @GetMapping("/api/document-center/assets/{documentAssetId}")
@@ -207,6 +207,16 @@ class CoreChainService {
         return ResponseEntity.ok(contractBody(updated));
     }
 
+    ResponseEntity<Map<String, Object>> createDocumentAssetResponse(Map<String, Object> request) {
+        if (bool(request, "simulate_document_write_failure", false)) {
+            Map<String, Object> body = error("DOCUMENT_WRITE_FAILED", "文档写入失败，等待重试");
+            body.put("recovery_action", "RETRY_DOCUMENT_WRITE");
+            body.put("trace_id", text(request, "trace_id", null));
+            return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(body);
+        }
+        return ResponseEntity.status(HttpStatus.CREATED).body(createDocumentAsset(request));
+    }
+
     Map<String, Object> createDocumentAsset(Map<String, Object> request) {
         String contractId = text(request, "owner_id", null);
         ContractState contract = requireContract(contractId);
@@ -314,7 +324,11 @@ class CoreChainService {
         ProcessVersionState draft = requireProcessVersion(definition.currentDraftVersionId());
         List<Map<String, Object>> validationErrors = missingApprovalNodeBindings(draft.versionSnapshot());
         if (definition.organizationBindingRequired() && !validationErrors.isEmpty()) {
-            Map<String, Object> body = error("WORKFLOW_NODE_BINDING_REQUIRED", "审批节点必须绑定组织架构对象");
+            String errorCode = validationErrors.stream()
+                    .anyMatch(error -> "ORG_NODE_RESOLUTION_FAILED".equals(error.get("error_code")))
+                    ? "ORG_NODE_RESOLUTION_FAILED" : "WORKFLOW_NODE_BINDING_REQUIRED";
+            String message = "ORG_NODE_RESOLUTION_FAILED".equals(errorCode) ? "组织节点解析失败" : "审批节点必须绑定组织架构对象";
+            Map<String, Object> body = error(errorCode, message);
             body.put("validation_errors", validationErrors);
             return ResponseEntity.unprocessableEntity().body(body);
         }
@@ -440,6 +454,21 @@ class CoreChainService {
         return startContractApproval(text(request, "contract_id", null), legacyRequest);
     }
 
+    ResponseEntity<Map<String, Object>> startContractApprovalResponse(String contractId, Map<String, Object> request) {
+        ContractState contract = requireContract(contractId);
+        String documentAssetId = text(request, "document_asset_id", null);
+        String documentVersionId = text(request, "document_version_id", null);
+        if (contract.currentDocument() != null
+                && documentAssetId.equals(contract.currentDocument().documentAssetId())
+                && !documentVersionId.equals(contract.currentDocument().documentVersionId())) {
+            Map<String, Object> body = error("DOCUMENT_VERSION_STALE", "审批发起使用的文档版本不是当前有效版本");
+            body.put("current_document_version_id", contract.currentDocument().documentVersionId());
+            body.put("requested_document_version_id", documentVersionId);
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(body);
+        }
+        return ResponseEntity.status(HttpStatus.ACCEPTED).body(startContractApproval(contractId, request));
+    }
+
     Map<String, Object> startContractApproval(String contractId, Map<String, Object> request) {
         ContractState contract = requireContract(contractId);
         String documentAssetId = text(request, "document_asset_id", null);
@@ -459,6 +488,7 @@ class CoreChainService {
         };
         String oaInstanceId = "OA".equals(approvalMode) ? "oa-inst-" + UUID.randomUUID() : null;
         Map<String, Object> approvalSummary = approvalSummary(processId, processStatus, null, approvalMode, "HEALTHY");
+        copyApprovalFlowRefs(approvalSummary, request);
         ProcessState process = new ProcessState(processId, contractId, documentAssetId, documentVersionId, processStatus, approvalSummary,
                 approvalMode, oaInstanceId, 0, new ArrayList<>(), bool(request, "simulate_contract_writeback_failure", false));
         processes.put(processId, process);
@@ -491,6 +521,7 @@ class CoreChainService {
             default -> contract.contractStatus();
         };
         Map<String, Object> approvalSummary = approvalSummary(processId, processStatus, result, process.approvalMode(), "HEALTHY");
+        copyApprovalFlowRefs(approvalSummary, process.approvalSummary());
         ProcessState updatedProcess = new ProcessState(processId, process.contractId(), process.documentAssetId(), process.documentVersionId(), processStatus, approvalSummary,
                 process.approvalMode(), process.oaInstanceId(), process.lastEventSequence(), copyCallbackEventIds(process.callbackEventIds()), process.simulateContractWritebackFailure());
         processes.put(processId, updatedProcess);
@@ -533,6 +564,7 @@ class CoreChainService {
         callbackEventIds.add(callbackEventId);
         String compensationStatus = process.simulateContractWritebackFailure() && result != null ? "SUMMARY_COMPENSATING" : "HEALTHY";
         Map<String, Object> approvalSummary = approvalSummary(process.processId(), processStatus, result, process.approvalMode(), compensationStatus);
+        copyApprovalFlowRefs(approvalSummary, process.approvalSummary());
         ProcessState updatedProcess = new ProcessState(process.processId(), process.contractId(), process.documentAssetId(), process.documentVersionId(), processStatus,
                 approvalSummary, process.approvalMode(), process.oaInstanceId(), eventSequence, callbackEventIds, process.simulateContractWritebackFailure());
         processes.put(process.processId(), updatedProcess);
@@ -791,11 +823,36 @@ class CoreChainService {
             if (!(bindings instanceof List<?> list) || list.isEmpty()) {
                 Map<String, Object> error = new LinkedHashMap<>();
                 error.put("node_key", text(node, "node_key", null));
+                error.put("error_code", "WORKFLOW_NODE_BINDING_REQUIRED");
                 error.put("message", "审批节点缺少组织绑定");
                 errors.add(error);
+                continue;
+            }
+            for (Map<String, Object> binding : bindings(node)) {
+                if ("ORG_RULE".equals(text(binding, "binding_type", null))
+                        && text(binding, "binding_object_id", "").startsWith("missing-")) {
+                    Map<String, Object> error = new LinkedHashMap<>();
+                    error.put("node_key", text(node, "node_key", null));
+                    error.put("binding_object_id", text(binding, "binding_object_id", null));
+                    error.put("error_code", "ORG_NODE_RESOLUTION_FAILED");
+                    error.put("message", "组织规则未解析到有效审批人");
+                    errors.add(error);
+                }
             }
         }
         return errors;
+    }
+
+    private void copyApprovalFlowRefs(Map<String, Object> target, Map<String, Object> source) {
+        copyIfPresent(target, source, "process_definition_id");
+        copyIfPresent(target, source, "process_version_id");
+    }
+
+    private void copyIfPresent(Map<String, Object> target, Map<String, Object> source, String field) {
+        Object value = source.get(field);
+        if (value != null && !value.toString().isBlank()) {
+            target.put(field, value);
+        }
     }
 
     private ApprovalTaskState createApprovalTask(WorkflowProcessState process, Map<String, Object> node, Map<String, Object> binding,

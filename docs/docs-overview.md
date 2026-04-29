@@ -141,6 +141,7 @@
 7. [第二批流程引擎审批定义与平台运行时基础能力验证报告](./reports/verification/102-14-workflow-engine-runtime-implementation.md)
 8. [第二批合同文档挂接闭环实现验证报告](./reports/verification/102-15-contract-document-binding-implementation.md)
 9. [第二批审批发起、审批承接与合同状态回写闭环验证报告](./reports/verification/102-16-approval-status-writeback-implementation.md)
+10. [第二批最小端到端闭环实现验证报告](./reports/verification/102-17-batch2-end-to-end-implementation.md)
 
 ## 七、上游来源材料
 
@@ -268,6 +269,7 @@
 | 过程报告 | [第二批流程引擎审批定义与平台运行时基础能力验证报告](./reports/verification/102-14-workflow-engine-runtime-implementation.md) | 第二批流程定义发布、组织绑定校验、平台审批实例与任务推进实现验证报告 | 已存在 |
 | 过程报告 | [第二批合同文档挂接闭环实现验证报告](./reports/verification/102-15-contract-document-binding-implementation.md) | 第二批合同主正文、附件挂接、文档摘要回写与主版本切换实现验证报告 | 已存在 |
 | 过程报告 | [第二批审批发起、审批承接与合同状态回写闭环验证报告](./reports/verification/102-16-approval-status-writeback-implementation.md) | 第二批统一审批入口、OA 主路径桥接、平台承接路径、合同状态回写与补偿任务实现验证报告 | 已存在 |
+| 过程报告 | [第二批最小端到端闭环实现验证报告](./reports/verification/102-17-batch2-end-to-end-implementation.md) | 第二批合同创建、编辑、文档挂接、审批通过、状态回写、详情查看与关键异常闭环验证报告 | 已存在 |
 | 上游来源材料 | [docs/specifications/湖南星邦智能装备股份有限公司合同管理平台招标技术要求.pdf](./specifications/%E6%B9%96%E5%8D%97%E6%98%9F%E9%82%A6%E6%99%BA%E8%83%BD%E8%A3%85%E5%A4%87%E8%82%A1%E4%BB%BD%E6%9C%89%E9%99%90%E5%85%AC%E5%8F%B8%E5%90%88%E5%90%8C%E7%AE%A1%E7%90%86%E5%B9%B3%E5%8F%B0%E6%8B%9B%E6%A0%87%E6%8A%80%E6%9C%AF%E8%A6%81%E6%B1%82.pdf) | 正式上游来源材料 | 已存在 |
 
 ## 十、维护规则
