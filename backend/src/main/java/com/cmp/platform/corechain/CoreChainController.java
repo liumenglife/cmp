@@ -616,6 +616,102 @@ class CoreChainService {
         return body;
     }
 
+    Map<String, Object> batch3SharedContract() {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("status_fields", List.of("signature_status", "encryption_status", "performance_status", "change_status", "termination_status", "archive_status"));
+
+        Map<String, Object> statusMapping = new LinkedHashMap<>();
+        statusMapping.put("signature_status", Map.of(
+                "READY", Map.of("allowed_contract_status", List.of("APPROVED"), "writeback_contract_status", "UNCHANGED"),
+                "SIGNED", Map.of("allowed_contract_status", List.of("APPROVED"), "writeback_contract_status", "SIGNED")));
+        statusMapping.put("encryption_status", Map.of(
+                "PENDING", Map.of("allowed_contract_status", List.of("DRAFT", "UNDER_APPROVAL", "APPROVED", "SIGNED"), "writeback_contract_status", "UNCHANGED"),
+                "ENCRYPTED", Map.of("allowed_contract_status", List.of("DRAFT", "UNDER_APPROVAL", "APPROVED", "SIGNED"), "writeback_contract_status", "UNCHANGED")));
+        statusMapping.put("performance_status", Map.of(
+                "IN_PROGRESS", Map.of("allowed_contract_status", List.of("SIGNED"), "writeback_contract_status", "UNCHANGED"),
+                "COMPLETED", Map.of("allowed_contract_status", List.of("SIGNED"), "writeback_contract_status", "PERFORMED")));
+        statusMapping.put("change_status", Map.of(
+                "APPROVING", Map.of("allowed_contract_status", List.of("SIGNED", "PERFORMED"), "writeback_contract_status", "CHANGE_UNDER_APPROVAL"),
+                "APPROVED", Map.of("allowed_contract_status", List.of("SIGNED", "PERFORMED"), "writeback_contract_status", "CHANGED")));
+        statusMapping.put("termination_status", Map.of(
+                "APPROVING", Map.of("allowed_contract_status", List.of("SIGNED", "PERFORMED", "CHANGED"), "writeback_contract_status", "TERMINATION_UNDER_APPROVAL"),
+                "TERMINATED", Map.of("allowed_contract_status", List.of("SIGNED", "PERFORMED", "CHANGED"), "writeback_contract_status", "TERMINATED")));
+        statusMapping.put("archive_status", Map.of(
+                "READY", Map.of("allowed_contract_status", List.of("SIGNED", "PERFORMED", "CHANGED", "TERMINATED"), "writeback_contract_status", "UNCHANGED"),
+                "ARCHIVED", Map.of("allowed_contract_status", List.of("SIGNED", "PERFORMED", "CHANGED", "TERMINATED"), "writeback_contract_status", "ARCHIVED")));
+        body.put("status_contract_mapping", statusMapping);
+
+        Map<String, Object> writeback = new LinkedHashMap<>();
+        writeback.put("signature_status", "e-signature -> contract.signature_summary");
+        writeback.put("encryption_status", "encrypted-document -> document-center.encryption_summary -> contract.document_summary");
+        writeback.put("performance_status", "contract-lifecycle -> contract.performance_summary");
+        writeback.put("change_status", "contract-lifecycle -> contract.change_summary");
+        writeback.put("termination_status", "contract-lifecycle -> contract.termination_summary");
+        writeback.put("archive_status", "contract-lifecycle -> contract.archive_summary");
+        body.put("summary_writeback_direction", writeback);
+
+        body.put("truth_ownership", Map.of(
+                "contract_master", "reference contract_id only",
+                "document_version", "reference document_version_id only",
+                "approval", "reference approval_summary only"));
+        return body;
+    }
+
+    Map<String, Object> batch3MountPoints(String contractId, String signatureStatus) {
+        ContractState contract = requireContract(contractId);
+        DocumentRef document = contract.currentDocument();
+        boolean approved = "APPROVED".equals(contract.contractStatus())
+                && contract.approvalSummary() != null
+                && "APPROVED".equals(contract.approvalSummary().get("final_result"));
+        String normalizedSignatureStatus = signatureStatus == null || signatureStatus.isBlank() ? "NOT_STARTED" : signatureStatus;
+
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("contract_id", contract.contractId());
+        body.put("contract_status", contract.contractStatus());
+        body.put("approval_summary", contract.approvalSummary());
+        body.put("signature_input", batch3SignatureInput(contract, document, approved));
+        body.put("encryption_input", batch3DocumentInput(document));
+        body.put("archive_input", batch3DocumentInput(document));
+        body.put("performance_input", batch3PerformanceInput(contract, normalizedSignatureStatus));
+        body.put("main_truth_reuse", Map.of(
+                "contract_master_owner", "contract-core",
+                "document_version_owner", "document-center",
+                "approval_summary_owner", "workflow-engine"));
+        return body;
+    }
+
+    private Map<String, Object> batch3SignatureInput(ContractState contract, DocumentRef document, boolean approved) {
+        Map<String, Object> input = new LinkedHashMap<>();
+        input.put("accepted", approved && document != null);
+        input.put("contract_id", contract.contractId());
+        input.put("document_version_ref", document == null ? null : batch3DocumentVersionRef(document));
+        input.put("approval_summary", contract.approvalSummary());
+        return input;
+    }
+
+    private Map<String, Object> batch3DocumentInput(DocumentRef document) {
+        Map<String, Object> input = new LinkedHashMap<>();
+        input.put("document_version_ref", document == null ? null : batch3DocumentVersionRef(document));
+        return input;
+    }
+
+    private Map<String, Object> batch3PerformanceInput(ContractState contract, String signatureStatus) {
+        Map<String, Object> input = new LinkedHashMap<>();
+        input.put("accepted", "SIGNED".equals(contract.contractStatus()));
+        input.put("contract_id", contract.contractId());
+        input.put("source_contract_status", contract.contractStatus());
+        input.put("signature_status", signatureStatus);
+        return input;
+    }
+
+    private Map<String, Object> batch3DocumentVersionRef(DocumentRef document) {
+        Map<String, Object> ref = new LinkedHashMap<>();
+        ref.put("document_asset_id", document.documentAssetId());
+        ref.put("document_version_id", document.documentVersionId());
+        ref.put("effective_document_version_id", document.effectiveDocumentVersionId());
+        return ref;
+    }
+
     private Map<String, Object> contractBody(ContractState contract) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("contract_id", contract.contractId());
