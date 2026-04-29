@@ -192,3 +192,19 @@
 
 - 第三批第七项“合同生命周期变更、终止与归档能力”继续以 [`102-03-batch-3-dependent-business-capabilities-implementation-plan.md`](../superpowers/plans/102-03-batch-3-dependent-business-capabilities-implementation-plan.md) 为执行依据。
 - 已全绿的第三批第六项不再作为未完成任务处理。
+
+## 2026-04-29 第三批第七项阶段性归档
+
+### 归档原因
+
+- 第三批第七项“合同生命周期变更、终止与归档能力”已经完成实现、修复、独立质量审查复审与完整验证。
+- `current.md` 继续维护第三批跨模块综合验证与整体质量收口推进状态，本节记录已经全绿的第七项完成事实。
+
+### 已归档任务批次
+
+- [✓] 合同生命周期变更、终止与归档能力：已按测试驱动开发完成，首次独立质量审查结论为不通过，问题包括审批驳回污染完成状态、生命周期摘要未形成持久事实、审批流程引用状态未回写、归档输入集校验不足、借阅归还状态机约束不足；修复后独立复审结论为通过，没问题；完整验证 `./scripts/verify-all.sh` 通过，后端 132 个测试通过，前端检查、测试、构建通过，容器健康检查通过并完成清理。
+
+### 迁移说明
+
+- 第三批跨模块综合验证继续以 [`102-03-batch-3-dependent-business-capabilities-implementation-plan.md`](../superpowers/plans/102-03-batch-3-dependent-business-capabilities-implementation-plan.md) 为执行依据。
+- 已全绿的第三批第七项不再作为未完成任务处理。

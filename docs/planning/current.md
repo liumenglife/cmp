@@ -4,12 +4,12 @@
 
 - 第三批目标是完成依赖第二批主链路真相源的业务能力，包括电子签章、加密软件、合同生命周期三条主线。
 - 本批次必须围绕第二批已经形成的合同主档、文档版本链、审批摘要、任务、权限与审计能力运行，不复制合同、文档或审批主真相。
-- 当前分支为 `feature/contract-lifecycle-change-termination-archive`，隔离工作区为 `.worktrees/feature/contract-lifecycle-change-termination-archive`，第三批第七项编码只在该工作树推进。
+- 当前分支为 `feature/contract-lifecycle-change-termination-archive`，隔离工作区为 `.worktrees/feature/contract-lifecycle-change-termination-archive`，第三批跨模块综合验证准备只在该工作树推进。
 
 ## 成功定义
 
 - 已基于最新 `main` 创建第三批隔离工作区和业务分支。
-- 新工作树基线验证 `./scripts/verify-all.sh` 已通过：后端 95 个测试通过，前端检查、测试、构建通过，容器健康检查通过并完成清理。
+- 新工作树基线验证 `./scripts/verify-all.sh` 已通过；第七项收口验证 `./scripts/verify-all.sh` 已通过：后端 132 个测试通过，前端检查、测试、构建通过，容器健康检查通过并完成清理。
 - 电子签章可基于审批通过后的正式合同和文档中心版本发起申请，并完成会话、结果回写、验签摘要、合同摘要和时间线回写。
 - 加密软件可在文件入库后自动加密，平台内读取统一走受控解密访问；管理端可按部门、人员授权解密下载，且全过程可审计。
 - 履约、变更、终止、归档均围绕同一 `contract_id` 运行，不创建新的合同主档。
@@ -24,7 +24,7 @@
 
 ## 当前阶段
 
-- 阶段：第三批第七项“合同生命周期变更、终止与归档能力”编码阶段。
+- 阶段：第三批跨模块综合验证准备阶段。
 - 分支：`feature/contract-lifecycle-change-termination-archive`。
 - 隔离工作区：`.worktrees/feature/contract-lifecycle-change-termination-archive`。
 - 规格：[`102-cmp-implementation-execution-spec.md`](../superpowers/specs/102-cmp-implementation-execution-spec.md)。
@@ -39,7 +39,7 @@
 - [✓] 加密软件自动加密与平台内受控访问：已通过独立质量审查复审，没有问题。
 - [✓] 加密软件授权解密下载与高敏审计闭环：已通过独立质量审查复审，没有问题。
 - [✓] 合同生命周期履约基础能力：已通过独立质量审查复审，没有问题。
-- [•] 合同生命周期变更、终止与归档能力。
+- [✓] 合同生命周期变更、终止与归档能力：已通过独立质量审查复审，没有问题。
 - [ ] 第三批跨模块综合验证。
 - [ ] 第三批整体质量收口。
 
@@ -67,7 +67,9 @@
 - [✓] 第三批第六项合同生命周期履约基础能力已完成实现、问题修复与独立质量审查复审，结论为通过，没有问题。
 - [•] 已创建第三批第七项分支与工作树：`feature/contract-lifecycle-change-termination-archive`。
 - [✓] 第三批第七项工作树基线验证已通过：`./scripts/verify-all.sh`。
-- [•] 准备派发实现子代理执行第三批第七项：合同生命周期变更、终止与归档能力。
+- [✓] 第三批第七项合同生命周期变更、终止与归档能力已完成实现、问题修复与独立质量审查复审，结论为通过，没有问题。
+- [✓] 第三批第七项完整验证已通过：`./scripts/verify-all.sh`，后端 132 个测试通过，前端检查、测试、构建通过，容器健康检查通过并完成清理。
+- [•] 准备进入第三批跨模块综合验证。
 
 ## 已完成里程碑
 
@@ -81,6 +83,7 @@
 - [✓] 第三批第四项加密软件自动加密与平台内受控访问已通过完整验证。
 - [✓] 第三批第五项加密软件授权解密下载与高敏审计闭环已通过完整验证。
 - [✓] 第三批第六项合同生命周期履约基础能力已通过完整验证。
+- [✓] 第三批第七项合同生命周期变更、终止与归档能力已通过完整验证。
 
 ## 当前阻塞
 
@@ -92,15 +95,15 @@
 - [✓] `feature/contract-core-chain` 第二批合同核心主链路编码、整体质量收口、PR 合并与清理。
 - [✓] `feature/batch3-dependent-business-capabilities` 第三批前三项阶段性交付、PR 合并与清理。
 - [✓] `feature/encrypted-document-controlled-access` 第三批加密软件能力、合同生命周期履约基础能力编码、PR 合并与清理。
-- [•] `feature/contract-lifecycle-change-termination-archive` 第三批第七项合同生命周期变更终止归档编码。
+- [•] `feature/contract-lifecycle-change-termination-archive` 第三批第七项合同生命周期变更终止归档收口与跨模块综合验证准备。
 
 ## 下一步唯一动作
 
-- 派发实现子代理执行第三批第七项“合同生命周期变更、终止与归档能力”，并强制按测试驱动开发推进。
+- 派发子代理执行第三批跨模块综合验证，并强制覆盖电子签章、加密软件、合同生命周期与第二批主链路真相源的集成回归。
 
 ## 恢复提示
 
 - 恢复时先读本文件、[`history.md`](./history.md)、[`decisions.md`](./decisions.md)。
 - 第一批底座主线历史、第二批合同核心主链路历史已迁入 [`history.md`](./history.md)，不要把已完成批次长列表写回 `current.md`。
 - 第三批正式执行依据为 [`102-cmp-implementation-execution-spec.md`](../superpowers/specs/102-cmp-implementation-execution-spec.md) 与 [`102-03-batch-3-dependent-business-capabilities-implementation-plan.md`](../superpowers/plans/102-03-batch-3-dependent-business-capabilities-implementation-plan.md)。
-- 第三批第七项当前工作树为 `.worktrees/feature/contract-lifecycle-change-termination-archive`，不要在主工作区直接编码。
+- 第三批跨模块综合验证当前工作树为 `.worktrees/feature/contract-lifecycle-change-termination-archive`，不要在主工作区直接编码。
