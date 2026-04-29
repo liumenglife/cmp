@@ -424,7 +424,7 @@ docs/
 - 进入项目型开发流程时，默认优先考虑使用 `superpowers-planning-with-files`，由主 Agent 维护 `docs/planning/current.md` 与 `docs/planning/decisions.md`，防止主目标与支线状态漂移。
 - 项目级 Agent 规范只允许落在 `PRINCIPLE.md`、`skills/` 与 `docs/guides/development/agent-rules-portability.md` 三个固定位置，禁止散落到其他难以发现的文档中。
 - 涉及 Python 的验证、脚本、测试或打包时，必须使用 `uv` 作为统一入口，避免把环境管理和执行命令散落到多个工具链。
-- 涉及 UI 前端开发/优化的任务，尽量使用 ui-ux-pro-max-skill 技能或frontend-design技能的能力来进行工作。
+- 涉及 UI 前端开发/优化的任务，优先使用ui-ux-pro-max技能，frontend-design技能兜底。
 - 开始输出代码前最好联网搜索一下其最佳实践 (Best Practices)。
 - 联网搜索时优先采用 Context7 官方文档的最佳实践。
 - 当问题涉及库/API 文档、代码生成、安装、配置、版本差异、迁移步骤时，默认优先调用 Context7 MCP。
