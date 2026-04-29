@@ -297,9 +297,55 @@ class CoreChainController {
 
     @PatchMapping("/api/contracts/{contractId}/performance-nodes/{nodeId}")
     ResponseEntity<Map<String, Object>> updatePerformanceNode(@PathVariable String contractId,
-                                                              @PathVariable String nodeId,
-                                                              @RequestBody Map<String, Object> request) {
+                                                               @PathVariable String nodeId,
+                                                               @RequestBody Map<String, Object> request) {
         return service.updatePerformanceNode(contractId, nodeId, request);
+    }
+
+    @PostMapping("/api/contracts/{contractId}/changes")
+    ResponseEntity<Map<String, Object>> createContractChange(@PathVariable String contractId,
+                                                             @RequestBody Map<String, Object> request) {
+        return service.createContractChange(contractId, request);
+    }
+
+    @PostMapping("/api/contracts/{contractId}/changes/{changeId}/approval-results")
+    ResponseEntity<Map<String, Object>> applyContractChangeResult(@PathVariable String contractId,
+                                                                  @PathVariable String changeId,
+                                                                  @RequestBody Map<String, Object> request) {
+        return service.applyContractChangeResult(contractId, changeId, request);
+    }
+
+    @PostMapping("/api/contracts/{contractId}/terminations")
+    ResponseEntity<Map<String, Object>> createContractTermination(@PathVariable String contractId,
+                                                                  @RequestBody Map<String, Object> request) {
+        return service.createContractTermination(contractId, request);
+    }
+
+    @PostMapping("/api/contracts/{contractId}/terminations/{terminationId}/approval-results")
+    ResponseEntity<Map<String, Object>> applyContractTerminationResult(@PathVariable String contractId,
+                                                                       @PathVariable String terminationId,
+                                                                       @RequestBody Map<String, Object> request) {
+        return service.applyContractTerminationResult(contractId, terminationId, request);
+    }
+
+    @PostMapping("/api/contracts/{contractId}/archives")
+    ResponseEntity<Map<String, Object>> createArchiveRecord(@PathVariable String contractId,
+                                                            @RequestBody Map<String, Object> request) {
+        return service.createArchiveRecord(contractId, request);
+    }
+
+    @PostMapping("/api/contracts/{contractId}/archives/{archiveRecordId}/borrows")
+    ResponseEntity<Map<String, Object>> borrowArchive(@PathVariable String contractId,
+                                                      @PathVariable String archiveRecordId,
+                                                      @RequestBody Map<String, Object> request) {
+        return service.borrowArchive(contractId, archiveRecordId, request);
+    }
+
+    @PostMapping("/api/contracts/{contractId}/archive-borrows/{borrowRecordId}/return")
+    ResponseEntity<Map<String, Object>> returnArchiveBorrow(@PathVariable String contractId,
+                                                            @PathVariable String borrowRecordId,
+                                                            @RequestBody Map<String, Object> request) {
+        return service.returnArchiveBorrow(contractId, borrowRecordId, request);
     }
 
     @GetMapping("/api/encrypted-documents/audit-events")
@@ -341,6 +387,13 @@ class CoreChainService {
     private final Map<String, String> performanceRecordByContract = new ConcurrentHashMap<>();
     private final Map<String, PerformanceNodeState> performanceNodes = new ConcurrentHashMap<>();
     private final Map<String, Map<String, Object>> performanceSummaries = new ConcurrentHashMap<>();
+    private final Map<String, ContractChangeState> contractChanges = new ConcurrentHashMap<>();
+    private final Map<String, Map<String, Object>> changeSummaries = new ConcurrentHashMap<>();
+    private final Map<String, ContractTerminationState> contractTerminations = new ConcurrentHashMap<>();
+    private final Map<String, Map<String, Object>> terminationSummaries = new ConcurrentHashMap<>();
+    private final Map<String, ArchiveRecordState> archiveRecords = new ConcurrentHashMap<>();
+    private final Map<String, Map<String, Object>> archiveSummaries = new ConcurrentHashMap<>();
+    private final Map<String, ArchiveBorrowState> archiveBorrows = new ConcurrentHashMap<>();
     private final Map<String, Map<String, Object>> lifecycleSummaries = new ConcurrentHashMap<>();
     private final List<Map<String, Object>> lifecycleTimelineEvents = new ArrayList<>();
     private final List<Map<String, Object>> lifecycleAuditEvents = new ArrayList<>();
@@ -1388,6 +1441,187 @@ class CoreChainService {
         return ResponseEntity.ok(body);
     }
 
+    ResponseEntity<Map<String, Object>> createContractChange(String contractId, Map<String, Object> request) {
+        ContractState contract = requireContract(contractId);
+        if ("TERMINATED".equals(contract.contractStatus()) || "ARCHIVED".equals(contract.contractStatus())) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(error("CONTRACT_TERMINATED_CHANGE_RESTRICTED", "合同终止或归档后不允许继续发起变更"));
+        }
+        if (!List.of("SIGNED", "PERFORMED", "CHANGED").contains(contract.contractStatus())) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(error("CONTRACT_NOT_EFFECTIVE_FOR_CHANGE", "合同未生效，不能发起变更"));
+        }
+        String changeId = "cl-change-" + UUID.randomUUID();
+        Map<String, Object> documentRef = lifecycleDocumentRef(contractId, "CONTRACT_CHANGE", changeId, "CHANGE_AGREEMENT",
+                text(request, "supplemental_document_asset_id", null), text(request, "supplemental_document_version_id", null));
+        String workflowInstanceId = text(request, "workflow_instance_id", "wf-change-" + UUID.randomUUID());
+        Map<String, Object> processRef = lifecycleProcessRef(contractId, "CONTRACT_CHANGE", changeId, workflowInstanceId, "CONTRACT_CHANGE_APPROVAL", "APPROVING");
+        ContractChangeState change = new ContractChangeState(changeId, contractId, text(request, "change_type", "GENERAL"), text(request, "change_reason", null),
+                text(request, "change_summary", null), map(request.get("impact_scope")), text(request, "effective_date", null), "APPROVING",
+                workflowInstanceId, documentRef, processRef, null, null, null, 1);
+        contractChanges.put(changeId, change);
+        persistChange(change);
+        persistPerformanceDocumentRef(documentRef);
+        persistLifecycleProcessRef(processRef);
+        appendLifecycleTimeline(contractId, "CHANGE_APPROVAL_STARTED", "CONTRACT_CHANGE", changeId, "CHANGE_APPROVING",
+                text(request, "operator_user_id", null), "APPROVING", lifecycleDocumentRefId(documentRef), text(request, "trace_id", null));
+        appendLifecycleAudit(contractId, "CHANGE_APPLIED_FOR_APPROVAL", "CONTRACT_CHANGE", changeId,
+                text(request, "operator_user_id", null), "SUCCESS", "APPROVING", lifecycleDocumentRefId(documentRef), text(request, "trace_id", null));
+        return ResponseEntity.status(HttpStatus.CREATED).body(changeBody(change));
+    }
+
+    ResponseEntity<Map<String, Object>> applyContractChangeResult(String contractId, String changeId, Map<String, Object> request) {
+        ContractChangeState change = requireChange(changeId);
+        if (!contractId.equals(change.contractId())) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(error("CHANGE_CONTRACT_MISMATCH", "变更记录未绑定当前合同"));
+        }
+        String result = text(request, "approval_result", "APPROVED");
+        String nextStatus = "APPROVED".equals(result) ? "APPLIED" : "REJECTED";
+        ContractChangeState updated = new ContractChangeState(change.changeId(), change.contractId(), change.changeType(), change.changeReason(),
+                change.changeSummary(), change.impactScope(), change.effectiveDate(), nextStatus, text(request, "workflow_instance_id", change.workflowInstanceId()),
+                change.documentRef(), lifecycleProcessRef(contractId, "CONTRACT_CHANGE", changeId, text(request, "workflow_instance_id", change.workflowInstanceId()),
+                        "CONTRACT_CHANGE_APPROVAL", nextStatus), text(request, "approved_at", Instant.now().toString()),
+                "APPROVED".equals(result) ? Instant.now().toString() : null, text(request, "result_summary", change.changeSummary()), change.resultVersionNo() + 1);
+        contractChanges.put(changeId, updated);
+        persistChange(updated);
+        Map<String, Object> summary = changeSummary(updated);
+        changeSummaries.put(contractId, summary);
+        refreshLifecycleSummary(contractId, "CHANGE", nextStatus, "CHANGE_APPROVED");
+        if ("APPROVED".equals(result)) {
+            appendContractEvent(contractId, "CHANGE_APPLIED", changeId, text(request, "trace_id", null), "CHANGED");
+            appendLifecycleTimeline(contractId, "CHANGE_APPLIED", "CONTRACT_CHANGE", changeId, "CHANGE_APPROVED",
+                    text(request, "operator_user_id", null), "APPLIED", lifecycleDocumentRefId(updated.documentRef()), text(request, "trace_id", null));
+            appendLifecycleAudit(contractId, "CHANGE_APPLIED", "CONTRACT_CHANGE", changeId,
+                    text(request, "operator_user_id", null), "SUCCESS", "APPLIED", lifecycleDocumentRefId(updated.documentRef()), text(request, "trace_id", null));
+        }
+        return ResponseEntity.ok(changeBody(updated));
+    }
+
+    ResponseEntity<Map<String, Object>> createContractTermination(String contractId, Map<String, Object> request) {
+        ContractState contract = requireContract(contractId);
+        if (!List.of("SIGNED", "PERFORMED", "CHANGED").contains(contract.contractStatus())) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(error("CONTRACT_NOT_EFFECTIVE_FOR_TERMINATION", "合同状态不允许发起终止"));
+        }
+        String terminationId = "cl-term-" + UUID.randomUUID();
+        Map<String, Object> documentRef = lifecycleDocumentRef(contractId, "CONTRACT_TERMINATION", terminationId, "TERMINATION_AGREEMENT",
+                text(request, "material_document_asset_id", null), text(request, "material_document_version_id", null));
+        String workflowInstanceId = text(request, "workflow_instance_id", "wf-term-" + UUID.randomUUID());
+        Map<String, Object> processRef = lifecycleProcessRef(contractId, "CONTRACT_TERMINATION", terminationId, workflowInstanceId, "CONTRACT_TERMINATION_APPROVAL", "APPROVING");
+        ContractTerminationState termination = new ContractTerminationState(terminationId, contractId, text(request, "termination_type", "GENERAL"),
+                text(request, "termination_reason", null), text(request, "termination_summary", null), text(request, "requested_termination_date", null),
+                text(request, "settlement_summary", null), "APPROVING", workflowInstanceId, documentRef, processRef, null,
+                text(request, "post_action_status", "PENDING"), text(request, "access_restriction", "PENDING_TERMINATION_APPROVAL"));
+        contractTerminations.put(terminationId, termination);
+        persistTermination(termination);
+        persistPerformanceDocumentRef(documentRef);
+        persistLifecycleProcessRef(processRef);
+        appendLifecycleTimeline(contractId, "TERMINATION_APPROVAL_STARTED", "CONTRACT_TERMINATION", terminationId, "TERMINATION_APPROVING",
+                text(request, "operator_user_id", null), "APPROVING", lifecycleDocumentRefId(documentRef), text(request, "trace_id", null));
+        appendLifecycleAudit(contractId, "TERMINATION_APPLIED_FOR_APPROVAL", "CONTRACT_TERMINATION", terminationId,
+                text(request, "operator_user_id", null), "SUCCESS", "APPROVING", lifecycleDocumentRefId(documentRef), text(request, "trace_id", null));
+        return ResponseEntity.status(HttpStatus.CREATED).body(terminationBody(termination));
+    }
+
+    ResponseEntity<Map<String, Object>> applyContractTerminationResult(String contractId, String terminationId, Map<String, Object> request) {
+        ContractTerminationState termination = requireTermination(terminationId);
+        if (!contractId.equals(termination.contractId())) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(error("TERMINATION_CONTRACT_MISMATCH", "终止记录未绑定当前合同"));
+        }
+        String result = text(request, "approval_result", "APPROVED");
+        String nextStatus = "APPROVED".equals(result) ? "TERMINATED" : "REJECTED";
+        ContractTerminationState updated = new ContractTerminationState(termination.terminationId(), termination.contractId(), termination.terminationType(),
+                termination.terminationReason(), termination.terminationSummary(), termination.requestedTerminationDate(),
+                text(request, "settlement_summary", termination.settlementSummary()), nextStatus,
+                text(request, "workflow_instance_id", termination.workflowInstanceId()), termination.documentRef(),
+                lifecycleProcessRef(contractId, "CONTRACT_TERMINATION", terminationId, text(request, "workflow_instance_id", termination.workflowInstanceId()),
+                        "CONTRACT_TERMINATION_APPROVAL", nextStatus), text(request, "terminated_at", Instant.now().toString()),
+                text(request, "post_action_status", termination.postActionStatus()), text(request, "access_restriction", "READ_ONLY_AFTER_TERMINATION"));
+        contractTerminations.put(terminationId, updated);
+        persistTermination(updated);
+        Map<String, Object> summary = terminationSummary(updated);
+        terminationSummaries.put(contractId, summary);
+        refreshLifecycleSummary(contractId, "TERMINATION", nextStatus, "TERMINATION_COMPLETED");
+        if ("APPROVED".equals(result)) {
+            appendContractEvent(contractId, "TERMINATION_COMPLETED", terminationId, text(request, "trace_id", null), "TERMINATED");
+            appendLifecycleTimeline(contractId, "TERMINATION_COMPLETED", "CONTRACT_TERMINATION", terminationId, "TERMINATION_COMPLETED",
+                    text(request, "operator_user_id", null), "TERMINATED", lifecycleDocumentRefId(updated.documentRef()), text(request, "trace_id", null));
+            appendLifecycleAudit(contractId, "TERMINATION_COMPLETED", "CONTRACT_TERMINATION", terminationId,
+                    text(request, "operator_user_id", null), "SUCCESS", "TERMINATED", lifecycleDocumentRefId(updated.documentRef()), text(request, "trace_id", null));
+        }
+        return ResponseEntity.ok(terminationBody(updated));
+    }
+
+    ResponseEntity<Map<String, Object>> createArchiveRecord(String contractId, Map<String, Object> request) {
+        ContractState contract = requireContract(contractId);
+        if (!List.of("PERFORMED", "CHANGED", "TERMINATED").contains(contract.contractStatus())) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(error("CONTRACT_NOT_READY_FOR_ARCHIVE", "合同未满足归档准入条件"));
+        }
+        List<String> inputSet = listStrings(request.get("input_set"));
+        List<String> required = List.of("CONTRACT_MASTER", "MAIN_BODY", "PERFORMANCE_SUMMARY");
+        boolean missingRequired = !inputSet.containsAll(required) || ("TERMINATED".equals(contract.contractStatus()) && !inputSet.contains("TERMINATION_SUMMARY"));
+        if (missingRequired) {
+            Map<String, Object> body = error("ARCHIVE_INPUT_SET_INCOMPLETE", "归档输入集缺少必需项");
+            body.put("required_input_set", required);
+            body.put("actual_input_set", inputSet);
+            return ResponseEntity.unprocessableEntity().body(body);
+        }
+        String archiveId = "cl-archive-" + UUID.randomUUID();
+        Map<String, Object> packageRef = lifecycleDocumentRef(contractId, "ARCHIVE_RECORD", archiveId, "ARCHIVE_PACKAGE",
+                text(request, "package_document_asset_id", null), text(request, "package_document_version_id", null));
+        Map<String, Object> manifestRef = lifecycleDocumentRef(contractId, "ARCHIVE_RECORD", archiveId, "ARCHIVE_MANIFEST",
+                text(request, "manifest_document_asset_id", null), text(request, "manifest_document_version_id", null));
+        ArchiveRecordState archive = new ArchiveRecordState(archiveId, contractId, text(request, "archive_batch_no", "ARCH-" + UUID.randomUUID()),
+                text(request, "archive_type", "FINAL"), text(request, "archive_reason", null), inputSet, "ARCHIVED", "PASSED",
+                text(request, "archive_keeper_user_id", null), text(request, "archive_location_code", null), packageRef, manifestRef, Instant.now().toString());
+        archiveRecords.put(archiveId, archive);
+        persistArchive(archive);
+        persistPerformanceDocumentRef(packageRef);
+        persistPerformanceDocumentRef(manifestRef);
+        Map<String, Object> summary = archiveSummary(archive, null);
+        archiveSummaries.put(contractId, summary);
+        refreshLifecycleSummary(contractId, "ARCHIVE", "ARCHIVED", "ARCHIVE_COMPLETED");
+        appendContractEvent(contractId, "ARCHIVE_COMPLETED", archiveId, text(request, "trace_id", null), "ARCHIVED");
+        appendLifecycleTimeline(contractId, "ARCHIVE_COMPLETED", "ARCHIVE_RECORD", archiveId, "ARCHIVE_COMPLETED",
+                text(request, "operator_user_id", null), "ARCHIVED", lifecycleDocumentRefId(packageRef), text(request, "trace_id", null));
+        appendLifecycleAudit(contractId, "ARCHIVE_COMPLETED", "ARCHIVE_RECORD", archiveId,
+                text(request, "operator_user_id", null), "SUCCESS", "ARCHIVED", lifecycleDocumentRefId(packageRef), text(request, "trace_id", null));
+        return ResponseEntity.status(HttpStatus.CREATED).body(archiveBody(archive));
+    }
+
+    ResponseEntity<Map<String, Object>> borrowArchive(String contractId, String archiveRecordId, Map<String, Object> request) {
+        ArchiveRecordState archive = requireArchive(archiveRecordId);
+        if (!contractId.equals(archive.contractId())) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(error("ARCHIVE_CONTRACT_MISMATCH", "归档记录未绑定当前合同"));
+        }
+        String borrowId = "cl-borrow-" + UUID.randomUUID();
+        ArchiveBorrowState borrow = new ArchiveBorrowState(borrowId, contractId, archiveRecordId, archive.archiveBatchNo(), archive.packageRef(), archive.manifestRef(),
+                "BORROWED", text(request, "borrow_purpose", null), text(request, "requested_by", null), text(request, "requested_org_unit_id", null),
+                Instant.now().toString(), text(request, "due_at", null), null);
+        archiveBorrows.put(borrowId, borrow);
+        persistBorrow(borrow);
+        archiveSummaries.put(contractId, archiveSummary(archive, borrow));
+        refreshLifecycleSummary(contractId, "ARCHIVE", "ARCHIVED", "ARCHIVE_BORROWED");
+        appendLifecycleAudit(contractId, "ARCHIVE_BORROWED", "ARCHIVE_BORROW", borrowId,
+                borrow.requestedBy(), "SUCCESS", "BORROWED", lifecycleDocumentRefId(archive.packageRef()), text(request, "trace_id", null));
+        return ResponseEntity.status(HttpStatus.CREATED).body(borrowBody(borrow));
+    }
+
+    ResponseEntity<Map<String, Object>> returnArchiveBorrow(String contractId, String borrowRecordId, Map<String, Object> request) {
+        ArchiveBorrowState borrow = requireBorrow(borrowRecordId);
+        if (!contractId.equals(borrow.contractId())) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(error("BORROW_CONTRACT_MISMATCH", "借阅记录未绑定当前合同"));
+        }
+        ArchiveBorrowState returned = new ArchiveBorrowState(borrow.borrowRecordId(), borrow.contractId(), borrow.archiveRecordId(), borrow.archiveBatchNo(),
+                borrow.packageRef(), borrow.manifestRef(), "RETURNED", borrow.borrowPurpose(), borrow.requestedBy(), borrow.requestedOrgUnitId(),
+                borrow.requestedAt(), borrow.dueAt(), Instant.now().toString());
+        archiveBorrows.put(borrowRecordId, returned);
+        persistBorrow(returned);
+        ArchiveRecordState archive = requireArchive(returned.archiveRecordId());
+        archiveSummaries.put(contractId, archiveSummary(archive, returned));
+        refreshLifecycleSummary(contractId, "ARCHIVE", "ARCHIVED", "ARCHIVE_RETURNED");
+        appendLifecycleAudit(contractId, "ARCHIVE_BORROW_RETURNED", "ARCHIVE_BORROW", borrowRecordId,
+                text(request, "returned_by", returned.requestedBy()), "SUCCESS", "RETURNED", lifecycleDocumentRefId(returned.packageRef()), text(request, "trace_id", null));
+        return ResponseEntity.ok(returnBody(returned));
+    }
+
     Map<String, Object> batch3SharedContract() {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("status_fields", List.of("signature_status", "encryption_status", "performance_status", "change_status", "termination_status", "archive_status"));
@@ -1888,16 +2122,162 @@ class CoreChainService {
     }
 
     private Map<String, Object> lifecycleSummary(String contractId, Map<String, Object> performanceSummary) {
+        return lifecycleSummary(contractId, "PERFORMANCE", text(performanceSummary, "performance_status", null), text(performanceSummary, "latest_milestone_code", null));
+    }
+
+    private Map<String, Object> refreshLifecycleSummary(String contractId, String currentStage, String stageStatus, String milestoneCode) {
+        Map<String, Object> summary = lifecycleSummary(contractId, currentStage, stageStatus, milestoneCode);
+        lifecycleSummaries.put(contractId, summary);
+        persistLifecycleSummary(contractId, summary);
+        return summary;
+    }
+
+    private Map<String, Object> lifecycleSummary(String contractId, String currentStage, String stageStatus, String milestoneCode) {
         Map<String, Object> summary = new LinkedHashMap<>();
         summary.put("contract_id", contractId);
-        summary.put("current_stage", "PERFORMANCE");
-        summary.put("stage_status", performanceSummary.get("performance_status"));
-        summary.put("performance_summary", performanceSummary);
-        summary.put("risk_summary", performanceSummary.get("risk_summary"));
-        summary.put("latest_milestone_code", performanceSummary.get("latest_milestone_code"));
+        summary.put("current_stage", currentStage);
+        summary.put("stage_status", stageStatus);
+        summary.put("performance_summary", performanceSummaries.get(contractId));
+        summary.put("change_summary", changeSummaries.get(contractId));
+        summary.put("termination_summary", terminationSummaries.get(contractId));
+        summary.put("archive_summary", archiveSummaries.get(contractId));
+        Map<String, Object> performanceSummary = performanceSummaries.get(contractId);
+        summary.put("risk_summary", performanceSummary == null ? null : performanceSummary.get("risk_summary"));
+        summary.put("latest_milestone_code", milestoneCode);
         summary.put("latest_milestone_at", Instant.now().toString());
         summary.put("summary_version", "cl-summary-v1");
         return summary;
+    }
+
+    private Map<String, Object> changeSummary(ContractChangeState change) {
+        Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("latest_change_id", change.changeId());
+        summary.put("change_status", change.changeStatus());
+        summary.put("change_type", change.changeType());
+        summary.put("effective_date", change.effectiveDate());
+        summary.put("current_effective_summary", change.changeResultSummary());
+        summary.put("impact_scope", change.impactScope());
+        summary.put("workflow_instance_id", change.workflowInstanceId());
+        summary.put("document_ref", change.documentRef());
+        return summary;
+    }
+
+    private Map<String, Object> terminationSummary(ContractTerminationState termination) {
+        Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("latest_termination_id", termination.terminationId());
+        summary.put("termination_status", termination.terminationStatus());
+        summary.put("terminated_at", termination.terminatedAt());
+        summary.put("settlement_summary", termination.settlementSummary());
+        summary.put("post_action_status", termination.postActionStatus());
+        summary.put("access_restriction", termination.accessRestriction());
+        summary.put("workflow_instance_id", termination.workflowInstanceId());
+        summary.put("document_ref", termination.documentRef());
+        return summary;
+    }
+
+    private Map<String, Object> archiveSummary(ArchiveRecordState archive, ArchiveBorrowState borrow) {
+        Map<String, Object> summary = new LinkedHashMap<>();
+        summary.put("latest_archive_record_id", archive.archiveRecordId());
+        summary.put("archive_status", archive.archiveStatus());
+        summary.put("archive_batch_no", archive.archiveBatchNo());
+        summary.put("archive_integrity_status", archive.archiveIntegrityStatus());
+        summary.put("package_ref", archive.packageRef());
+        summary.put("manifest_ref", archive.manifestRef());
+        if (borrow != null) {
+            summary.put("latest_borrow_record_id", borrow.borrowRecordId());
+            summary.put("borrow_status", borrow.borrowStatus());
+        }
+        return summary;
+    }
+
+    private Map<String, Object> lifecycleDocumentRef(String contractId, String sourceResourceType, String sourceResourceId,
+                                                     String documentRole, String documentAssetId, String documentVersionId) {
+        DocumentAssetState asset = requireDocumentAsset(documentAssetId);
+        DocumentVersionState version = requireDocumentVersion(documentVersionId);
+        if (!contractId.equals(asset.ownerId()) || !asset.documentAssetId().equals(version.documentAssetId())) {
+            throw new IllegalArgumentException("生命周期文档引用必须绑定当前合同的文档中心版本");
+        }
+        Map<String, Object> ref = new LinkedHashMap<>();
+        ref.put("lifecycle_document_ref_id", "cl-doc-ref-" + UUID.randomUUID());
+        ref.put("contract_id", contractId);
+        ref.put("source_resource_type", sourceResourceType);
+        ref.put("source_resource_id", sourceResourceId);
+        ref.put("document_role", documentRole);
+        ref.put("document_asset_id", documentAssetId);
+        ref.put("document_version_id", documentVersionId);
+        ref.put("is_primary", true);
+        return ref;
+    }
+
+    private Map<String, Object> lifecycleProcessRef(String contractId, String sourceResourceType, String sourceResourceId,
+                                                    String workflowInstanceId, String processPurpose, String status) {
+        Map<String, Object> ref = new LinkedHashMap<>();
+        ref.put("lifecycle_process_ref_id", "cl-proc-ref-" + UUID.randomUUID());
+        ref.put("contract_id", contractId);
+        ref.put("source_resource_type", sourceResourceType);
+        ref.put("source_resource_id", sourceResourceId);
+        ref.put("workflow_instance_id", workflowInstanceId);
+        ref.put("process_purpose", processPurpose);
+        ref.put("process_status_snapshot", status);
+        return ref;
+    }
+
+    private Map<String, Object> changeBody(ContractChangeState change) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("change_id", change.changeId());
+        body.put("contract_id", change.contractId());
+        body.put("change_type", change.changeType());
+        body.put("change_status", change.changeStatus());
+        body.put("effective_date", change.effectiveDate());
+        body.put("impact_scope", change.impactScope());
+        body.put("process_ref", change.processRef());
+        body.put("document_ref", change.documentRef());
+        body.put("change_summary", changeSummary(change));
+        return body;
+    }
+
+    private Map<String, Object> terminationBody(ContractTerminationState termination) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("termination_id", termination.terminationId());
+        body.put("contract_id", termination.contractId());
+        body.put("termination_type", termination.terminationType());
+        body.put("termination_status", termination.terminationStatus());
+        body.put("process_ref", termination.processRef());
+        body.put("document_ref", termination.documentRef());
+        body.put("termination_summary", terminationSummary(termination));
+        return body;
+    }
+
+    private Map<String, Object> archiveBody(ArchiveRecordState archive) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("archive_record_id", archive.archiveRecordId());
+        body.put("contract_id", archive.contractId());
+        body.put("archive_batch_no", archive.archiveBatchNo());
+        body.put("archive_status", archive.archiveStatus());
+        body.put("archive_integrity_status", archive.archiveIntegrityStatus());
+        body.put("package_ref", archive.packageRef());
+        body.put("manifest_ref", archive.manifestRef());
+        body.put("archive_summary", archiveSummary(archive, null));
+        return body;
+    }
+
+    private Map<String, Object> borrowBody(ArchiveBorrowState borrow) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("borrow_record_id", borrow.borrowRecordId());
+        body.put("contract_id", borrow.contractId());
+        body.put("archive_record_id", borrow.archiveRecordId());
+        body.put("borrow_status", borrow.borrowStatus());
+        body.put("borrow_purpose", borrow.borrowPurpose());
+        body.put("requested_by", borrow.requestedBy());
+        body.put("due_at", borrow.dueAt());
+        return body;
+    }
+
+    private Map<String, Object> returnBody(ArchiveBorrowState borrow) {
+        Map<String, Object> body = borrowBody(borrow);
+        body.put("return_status", borrow.borrowStatus());
+        body.put("returned_at", borrow.returnedAt());
+        return body;
     }
 
     private ResponseEntity<Map<String, Object>> validatePerformanceNodeChange(PerformanceNodeState current, String nextStatus,
@@ -1970,7 +2350,11 @@ class CoreChainService {
 
     private List<Map<String, Object>> nonLifecycleContractEvents(List<Map<String, Object>> events) {
         return new ArrayList<>(events.stream()
-                .filter(event -> !text(event, "event_type", "").startsWith("PERFORMANCE_"))
+                .filter(event -> {
+                    String type = text(event, "event_type", "");
+                    return !type.startsWith("PERFORMANCE_") && !type.startsWith("CHANGE_")
+                            && !type.startsWith("TERMINATION_") && !type.startsWith("ARCHIVE_");
+                })
                 .map(LinkedHashMap::new)
                 .map(event -> (Map<String, Object>) event)
                 .toList());
@@ -1997,15 +2381,68 @@ class CoreChainService {
     }
 
     private void persistLifecycleSummary(String contractId, Map<String, Object> summary) {
+        Map<String, Object> performanceSummary = summary.containsKey("performance_summary") ? map(summary.get("performance_summary")) : summary;
         Map<String, Object> riskSummary = map(summary.get("risk_summary"));
+        String currentStage = text(summary, "current_stage", "PERFORMANCE");
+        String stageStatus = text(summary, "stage_status", text(performanceSummary, "performance_status", "IN_PROGRESS"));
         jdbcTemplate.update("DELETE FROM cl_lifecycle_summary WHERE contract_id = ?", contractId);
         jdbcTemplate.update("""
                 INSERT INTO cl_lifecycle_summary (contract_id, current_stage, stage_status, performance_record_id, performance_status, progress_percent, risk_level, open_node_count, overdue_node_count, issue_count, latest_milestone_code, latest_milestone_at, summary_version, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """, contractId, "PERFORMANCE", text(summary, "performance_status", null), text(summary, "performance_record_id", null),
-                text(summary, "performance_status", null), intValue(summary, "progress_percent", 0), text(riskSummary, "risk_level", "LOW"),
-                intValue(summary, "open_node_count", 0), intValue(summary, "overdue_node_count", 0), intValue(riskSummary, "issue_count", 0),
+                """, contractId, currentStage, stageStatus, text(performanceSummary, "performance_record_id", null),
+                text(performanceSummary, "performance_status", null), intValue(performanceSummary, "progress_percent", 0), text(riskSummary, "risk_level", "LOW"),
+                intValue(performanceSummary, "open_node_count", 0), intValue(performanceSummary, "overdue_node_count", 0), intValue(riskSummary, "issue_count", 0),
                 text(summary, "latest_milestone_code", null), Instant.now().toString(), "cl-summary-v1", Instant.now().toString());
+    }
+
+    private void persistChange(ContractChangeState change) {
+        jdbcTemplate.update("DELETE FROM cl_contract_change WHERE change_id = ?", change.changeId());
+        jdbcTemplate.update("""
+                INSERT INTO cl_contract_change (change_id, contract_id, change_type, change_reason, change_summary, impact_scope_json, effective_date, change_status, workflow_instance_id, approved_at, applied_at, change_result_summary, result_version_no)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, change.changeId(), change.contractId(), change.changeType(), change.changeReason(), change.changeSummary(), change.impactScope().toString(),
+                change.effectiveDate(), change.changeStatus(), change.workflowInstanceId(), change.approvedAt(), change.appliedAt(), change.changeResultSummary(), change.resultVersionNo());
+    }
+
+    private void persistTermination(ContractTerminationState termination) {
+        jdbcTemplate.update("DELETE FROM cl_contract_termination WHERE termination_id = ?", termination.terminationId());
+        jdbcTemplate.update("""
+                INSERT INTO cl_contract_termination (termination_id, contract_id, termination_type, termination_reason, termination_summary, requested_termination_date, settlement_summary, termination_status, workflow_instance_id, terminated_at, post_action_status, access_restriction)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, termination.terminationId(), termination.contractId(), termination.terminationType(), termination.terminationReason(), termination.terminationSummary(),
+                termination.requestedTerminationDate(), termination.settlementSummary(), termination.terminationStatus(), termination.workflowInstanceId(),
+                termination.terminatedAt(), termination.postActionStatus(), termination.accessRestriction());
+    }
+
+    private void persistArchive(ArchiveRecordState archive) {
+        jdbcTemplate.update("DELETE FROM cl_archive_record WHERE archive_record_id = ?", archive.archiveRecordId());
+        jdbcTemplate.update("""
+                INSERT INTO cl_archive_record (archive_record_id, contract_id, archive_batch_no, archive_type, archive_reason, input_set_snapshot, archive_status, archive_integrity_status, archive_keeper_user_id, archive_location_code, package_document_asset_id, package_document_version_id, manifest_document_asset_id, manifest_document_version_id, archived_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, archive.archiveRecordId(), archive.contractId(), archive.archiveBatchNo(), archive.archiveType(), archive.archiveReason(), archive.inputSet().toString(),
+                archive.archiveStatus(), archive.archiveIntegrityStatus(), archive.archiveKeeperUserId(), archive.archiveLocationCode(),
+                text(archive.packageRef(), "document_asset_id", null), text(archive.packageRef(), "document_version_id", null),
+                text(archive.manifestRef(), "document_asset_id", null), text(archive.manifestRef(), "document_version_id", null), archive.archivedAt());
+    }
+
+    private void persistBorrow(ArchiveBorrowState borrow) {
+        jdbcTemplate.update("DELETE FROM cl_archive_borrow_record WHERE borrow_record_id = ?", borrow.borrowRecordId());
+        jdbcTemplate.update("""
+                INSERT INTO cl_archive_borrow_record (borrow_record_id, contract_id, archive_record_id, archive_batch_no, package_document_asset_id, manifest_document_asset_id, borrow_status, borrow_purpose, requested_by, requested_org_unit_id, requested_at, due_at, returned_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, borrow.borrowRecordId(), borrow.contractId(), borrow.archiveRecordId(), borrow.archiveBatchNo(), text(borrow.packageRef(), "document_asset_id", null),
+                text(borrow.manifestRef(), "document_asset_id", null), borrow.borrowStatus(), borrow.borrowPurpose(), borrow.requestedBy(), borrow.requestedOrgUnitId(),
+                borrow.requestedAt(), borrow.dueAt(), borrow.returnedAt());
+    }
+
+    private void persistLifecycleProcessRef(Map<String, Object> processRef) {
+        jdbcTemplate.update("DELETE FROM cl_lifecycle_process_ref WHERE lifecycle_process_ref_id = ?", text(processRef, "lifecycle_process_ref_id", null));
+        jdbcTemplate.update("""
+                INSERT INTO cl_lifecycle_process_ref (lifecycle_process_ref_id, contract_id, source_resource_type, source_resource_id, workflow_instance_id, process_purpose, process_status_snapshot, last_synced_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """, text(processRef, "lifecycle_process_ref_id", null), text(processRef, "contract_id", null),
+                text(processRef, "source_resource_type", null), text(processRef, "source_resource_id", null), text(processRef, "workflow_instance_id", null),
+                text(processRef, "process_purpose", null), text(processRef, "process_status_snapshot", null), Instant.now().toString());
     }
 
     private void persistPerformanceDocumentRef(Map<String, Object> documentRef) {
@@ -2069,6 +2506,9 @@ class CoreChainService {
         event.put("event_result", eventResult);
         event.put("related_document_ref_id", documentRefId);
         event.put("trace_id", traceId);
+        event.put("visible_to_search", true);
+        event.put("visible_to_ai", true);
+        event.put("visible_to_notify", true);
         event.put("occurred_at", Instant.now().toString());
         return event;
     }
@@ -2102,6 +2542,38 @@ class CoreChainService {
     private PerformanceRecordState performanceRecordForContract(String contractId) {
         String recordId = performanceRecordByContract.get(contractId);
         return recordId == null ? null : performanceRecords.get(recordId);
+    }
+
+    private ContractChangeState requireChange(String changeId) {
+        ContractChangeState change = contractChanges.get(changeId);
+        if (change == null) {
+            throw new IllegalArgumentException("change_id 不存在: " + changeId);
+        }
+        return change;
+    }
+
+    private ContractTerminationState requireTermination(String terminationId) {
+        ContractTerminationState termination = contractTerminations.get(terminationId);
+        if (termination == null) {
+            throw new IllegalArgumentException("termination_id 不存在: " + terminationId);
+        }
+        return termination;
+    }
+
+    private ArchiveRecordState requireArchive(String archiveRecordId) {
+        ArchiveRecordState archive = archiveRecords.get(archiveRecordId);
+        if (archive == null) {
+            throw new IllegalArgumentException("archive_record_id 不存在: " + archiveRecordId);
+        }
+        return archive;
+    }
+
+    private ArchiveBorrowState requireBorrow(String borrowRecordId) {
+        ArchiveBorrowState borrow = archiveBorrows.get(borrowRecordId);
+        if (borrow == null) {
+            throw new IllegalArgumentException("borrow_record_id 不存在: " + borrowRecordId);
+        }
+        return borrow;
     }
 
     private Map<String, Object> acceptEncryptionCheckIn(String documentAssetId, String documentVersionId, String triggerType,
@@ -2502,6 +2974,9 @@ class CoreChainService {
         body.put("audit_record", contract.events());
         body.put("signature_summary", signatureSummaries.get(contract.contractId()));
         body.put("performance_summary", performanceSummaries.get(contract.contractId()));
+        body.put("change_summary", changeSummaries.get(contract.contractId()));
+        body.put("termination_summary", terminationSummaries.get(contract.contractId()));
+        body.put("archive_summary", archiveSummaries.get(contract.contractId()));
         return body;
     }
 
@@ -3097,6 +3572,10 @@ class CoreChainService {
         return value instanceof List<?> source ? (List<Map<String, Object>>) source : List.of();
     }
 
+    private List<String> listStrings(Object value) {
+        return value instanceof List<?> source ? source.stream().map(Object::toString).toList() : List.of();
+    }
+
     private List<Map<String, Object>> copyAssignmentList(List<Map<String, Object>> assignments) {
         return assignments.stream().map(LinkedHashMap::new).map(item -> (Map<String, Object>) item).toList();
     }
@@ -3231,6 +3710,32 @@ class CoreChainService {
                                         String riskLevel, int issueCount, boolean overdue, String resultSummary,
                                         String lastResultAt, String ownerUserId, String ownerOrgUnitId,
                                         Map<String, Object> documentRef) {
+    }
+
+    private record ContractChangeState(String changeId, String contractId, String changeType, String changeReason,
+                                       String changeSummary, Map<String, Object> impactScope, String effectiveDate,
+                                       String changeStatus, String workflowInstanceId, Map<String, Object> documentRef,
+                                       Map<String, Object> processRef, String approvedAt, String appliedAt,
+                                       String changeResultSummary, int resultVersionNo) {
+    }
+
+    private record ContractTerminationState(String terminationId, String contractId, String terminationType,
+                                            String terminationReason, String terminationSummary, String requestedTerminationDate,
+                                            String settlementSummary, String terminationStatus, String workflowInstanceId,
+                                            Map<String, Object> documentRef, Map<String, Object> processRef, String terminatedAt,
+                                            String postActionStatus, String accessRestriction) {
+    }
+
+    private record ArchiveRecordState(String archiveRecordId, String contractId, String archiveBatchNo, String archiveType,
+                                      String archiveReason, List<String> inputSet, String archiveStatus,
+                                      String archiveIntegrityStatus, String archiveKeeperUserId, String archiveLocationCode,
+                                      Map<String, Object> packageRef, Map<String, Object> manifestRef, String archivedAt) {
+    }
+
+    private record ArchiveBorrowState(String borrowRecordId, String contractId, String archiveRecordId, String archiveBatchNo,
+                                      Map<String, Object> packageRef, Map<String, Object> manifestRef, String borrowStatus,
+                                      String borrowPurpose, String requestedBy, String requestedOrgUnitId, String requestedAt,
+                                      String dueAt, String returnedAt) {
     }
 
     private record EncryptionSecurityBindingState(String securityBindingId, String documentAssetId, String currentVersionId,
