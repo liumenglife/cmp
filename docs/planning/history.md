@@ -224,3 +224,19 @@
 
 - 第三批整体质量收口继续以 [`102-03-batch-3-dependent-business-capabilities-implementation-plan.md`](../superpowers/plans/102-03-batch-3-dependent-business-capabilities-implementation-plan.md) 为执行依据。
 - 已全绿的第三批跨模块综合验证不再作为未完成任务处理。
+
+## 2026-04-29 第三批第七项分支整体质量收口归档
+
+### 归档原因
+
+- `feature/contract-lifecycle-change-termination-archive` 已完成第三批第七项、跨模块综合验证与整体质量收口审查。
+- 工作树干净、完整验证通过、规划真相与分支决策一致，已具备创建 PR 的条件。
+
+### 已归档任务批次
+
+- [✓] 第三批整体质量收口：独立质量收口审查结论为通过，没问题；`git status --short --branch` 显示工作树干净；`git diff --check origin/main..HEAD` 通过；完整验证 `./scripts/verify-all.sh` 通过，后端 133 个测试通过，前端检查、测试、构建通过，容器健康检查通过并完成清理；敏感信息抽查未发现新增真实密钥或凭据。
+
+### 迁移说明
+
+- 本分支已具备 PR 准备状态；后续应创建 PR，并等待 checks 通过后再合并。
+- 第三批第七项、跨模块综合验证与整体质量收口不再作为未完成任务处理。
