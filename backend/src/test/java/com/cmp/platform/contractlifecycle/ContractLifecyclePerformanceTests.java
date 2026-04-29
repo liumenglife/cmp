@@ -8,10 +8,12 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.BeforeEach;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 
 @SpringBootTest
@@ -20,6 +22,19 @@ class ContractLifecyclePerformanceTests {
 
     @Autowired
     private MockMvc mockMvc;
+
+    @Autowired
+    private JdbcTemplate jdbcTemplate;
+
+    @BeforeEach
+    void cleanLifecycleTables() {
+        jdbcTemplate.update("DELETE FROM cl_lifecycle_audit_event");
+        jdbcTemplate.update("DELETE FROM cl_lifecycle_timeline_event");
+        jdbcTemplate.update("DELETE FROM cl_lifecycle_document_ref");
+        jdbcTemplate.update("DELETE FROM cl_lifecycle_summary");
+        jdbcTemplate.update("DELETE FROM cl_performance_node");
+        jdbcTemplate.update("DELETE FROM cl_performance_record");
+    }
 
     @Test
     void effectiveSignedContractCanStartPerformanceButUnsignedOrIneffectiveContractCannotCreateFormalRecord() throws Exception {
@@ -148,6 +163,96 @@ class ContractLifecyclePerformanceTests {
                 .andExpect(jsonPath("$.audit_record[?(@.event_type == 'PERFORMANCE_RISK_CHANGED')]", org.hamcrest.Matchers.hasSize(2)));
     }
 
+    @Test
+    void performanceRecordNodeSummaryAndDocumentRefAreDurableFacts() throws Exception {
+        LifecycleSample sample = createSignedContractSample("履约持久事实合同", "trace-cl-durable");
+        String recordId = createPerformanceRecord(sample.contractId(), "trace-cl-durable-record");
+        String evidence = createEvidenceDocument(sample.contractId(), "trace-cl-durable-evidence");
+        String evidenceAssetId = jsonString(evidence, "document_asset_id");
+        String evidenceVersionId = jsonString(evidence, "document_version_id");
+
+        String node = mockMvc.perform(post("/api/contracts/{contract_id}/performance-nodes", sample.contractId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"performance_record_id":"%s","node_type":"DELIVERY","node_name":"首批交付","milestone_code":"DELIVERY_ACCEPTED","planned_at":"2026-05-01","due_at":"2026-05-10","owner_user_id":"u-node-owner","owner_org_unit_id":"dept-node","evidence_document_asset_id":"%s","evidence_document_version_id":"%s","trace_id":"trace-cl-durable-node"}
+                                """.formatted(recordId, evidenceAssetId, evidenceVersionId)))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        String nodeId = jsonString(node, "performance_node_id");
+
+        assertRowCount("cl_performance_record", "performance_record_id = ? and contract_id = ? and performance_status = ?", 1, recordId, sample.contractId(), "IN_PROGRESS");
+        assertRowCount("cl_performance_node", "performance_node_id = ? and performance_record_id = ? and contract_id = ? and node_status = ?", 1, nodeId, recordId, sample.contractId(), "PENDING");
+        assertRowCount("cl_lifecycle_summary", "contract_id = ? and current_stage = ? and stage_status = ?", 1, sample.contractId(), "PERFORMANCE", "IN_PROGRESS");
+        assertRowCount("cl_lifecycle_document_ref", "source_resource_type = ? and source_resource_id = ? and document_asset_id = ? and document_version_id = ?", 1, "PERFORMANCE_NODE", nodeId, evidenceAssetId, evidenceVersionId);
+    }
+
+    @Test
+    void performanceNodeStateMachineRejectsInvalidStatusAndBlockedCompletion() throws Exception {
+        LifecycleSample sample = createSignedContractSample("履约状态机合同", "trace-cl-state-machine");
+        String recordId = createPerformanceRecord(sample.contractId(), "trace-cl-state-record");
+        String node = mockMvc.perform(post("/api/contracts/{contract_id}/performance-nodes", sample.contractId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"performance_record_id":"%s","node_type":"DELIVERY","node_name":"状态机节点","milestone_code":"DELIVERY_ACCEPTED","trace_id":"trace-cl-state-node"}
+                                """.formatted(recordId)))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        String nodeId = jsonString(node, "performance_node_id");
+
+        mockMvc.perform(patch("/api/contracts/{contract_id}/performance-nodes/{node_id}", sample.contractId(), nodeId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"node_status":"FORCED_DONE","progress_percent":100,"risk_level":"LOW","trace_id":"trace-cl-state-invalid"}
+                                """))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.error_code").value("PERFORMANCE_NODE_STATUS_INVALID"));
+
+        mockMvc.perform(patch("/api/contracts/{contract_id}/performance-nodes/{node_id}", sample.contractId(), nodeId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"node_status":"COMPLETED","progress_percent":100,"risk_level":"HIGH","issue_count":1,"actual_at":"2026-05-05","trace_id":"trace-cl-state-risk-block"}
+                                """))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error_code").value("PERFORMANCE_COMPLETION_BLOCKED"));
+
+        assertRowCount("cl_performance_node", "performance_node_id = ? and node_status = ? and risk_level = ? and progress_percent = ?", 1, nodeId, "PENDING", "LOW", 0);
+        assertRowCount("cl_performance_record", "performance_record_id = ? and performance_status = ?", 1, recordId, "IN_PROGRESS");
+    }
+
+    @Test
+    void lifecycleTimelineAndAuditAreSeparatedDurableQueryableFacts() throws Exception {
+        LifecycleSample sample = createSignedContractSample("履约时间线审计合同", "trace-cl-timeline-audit");
+        String recordId = createPerformanceRecord(sample.contractId(), "trace-cl-timeline-record");
+        String node = mockMvc.perform(post("/api/contracts/{contract_id}/performance-nodes", sample.contractId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"performance_record_id":"%s","node_type":"PAYMENT","node_name":"回款节点","milestone_code":"PAYMENT_RECEIVED","trace_id":"trace-cl-timeline-node"}
+                                """.formatted(recordId)))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        String nodeId = jsonString(node, "performance_node_id");
+
+        mockMvc.perform(patch("/api/contracts/{contract_id}/performance-nodes/{node_id}", sample.contractId(), nodeId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"node_status":"IN_PROGRESS","progress_percent":50,"risk_level":"MEDIUM","issue_count":1,"operator_user_id":"u-auditor","result_summary":"存在回款风险","trace_id":"trace-cl-timeline-risk"}
+                                """))
+                .andExpect(status().isOk());
+
+        assertRowCount("cl_lifecycle_timeline_event", "contract_id = ? and event_type = ? and source_resource_type = ? and source_resource_id = ? and milestone_code = ? and dedupe_key is not null", 1,
+                sample.contractId(), "PERFORMANCE_PROGRESS_UPDATED", "PERFORMANCE_NODE", nodeId, "PAYMENT_RECEIVED");
+        assertRowCount("cl_lifecycle_audit_event", "contract_id = ? and event_type = ? and source_resource_type = ? and source_resource_id = ? and actor_user_id = ? and result_status = ? and dedupe_key is not null", 1,
+                sample.contractId(), "PERFORMANCE_RISK_CHANGED", "PERFORMANCE_NODE", nodeId, "u-auditor", "SUCCESS");
+        assertRowCount("cl_lifecycle_timeline_event", "event_type = ? and event_result is not null", 1, "PERFORMANCE_PROGRESS_UPDATED");
+        assertRowCount("cl_lifecycle_audit_event", "event_type = ? and event_result is not null", 1, "PERFORMANCE_RISK_CHANGED");
+
+        String timelineId = jdbcTemplate.queryForObject("SELECT timeline_event_id FROM cl_lifecycle_timeline_event WHERE contract_id = ? AND event_type = ?", String.class,
+                sample.contractId(), "PERFORMANCE_PROGRESS_UPDATED");
+        String auditId = jdbcTemplate.queryForObject("SELECT audit_event_id FROM cl_lifecycle_audit_event WHERE contract_id = ? AND event_type = ?", String.class,
+                sample.contractId(), "PERFORMANCE_RISK_CHANGED");
+        assertThat(timelineId).isNotEqualTo(auditId);
+    }
+
     private String createPerformanceRecord(String contractId, String traceId) throws Exception {
         String record = mockMvc.perform(post("/api/contracts/{contract_id}/performance-records", contractId)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -256,6 +361,11 @@ class ContractLifecyclePerformanceTests {
         int valueStart = start + marker.length();
         int valueEnd = json.indexOf('"', valueStart);
         return json.substring(valueStart, valueEnd);
+    }
+
+    private void assertRowCount(String tableName, String whereClause, int expected, Object... args) {
+        Integer actual = jdbcTemplate.queryForObject("SELECT COUNT(*) FROM " + tableName + " WHERE " + whereClause, Integer.class, args);
+        assertThat(actual).isEqualTo(expected);
     }
 
     private record ApprovedSample(String contractId, String documentAssetId, String documentVersionId) {

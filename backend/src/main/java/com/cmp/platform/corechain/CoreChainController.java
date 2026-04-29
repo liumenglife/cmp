@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -341,6 +342,13 @@ class CoreChainService {
     private final Map<String, PerformanceNodeState> performanceNodes = new ConcurrentHashMap<>();
     private final Map<String, Map<String, Object>> performanceSummaries = new ConcurrentHashMap<>();
     private final Map<String, Map<String, Object>> lifecycleSummaries = new ConcurrentHashMap<>();
+    private final List<Map<String, Object>> lifecycleTimelineEvents = new ArrayList<>();
+    private final List<Map<String, Object>> lifecycleAuditEvents = new ArrayList<>();
+    private final JdbcTemplate jdbcTemplate;
+
+    CoreChainService(JdbcTemplate jdbcTemplate) {
+        this.jdbcTemplate = jdbcTemplate;
+    }
 
     Map<String, Object> createContract(Map<String, Object> request) {
         String contractId = "ctr-" + UUID.randomUUID();
@@ -1233,8 +1241,8 @@ class CoreChainService {
         body.put("attachment_summaries", contract.attachments().stream().map(this::documentBody).toList());
         body.put("approval_summary", contract.approvalSummary());
         body.put("lifecycle_summary", lifecycleSummaries.get(contractId));
-        body.put("timeline_summary", contract.events());
-        body.put("audit_record", contract.events());
+        body.put("timeline_summary", combinedTimeline(contract));
+        body.put("audit_record", combinedAudit(contract));
         return body;
     }
 
@@ -1255,8 +1263,13 @@ class CoreChainService {
                 0, 0, null, "履约已启动", "PERFORMANCE_STARTED", Instant.now().toString(), Instant.now().toString());
         performanceRecords.put(recordId, record);
         performanceRecordByContract.put(contractId, recordId);
+        persistPerformanceRecord(record);
         Map<String, Object> summary = refreshPerformanceSummary(contractId, "PERFORMANCE_STARTED");
         lifecycleSummaries.put(contractId, lifecycleSummary(contractId, summary));
+        appendLifecycleTimeline(contractId, "PERFORMANCE_STARTED", "PERFORMANCE_RECORD", recordId, "PERFORMANCE_STARTED",
+                text(request, "operator_user_id", record.ownerUserId()), "SUCCESS", null, text(request, "trace_id", null));
+        appendLifecycleAudit(contractId, "PERFORMANCE_RECORD_CREATED", "PERFORMANCE_RECORD", recordId,
+                text(request, "operator_user_id", record.ownerUserId()), "SUCCESS", "ADMITTED", null, text(request, "trace_id", null));
         appendContractEvent(contractId, "PERFORMANCE_STARTED", recordId, text(request, "trace_id", null), null);
         return ResponseEntity.status(HttpStatus.CREATED).body(performanceRecordBody(record, contract.contractStatus()));
     }
@@ -1307,8 +1320,14 @@ class CoreChainService {
                 text(request, "risk_level", "LOW"), intValue(request, "issue_count", 0), false, text(request, "result_summary", null), null,
                 text(request, "owner_user_id", record.ownerUserId()), text(request, "owner_org_unit_id", record.ownerOrgUnitId()), documentRef);
         performanceNodes.put(nodeId, node);
+        persistPerformanceNode(node);
+        persistPerformanceDocumentRef(documentRef);
         Map<String, Object> summary = refreshPerformanceSummary(contractId, node.milestoneCode());
         lifecycleSummaries.put(contractId, lifecycleSummary(contractId, summary));
+        appendLifecycleTimeline(contractId, "PERFORMANCE_NODE_CREATED", "PERFORMANCE_NODE", nodeId, node.milestoneCode(),
+                text(request, "operator_user_id", node.ownerUserId()), "SUCCESS", lifecycleDocumentRefId(documentRef), text(request, "trace_id", null));
+        appendLifecycleAudit(contractId, "PERFORMANCE_NODE_CREATED", "PERFORMANCE_NODE", nodeId,
+                text(request, "operator_user_id", node.ownerUserId()), "SUCCESS", "CREATED", lifecycleDocumentRefId(documentRef), text(request, "trace_id", null));
         appendContractEvent(contractId, "PERFORMANCE_NODE_CREATED", nodeId, text(request, "trace_id", null), null);
         Map<String, Object> body = performanceNodeBody(node);
         body.put("performance_summary", summary);
@@ -1323,25 +1342,44 @@ class CoreChainService {
         String previousRisk = node.riskLevel();
         String nodeStatus = text(request, "node_status", node.nodeStatus());
         String riskLevel = text(request, "risk_level", node.riskLevel());
+        int progressPercent = intValue(request, "progress_percent", node.progressPercent());
+        int issueCount = intValue(request, "issue_count", node.issueCount());
+        ResponseEntity<Map<String, Object>> stateRejection = validatePerformanceNodeChange(node, nodeStatus, progressPercent, riskLevel, issueCount, request);
+        if (stateRejection != null) {
+            return stateRejection;
+        }
         boolean overdue = bool(request, "is_overdue", "OVERDUE".equals(nodeStatus));
         PerformanceNodeState updated = new PerformanceNodeState(node.performanceNodeId(), node.performanceRecordId(), node.contractId(),
                 node.nodeType(), node.nodeName(), node.milestoneCode(), node.plannedAt(), node.dueAt(), text(request, "actual_at", node.actualAt()),
-                nodeStatus, intValue(request, "progress_percent", node.progressPercent()), riskLevel, intValue(request, "issue_count", node.issueCount()),
+                nodeStatus, progressPercent, riskLevel, issueCount,
                 overdue, text(request, "result_summary", node.resultSummary()), Instant.now().toString(), node.ownerUserId(), node.ownerOrgUnitId(), node.documentRef());
         performanceNodes.put(nodeId, updated);
+        persistPerformanceNode(updated);
 
         String milestoneCode = "COMPLETED".equals(nodeStatus) ? "PERFORMANCE_COMPLETED" : updated.milestoneCode();
         Map<String, Object> summary = refreshPerformanceSummary(contractId, milestoneCode);
         lifecycleSummaries.put(contractId, lifecycleSummary(contractId, summary));
+        String actorUserId = text(request, "operator_user_id", updated.ownerUserId());
+        String documentRefId = lifecycleDocumentRefId(updated.documentRef());
         if (!previousRisk.equals(riskLevel)) {
+            appendLifecycleAudit(contractId, "PERFORMANCE_RISK_CHANGED", "PERFORMANCE_NODE", nodeId,
+                    actorUserId, "SUCCESS", riskLevel, documentRefId, text(request, "trace_id", null));
             appendContractEvent(contractId, "PERFORMANCE_RISK_CHANGED", nodeId, text(request, "trace_id", null), null);
         }
         if (overdue || "OVERDUE".equals(nodeStatus)) {
+            appendLifecycleTimeline(contractId, "PERFORMANCE_NODE_OVERDUE", "PERFORMANCE_NODE", nodeId, updated.milestoneCode(),
+                    actorUserId, "OVERDUE", documentRefId, text(request, "trace_id", null));
             appendContractEvent(contractId, "PERFORMANCE_NODE_OVERDUE", nodeId, text(request, "trace_id", null), null);
         }
         if ("COMPLETED".equals(summary.get("performance_status"))) {
+            appendLifecycleTimeline(contractId, "PERFORMANCE_COMPLETED", "PERFORMANCE_NODE", nodeId, "PERFORMANCE_COMPLETED",
+                    actorUserId, "COMPLETED", documentRefId, text(request, "trace_id", null));
+            appendLifecycleAudit(contractId, "PERFORMANCE_COMPLETION_CONFIRMED", "PERFORMANCE_NODE", nodeId,
+                    actorUserId, "SUCCESS", "COMPLETED", documentRefId, text(request, "trace_id", null));
             appendContractEvent(contractId, "PERFORMANCE_COMPLETED", nodeId, text(request, "trace_id", null), "PERFORMED");
         } else {
+            appendLifecycleTimeline(contractId, "PERFORMANCE_PROGRESS_UPDATED", "PERFORMANCE_NODE", nodeId, updated.milestoneCode(),
+                    actorUserId, summary.get("performance_status").toString(), documentRefId, text(request, "trace_id", null));
             appendContractEvent(contractId, "PERFORMANCE_PROGRESS_UPDATED", nodeId, text(request, "trace_id", null), null);
         }
 
@@ -1808,7 +1846,10 @@ class CoreChainService {
         int openCount = nodeCount - completedCount;
         int progress = nodeCount == 0 ? 0 : nodes.stream().mapToInt(PerformanceNodeState::progressPercent).sum() / nodeCount;
         String riskLevel = nodes.stream().map(PerformanceNodeState::riskLevel).reduce("LOW", this::higherRisk);
-        String status = nodeCount > 0 && completedCount == nodeCount ? "COMPLETED" : (overdueCount > 0 || "HIGH".equals(riskLevel) ? "AT_RISK" : "IN_PROGRESS");
+        int issueCount = nodes.stream().mapToInt(PerformanceNodeState::issueCount).sum();
+        boolean completionReady = nodeCount > 0 && completedCount == nodeCount && overdueCount == 0
+                && issueCount == 0 && "LOW".equals(riskLevel) && progress == 100;
+        String status = completionReady ? "COMPLETED" : (overdueCount > 0 || "HIGH".equals(riskLevel) || issueCount > 0 ? "AT_RISK" : "IN_PROGRESS");
         String latestDueAt = nodes.stream().map(PerformanceNodeState::dueAt).filter(value -> value != null && !value.isBlank()).min(String::compareTo).orElse(null);
         String latestMilestone = "COMPLETED".equals(status) ? "PERFORMANCE_COMPLETED" : (milestoneCode == null ? "PERFORMANCE_STARTED" : milestoneCode);
         String summaryText = switch (status) {
@@ -1822,12 +1863,13 @@ class CoreChainService {
                     record.ownerUserId(), record.ownerOrgUnitId(), openCount, overdueCount, latestDueAt, summaryText, latestMilestone,
                     Instant.now().toString(), Instant.now().toString());
             performanceRecords.put(record.performanceRecordId(), updated);
+            persistPerformanceRecord(updated);
         }
 
         Map<String, Object> riskSummary = new LinkedHashMap<>();
         riskSummary.put("risk_level", riskLevel);
         riskSummary.put("overdue_node_count", overdueCount);
-        riskSummary.put("issue_count", nodes.stream().mapToInt(PerformanceNodeState::issueCount).sum());
+        riskSummary.put("issue_count", issueCount);
 
         Map<String, Object> summary = new LinkedHashMap<>();
         summary.put("contract_id", contractId);
@@ -1841,6 +1883,7 @@ class CoreChainService {
         summary.put("summary_text", summaryText);
         summary.put("last_contract_writeback_at", Instant.now().toString());
         performanceSummaries.put(contractId, summary);
+        persistLifecycleSummary(contractId, summary);
         return summary;
     }
 
@@ -1855,6 +1898,182 @@ class CoreChainService {
         summary.put("latest_milestone_at", Instant.now().toString());
         summary.put("summary_version", "cl-summary-v1");
         return summary;
+    }
+
+    private ResponseEntity<Map<String, Object>> validatePerformanceNodeChange(PerformanceNodeState current, String nextStatus,
+                                                                               int progressPercent, String riskLevel, int issueCount,
+                                                                               Map<String, Object> request) {
+        if (!List.of("PENDING", "IN_PROGRESS", "OVERDUE", "COMPLETED").contains(nextStatus)) {
+            return ResponseEntity.unprocessableEntity().body(error("PERFORMANCE_NODE_STATUS_INVALID", "履约节点状态不在允许范围内"));
+        }
+        if (!List.of("LOW", "MEDIUM", "HIGH").contains(riskLevel)) {
+            return ResponseEntity.unprocessableEntity().body(error("PERFORMANCE_RISK_LEVEL_INVALID", "履约风险等级不在允许范围内"));
+        }
+        if (progressPercent < 0 || progressPercent > 100) {
+            return ResponseEntity.unprocessableEntity().body(error("PERFORMANCE_PROGRESS_INVALID", "履约进度必须在 0 到 100 之间"));
+        }
+        if (issueCount < 0) {
+            return ResponseEntity.unprocessableEntity().body(error("PERFORMANCE_ISSUE_COUNT_INVALID", "履约问题数量不能为负数"));
+        }
+        if ("COMPLETED".equals(current.nodeStatus()) && !"COMPLETED".equals(nextStatus)) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(error("PERFORMANCE_NODE_TRANSITION_INVALID", "已完成履约节点不允许回退"));
+        }
+        boolean legalTransition = current.nodeStatus().equals(nextStatus)
+                || switch (current.nodeStatus()) {
+                    case "PENDING" -> List.of("IN_PROGRESS", "OVERDUE", "COMPLETED").contains(nextStatus);
+                    case "IN_PROGRESS" -> List.of("OVERDUE", "COMPLETED").contains(nextStatus);
+                    case "OVERDUE" -> List.of("IN_PROGRESS", "COMPLETED").contains(nextStatus);
+                    default -> false;
+                };
+        if (!legalTransition) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(error("PERFORMANCE_NODE_TRANSITION_INVALID", "履约节点状态迁移不合法"));
+        }
+        if ("COMPLETED".equals(nextStatus)) {
+            String actualAt = text(request, "actual_at", current.actualAt());
+            boolean completionBlocked = progressPercent != 100 || !"LOW".equals(riskLevel) || issueCount != 0
+                    || bool(request, "is_overdue", false) || actualAt == null || actualAt.isBlank();
+            if (completionBlocked) {
+                Map<String, Object> body = error("PERFORMANCE_COMPLETION_BLOCKED", "履约完成必须满足进度、风险、问题、逾期和实际完成时间校验");
+                body.put("required_progress_percent", 100);
+                body.put("required_risk_level", "LOW");
+                body.put("required_issue_count", 0);
+                return ResponseEntity.status(HttpStatus.CONFLICT).body(body);
+            }
+        }
+        return null;
+    }
+
+    private List<Map<String, Object>> lifecycleTimeline(String contractId) {
+        return lifecycleTimelineEvents.stream()
+                .filter(event -> contractId.equals(text(event, "contract_id", null)))
+                .toList();
+    }
+
+    private List<Map<String, Object>> combinedTimeline(ContractState contract) {
+        List<Map<String, Object>> events = nonLifecycleContractEvents(contract.events());
+        events.addAll(lifecycleTimeline(contract.contractId()));
+        return events;
+    }
+
+    private List<Map<String, Object>> lifecycleAudit(String contractId) {
+        return lifecycleAuditEvents.stream()
+                .filter(event -> contractId.equals(text(event, "contract_id", null)))
+                .toList();
+    }
+
+    private List<Map<String, Object>> combinedAudit(ContractState contract) {
+        List<Map<String, Object>> events = nonLifecycleContractEvents(contract.events());
+        events.addAll(lifecycleAudit(contract.contractId()));
+        return events;
+    }
+
+    private List<Map<String, Object>> nonLifecycleContractEvents(List<Map<String, Object>> events) {
+        return new ArrayList<>(events.stream()
+                .filter(event -> !text(event, "event_type", "").startsWith("PERFORMANCE_"))
+                .map(LinkedHashMap::new)
+                .map(event -> (Map<String, Object>) event)
+                .toList());
+    }
+
+    private void persistPerformanceRecord(PerformanceRecordState record) {
+        jdbcTemplate.update("DELETE FROM cl_performance_record WHERE performance_record_id = ?", record.performanceRecordId());
+        jdbcTemplate.update("""
+                INSERT INTO cl_performance_record (performance_record_id, contract_id, performance_status, progress_percent, risk_level, owner_user_id, owner_org_unit_id, open_node_count, overdue_node_count, latest_due_at, summary_text, latest_milestone_code, last_evaluated_at, last_writeback_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, record.performanceRecordId(), record.contractId(), record.performanceStatus(), record.progressPercent(), record.riskLevel(),
+                record.ownerUserId(), record.ownerOrgUnitId(), record.openNodeCount(), record.overdueNodeCount(), record.latestDueAt(),
+                record.summaryText(), record.latestMilestoneCode(), record.lastEvaluatedAt(), record.lastWritebackAt());
+    }
+
+    private void persistPerformanceNode(PerformanceNodeState node) {
+        jdbcTemplate.update("DELETE FROM cl_performance_node WHERE performance_node_id = ?", node.performanceNodeId());
+        jdbcTemplate.update("""
+                INSERT INTO cl_performance_node (performance_node_id, performance_record_id, contract_id, node_type, node_name, milestone_code, planned_at, due_at, actual_at, node_status, progress_percent, risk_level, issue_count, is_overdue, result_summary, last_result_at, owner_user_id, owner_org_unit_id)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, node.performanceNodeId(), node.performanceRecordId(), node.contractId(), node.nodeType(), node.nodeName(), node.milestoneCode(),
+                node.plannedAt(), node.dueAt(), node.actualAt(), node.nodeStatus(), node.progressPercent(), node.riskLevel(), node.issueCount(),
+                node.overdue(), node.resultSummary(), node.lastResultAt(), node.ownerUserId(), node.ownerOrgUnitId());
+    }
+
+    private void persistLifecycleSummary(String contractId, Map<String, Object> summary) {
+        Map<String, Object> riskSummary = map(summary.get("risk_summary"));
+        jdbcTemplate.update("DELETE FROM cl_lifecycle_summary WHERE contract_id = ?", contractId);
+        jdbcTemplate.update("""
+                INSERT INTO cl_lifecycle_summary (contract_id, current_stage, stage_status, performance_record_id, performance_status, progress_percent, risk_level, open_node_count, overdue_node_count, issue_count, latest_milestone_code, latest_milestone_at, summary_version, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, contractId, "PERFORMANCE", text(summary, "performance_status", null), text(summary, "performance_record_id", null),
+                text(summary, "performance_status", null), intValue(summary, "progress_percent", 0), text(riskSummary, "risk_level", "LOW"),
+                intValue(summary, "open_node_count", 0), intValue(summary, "overdue_node_count", 0), intValue(riskSummary, "issue_count", 0),
+                text(summary, "latest_milestone_code", null), Instant.now().toString(), "cl-summary-v1", Instant.now().toString());
+    }
+
+    private void persistPerformanceDocumentRef(Map<String, Object> documentRef) {
+        if (documentRef == null || documentRef.isEmpty()) {
+            return;
+        }
+        jdbcTemplate.update("DELETE FROM cl_lifecycle_document_ref WHERE lifecycle_document_ref_id = ?", text(documentRef, "lifecycle_document_ref_id", null));
+        jdbcTemplate.update("""
+                INSERT INTO cl_lifecycle_document_ref (lifecycle_document_ref_id, contract_id, source_resource_type, source_resource_id, document_role, document_asset_id, document_version_id, is_primary, created_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, text(documentRef, "lifecycle_document_ref_id", null), text(documentRef, "contract_id", null),
+                text(documentRef, "source_resource_type", null), text(documentRef, "source_resource_id", null), text(documentRef, "document_role", null),
+                text(documentRef, "document_asset_id", null), text(documentRef, "document_version_id", null), bool(documentRef, "is_primary", true), Instant.now().toString());
+    }
+
+    private String lifecycleDocumentRefId(Map<String, Object> documentRef) {
+        return documentRef == null || documentRef.isEmpty() ? null : text(documentRef, "lifecycle_document_ref_id", null);
+    }
+
+    private void appendLifecycleTimeline(String contractId, String eventType, String sourceResourceType, String sourceResourceId,
+                                         String milestoneCode, String actorUserId, String eventResult, String documentRefId, String traceId) {
+        String eventId = "cl-time-" + UUID.randomUUID();
+        String dedupeKey = dedupeKey("timeline", eventType, sourceResourceId, traceId);
+        Map<String, Object> event = lifecycleEvent(eventId, contractId, eventType, sourceResourceType, sourceResourceId, milestoneCode,
+                dedupeKey, actorUserId, eventResult, documentRefId, traceId);
+        lifecycleTimelineEvents.add(event);
+        jdbcTemplate.update("""
+                INSERT INTO cl_lifecycle_timeline_event (timeline_event_id, contract_id, event_type, source_resource_type, source_resource_id, milestone_code, dedupe_key, actor_user_id, event_result, related_document_ref_id, trace_id, occurred_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, eventId, contractId, eventType, sourceResourceType, sourceResourceId, milestoneCode, dedupeKey, actorUserId,
+                eventResult, documentRefId, traceId, text(event, "occurred_at", null));
+    }
+
+    private void appendLifecycleAudit(String contractId, String eventType, String sourceResourceType, String sourceResourceId,
+                                      String actorUserId, String resultStatus, String eventResult, String documentRefId, String traceId) {
+        String eventId = "cl-audit-" + UUID.randomUUID();
+        String dedupeKey = dedupeKey("audit", eventType, sourceResourceId, traceId);
+        Map<String, Object> event = lifecycleEvent(eventId, contractId, eventType, sourceResourceType, sourceResourceId, null,
+                dedupeKey, actorUserId, eventResult, documentRefId, traceId);
+        event.put("result_status", resultStatus);
+        lifecycleAuditEvents.add(event);
+        jdbcTemplate.update("""
+                INSERT INTO cl_lifecycle_audit_event (audit_event_id, contract_id, event_type, source_resource_type, source_resource_id, actor_user_id, result_status, event_result, dedupe_key, related_document_ref_id, trace_id, occurred_at)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, eventId, contractId, eventType, sourceResourceType, sourceResourceId, actorUserId, resultStatus, eventResult,
+                dedupeKey, documentRefId, traceId, text(event, "occurred_at", null));
+    }
+
+    private Map<String, Object> lifecycleEvent(String eventId, String contractId, String eventType, String sourceResourceType,
+                                               String sourceResourceId, String milestoneCode, String dedupeKey, String actorUserId,
+                                               String eventResult, String documentRefId, String traceId) {
+        Map<String, Object> event = new LinkedHashMap<>();
+        event.put("event_id", eventId);
+        event.put("contract_id", contractId);
+        event.put("event_type", eventType);
+        event.put("source_resource_type", sourceResourceType);
+        event.put("source_resource_id", sourceResourceId);
+        event.put("milestone_code", milestoneCode);
+        event.put("dedupe_key", dedupeKey);
+        event.put("actor_user_id", actorUserId);
+        event.put("event_result", eventResult);
+        event.put("related_document_ref_id", documentRefId);
+        event.put("trace_id", traceId);
+        event.put("occurred_at", Instant.now().toString());
+        return event;
+    }
+
+    private String dedupeKey(String scope, String eventType, String sourceResourceId, String traceId) {
+        return scope + ":" + eventType + ":" + sourceResourceId + ":" + (traceId == null ? UUID.randomUUID() : traceId);
     }
 
     private String higherRisk(String left, String right) {
