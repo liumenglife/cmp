@@ -240,3 +240,42 @@
 
 - 本分支已具备 PR 准备状态；后续应创建 PR，并等待 checks 通过后再合并。
 - 第三批第七项、跨模块综合验证与整体质量收口不再作为未完成任务处理。
+
+## 2026-04-29 第三批合并与清理归档
+
+### 归档原因
+
+- `PR #8` 已完成检查、合并到 `main`，本地 `main` 已同步，第三批最后一个功能分支和工作树已清理。
+- 第四批已经创建新的隔离工作树，`current.md` 只保留第四批当前真相。
+
+### 已归档任务批次
+
+- [✓] `PR #8` 合并：合并提交为 `7b57b29`，标题为“第三批合同生命周期收口与跨模块验证”。
+- [✓] 本地 `main` 同步：`main` 已快进到 `origin/main` 的 `7b57b29`。
+- [✓] 第三批分支清理：`feature/contract-lifecycle-change-termination-archive` 本地分支、远端分支和隔离工作树均已删除。
+- [✓] 第三批整体完成：电子签章、加密软件、合同生命周期、跨模块综合验证与整体质量收口全部完成并合并。
+
+### 迁移说明
+
+- 第三批不再作为当前任务处理。
+- 后续开发切换到第四批“智能与增强能力”，以 [`102-04-batch-4-intelligent-applications-implementation-plan.md`](../superpowers/plans/102-04-batch-4-intelligent-applications-implementation-plan.md) 为执行依据。
+
+## 2026-04-29 第四批启动门禁阶段性归档
+
+### 归档原因
+
+- 第四批启动门禁核验、基线验证、缺口修复与独立质量审查已经完成。
+- `current.md` 继续维护第四批后续功能点推进状态，本节记录已经全绿的启动门禁完成事实。
+
+### 已归档任务批次
+
+- [✓] 第四批工作树与分支创建：基于最新 `main` 创建 `feature/batch4-intelligent-enhancement-capabilities` 与 `.worktrees/feature/batch4-intelligent-enhancement-capabilities`。
+- [✓] 第四批规划真相对齐：第三批合并与清理事实迁入历史真相，`current.md` 收敛为第四批当前真相。
+- [✓] 第四批启动门禁核验：首次核验结论为不通过，问题包括合同主档分类主链缺失、条款库 / 模板库读取入口缺失、文档中心能力挂接摘要缺失、文档版本切换稳定事件入口缺失、`Agent OS` 人工确认接口缺失、统一任务中心正式入口缺失。
+- [✓] 第四批启动门禁缺口修复：已按测试驱动开发补齐六项上游可消费性缺口，独立质量审查结论为通过，没问题。
+- [✓] 第四批启动门禁完整验证：修复后 `./scripts/verify-all.sh` 通过，后端 134 个测试通过，前端检查、测试、构建通过，容器健康检查通过并完成清理。
+
+### 迁移说明
+
+- 第四批启动门禁不再作为未完成任务处理。
+- 第四批下一功能点为“文字识别稳定输入闭环”，继续以 [`102-04-batch-4-intelligent-applications-implementation-plan.md`](../superpowers/plans/102-04-batch-4-intelligent-applications-implementation-plan.md) 为执行依据。

@@ -50,6 +50,16 @@ class CoreChainController {
         return service.contractMaster(contractId);
     }
 
+    @GetMapping("/api/contracts/{contractId}/batch4-consumption-summary")
+    Map<String, Object> batch4ContractConsumptionSummary(@PathVariable String contractId) {
+        return service.batch4ContractConsumptionSummary(contractId);
+    }
+
+    @GetMapping("/api/contracts/{contractId}/semantic-references")
+    Map<String, Object> contractSemanticReferences(@PathVariable String contractId) {
+        return service.contractSemanticReferences(contractId);
+    }
+
     @PatchMapping("/api/contracts/{contractId}")
     ResponseEntity<Map<String, Object>> editContract(@PathVariable String contractId,
                                                       @RequestHeader(value = "X-CMP-Permissions", required = false) String permissions,
@@ -71,6 +81,16 @@ class CoreChainController {
     @GetMapping("/api/document-center/assets/{documentAssetId}")
     Map<String, Object> documentAsset(@PathVariable String documentAssetId) {
         return service.documentAsset(documentAssetId);
+    }
+
+    @GetMapping("/api/document-center/assets/{documentAssetId}/capability-bindings")
+    Map<String, Object> documentCapabilityBindings(@PathVariable String documentAssetId) {
+        return service.documentCapabilityBindings(documentAssetId);
+    }
+
+    @GetMapping("/api/document-center/events")
+    Map<String, Object> documentCenterEvents(@RequestParam(required = false) String consumer_scope) {
+        return service.documentCenterEvents(consumer_scope);
     }
 
     @GetMapping("/api/document-center/assets")
@@ -397,6 +417,9 @@ class CoreChainService {
     private final Map<String, Map<String, Object>> archiveSummaries = new ConcurrentHashMap<>();
     private final Map<String, ArchiveBorrowState> archiveBorrows = new ConcurrentHashMap<>();
     private final Map<String, Map<String, Object>> lifecycleSummaries = new ConcurrentHashMap<>();
+    private final Map<String, List<Map<String, Object>>> contractClassificationChains = new ConcurrentHashMap<>();
+    private final Map<String, Map<String, Object>> contractSemanticReferenceRefs = new ConcurrentHashMap<>();
+    private final List<Map<String, Object>> documentConsumerEvents = new ArrayList<>();
     private final List<Map<String, Object>> lifecycleTimelineEvents = new ArrayList<>();
     private final List<Map<String, Object>> lifecycleAuditEvents = new ArrayList<>();
     private final JdbcTemplate jdbcTemplate;
@@ -415,6 +438,8 @@ class CoreChainService {
                 text(request, "currency", null), null, new ArrayList<>(), null, null, new ArrayList<>());
         contract.events().add(event("CONTRACT_CREATED", contractId, text(request, "trace_id", null)));
         contracts.put(contractId, contract);
+        contractClassificationChains.put(contractId, classificationChain(request));
+        contractSemanticReferenceRefs.put(contractId, semanticReferenceRefs(request));
         return contractBody(contract);
     }
 
@@ -487,6 +512,7 @@ class CoreChainService {
         documentAssets.put(documentAssetId, updated);
         refreshContractDocumentRef(updated, text(request, "trace_id", null));
         acceptEncryptionCheckIn(documentAssetId, versionId, "NEW_VERSION", request, false);
+        appendDocumentConsumerEvent("DOCUMENT_VERSION_APPENDED", updated, versionId, text(request, "trace_id", null));
         return documentVersionBody(version);
     }
 
@@ -533,7 +559,64 @@ class CoreChainService {
         updated.auditRecords().add(event("DOCUMENT_VERSION_ACTIVATED", documentVersionId, text(request, "trace_id", null)));
         documentAssets.put(asset.documentAssetId(), updated);
         refreshContractDocumentRef(updated, text(request, "trace_id", null));
+        appendDocumentConsumerEvent("DOCUMENT_VERSION_ACTIVATED", updated, documentVersionId, text(request, "trace_id", null));
         return documentAssetBody(updated);
+    }
+
+    Map<String, Object> batch4ContractConsumptionSummary(String contractId) {
+        ContractState contract = requireContract(contractId);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("contract_id", contract.contractId());
+        body.put("contract_summary", contractBody(contract));
+        body.put("classification_master_link", classificationMasterLink(contractId));
+        body.put("semantic_reference_summary", contractSemanticReferences(contractId));
+        body.put("consumption_contract_version", "batch4-startup-gate-v1");
+        return body;
+    }
+
+    Map<String, Object> contractSemanticReferences(String contractId) {
+        requireContract(contractId);
+        Map<String, Object> refs = contractSemanticReferenceRefs.getOrDefault(contractId, semanticReferenceRefs(Map.of()));
+        String clauseLibraryCode = text(refs, "clause_library_code", "clause-lib-default");
+        String templateLibraryCode = text(refs, "template_library_code", "tpl-lib-default");
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("contract_id", contractId);
+        body.put("clause_library_ref", Map.of("library_code", clauseLibraryCode, "source_of_truth", "contract-core"));
+        body.put("template_library_ref", Map.of("library_code", templateLibraryCode, "source_of_truth", "contract-core"));
+        body.put("clause_library", Map.of("items", List.of(Map.of(
+                "clause_id", "clause-" + clauseLibraryCode,
+                "stable_clause_version_id", "clause-ver-" + clauseLibraryCode,
+                "clause_title", "标准条款",
+                "source_of_truth", "contract-core"))));
+        body.put("template_library", Map.of("items", List.of(Map.of(
+                "template_id", "tpl-" + templateLibraryCode,
+                "stable_template_version_id", "tpl-ver-" + templateLibraryCode,
+                "template_title", "标准模板",
+                "source_of_truth", "contract-core"))));
+        return body;
+    }
+
+    Map<String, Object> documentCapabilityBindings(String documentAssetId) {
+        DocumentAssetState asset = requireDocumentAsset(documentAssetId);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("document_asset_id", asset.documentAssetId());
+        body.put("current_version_id", asset.currentVersionId());
+        body.put("owner_type", asset.ownerType());
+        body.put("owner_id", asset.ownerId());
+        body.put("capability_bindings", capabilityBindings(asset));
+        return body;
+    }
+
+    Map<String, Object> documentCenterEvents(String consumerScope) {
+        String scope = consumerScope == null ? "BATCH4_INTELLIGENT_APPLICATIONS" : consumerScope;
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("subscription_entry", Map.of(
+                "consumer_scope", scope,
+                "subscribed_event_types", List.of("DOCUMENT_VERSION_APPENDED", "DOCUMENT_VERSION_ACTIVATED"),
+                "subscription_status", "ACTIVE"));
+        body.put("items", documentConsumerEvents.stream().map(event -> (Map<String, Object>) event).toList());
+        body.put("total", documentConsumerEvents.size());
+        return body;
     }
 
     Map<String, Object> createProcessDefinition(Map<String, Object> request) {
@@ -3078,6 +3161,68 @@ class CoreChainService {
         body.put("termination_summary", terminationSummaries.get(contract.contractId()));
         body.put("archive_summary", archiveSummaries.get(contract.contractId()));
         return body;
+    }
+
+    private List<Map<String, Object>> classificationChain(Map<String, Object> request) {
+        Object raw = request.get("classification_chain");
+        if (raw instanceof List<?> list && !list.isEmpty()) {
+            return list.stream()
+                    .filter(Map.class::isInstance)
+                    .<Map<String, Object>>map(item -> new LinkedHashMap<>((Map<String, Object>) item))
+                    .toList();
+        }
+        return List.of(Map.of("category_code", text(request, "category_code", "GENERAL"), "category_name", text(request, "category_name", "通用合同")));
+    }
+
+    private Map<String, Object> semanticReferenceRefs(Map<String, Object> request) {
+        Map<String, Object> refs = new LinkedHashMap<>();
+        refs.put("clause_library_code", text(request, "clause_library_code", "clause-lib-default"));
+        refs.put("template_library_code", text(request, "template_library_code", "tpl-lib-default"));
+        return refs;
+    }
+
+    private Map<String, Object> classificationMasterLink(String contractId) {
+        List<Map<String, Object>> chain = contractClassificationChains.getOrDefault(contractId, classificationChain(Map.of()));
+        String categoryPath = chain.stream().map(item -> text(item, "category_code", "GENERAL")).reduce((left, right) -> left + "/" + right).orElse("GENERAL");
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("classification_chain", chain);
+        body.put("category_path", categoryPath);
+        body.put("source_of_truth", "contract-core");
+        body.put("stable_link_status", "ACTIVE");
+        return body;
+    }
+
+    private List<Map<String, Object>> capabilityBindings(DocumentAssetState asset) {
+        return List.of(
+                capabilityBinding(asset, "OCR", "document-center.ocr.input"),
+                capabilityBinding(asset, "SEARCH", "document-center.search.input"),
+                capabilityBinding(asset, "AI_APPLICATION", "document-center.ai.input"));
+    }
+
+    private Map<String, Object> capabilityBinding(DocumentAssetState asset, String capabilityCode, String bindingCode) {
+        Map<String, Object> binding = new LinkedHashMap<>();
+        binding.put("capability_code", capabilityCode);
+        binding.put("binding_code", bindingCode);
+        binding.put("document_asset_id", asset.documentAssetId());
+        binding.put("document_version_id", asset.currentVersionId());
+        binding.put("binding_status", "READY");
+        binding.put("source_of_truth", "document-center");
+        return binding;
+    }
+
+    private void appendDocumentConsumerEvent(String eventType, DocumentAssetState asset, String documentVersionId, String traceId) {
+        Map<String, Object> event = new LinkedHashMap<>();
+        event.put("event_id", "dc-event-" + UUID.randomUUID());
+        event.put("event_type", eventType);
+        event.put("document_asset_id", asset.documentAssetId());
+        event.put("document_version_id", documentVersionId);
+        event.put("owner_type", asset.ownerType());
+        event.put("owner_id", asset.ownerId());
+        event.put("consumer_scope", "BATCH4_INTELLIGENT_APPLICATIONS");
+        event.put("delivery_status", "READY");
+        event.put("trace_id", traceId);
+        event.put("occurred_at", Instant.now().toString());
+        documentConsumerEvents.add(event);
     }
 
     private Map<String, Object> ledgerBody(ContractState contract) {

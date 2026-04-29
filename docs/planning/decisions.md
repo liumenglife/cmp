@@ -209,3 +209,9 @@
 - 决策：第三批第七项“合同生命周期变更、终止与归档能力”使用 `feature/contract-lifecycle-change-termination-archive` 分支和 `.worktrees/feature/contract-lifecycle-change-termination-archive` 隔离工作区推进。
 - 原因：第三批第四至第六项已经通过 PR 合并到 `main` 并完成旧工作树清理；第七项需要基于最新 `main` 启动，聚焦合同生命周期变更、终止与归档能力，避免继续沿用已完成阶段性交付分支。
 - 影响：第七项所有编码、验证、独立质量审查与提交均在该工作树内完成；主工作区保持 `main` 同步入口，不直接承载第七项生产代码修改。
+
+### 决策 34：第四批智能与增强能力使用独立工作树分支推进
+
+- 决策：第四批“智能与增强能力”编码使用 `feature/batch4-intelligent-enhancement-capabilities` 分支和 `.worktrees/feature/batch4-intelligent-enhancement-capabilities` 隔离工作区推进。
+- 原因：第三批已经通过 PR 合并到 `main` 并完成分支与工作树清理；第四批必须基于最新 `main` 启动，聚焦智能应用主线，避免继续沿用已完成第三批分支。
+- 影响：第四批所有编码、验证、独立质量审查与提交均在该工作树内完成；主工作区保持 `main` 同步入口，不直接承载第四批生产代码修改。
