@@ -162,6 +162,19 @@ class CoreChainController {
     Map<String, Object> compensationTasks(@RequestParam(required = false) String contract_id) {
         return service.compensationTasks(contract_id);
     }
+
+    @PostMapping("/api/contracts/{contractId}/signatures/apply")
+    ResponseEntity<Map<String, Object>> applySignature(@PathVariable String contractId,
+                                                       @RequestHeader(value = "X-CMP-Permissions", required = false) String permissions,
+                                                       @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+                                                       @RequestBody Map<String, Object> request) {
+        return service.applySignature(contractId, permissions, idempotencyKey, request);
+    }
+
+    @GetMapping("/api/signature-requests/{signatureRequestId}")
+    Map<String, Object> signatureRequest(@PathVariable String signatureRequestId) {
+        return service.signatureRequest(signatureRequestId);
+    }
 }
 
 @org.springframework.stereotype.Service
@@ -177,6 +190,8 @@ class CoreChainService {
     private final Map<String, ProcessState> processes = new ConcurrentHashMap<>();
     private final Map<String, String> oaProcessIndex = new ConcurrentHashMap<>();
     private final Map<String, CompensationTaskState> compensationTasks = new ConcurrentHashMap<>();
+    private final Map<String, SignatureRequestState> signatureRequests = new ConcurrentHashMap<>();
+    private final Map<String, String> signatureIdempotencyIndex = new ConcurrentHashMap<>();
 
     Map<String, Object> createContract(Map<String, Object> request) {
         String contractId = "ctr-" + UUID.randomUUID();
@@ -590,6 +605,46 @@ class CoreChainService {
         return body;
     }
 
+    ResponseEntity<Map<String, Object>> applySignature(String contractId, String permissions, String idempotencyKey, Map<String, Object> request) {
+        if (permissions == null || !permissions.contains("SIGNATURE_APPLY")) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(error("PERMISSION_DENIED", "缺少签章发起权限"));
+        }
+        if (idempotencyKey != null && signatureIdempotencyIndex.containsKey(idempotencyKey)) {
+            Map<String, Object> body = signatureRequestBody(requireSignatureRequest(signatureIdempotencyIndex.get(idempotencyKey)), true, true);
+            return ResponseEntity.ok(body);
+        }
+
+        ContractState contract = requireContract(contractId);
+        DocumentRef currentDocument = contract.currentDocument();
+        String documentAssetId = text(request, "main_document_asset_id", null);
+        String documentVersionId = text(request, "main_document_version_id", null);
+
+        ResponseEntity<Map<String, Object>> rejection = signatureAdmissionRejection(contract, currentDocument, documentAssetId, documentVersionId);
+        if (rejection != null) {
+            return rejection;
+        }
+
+        String signatureRequestId = "sig-req-" + UUID.randomUUID();
+        String fingerprint = contractId + ":" + documentAssetId + ":" + documentVersionId + ":"
+                + text(request, "signature_mode", "ELECTRONIC") + ":" + text(request, "seal_scheme_id", "") + ":" + text(request, "sign_order_mode", "SERIAL");
+        Map<String, Object> snapshot = signatureApplicationSnapshot(contract);
+        Map<String, Object> binding = signatureInputBinding(contractId, signatureRequestId, documentAssetId, documentVersionId);
+        List<Map<String, Object>> auditRecords = List.of(signatureAudit("SIGNATURE_APPLY_ADMITTED", contractId, signatureRequestId, text(request, "trace_id", null)));
+        SignatureRequestState state = new SignatureRequestState(signatureRequestId, contractId, "ADMITTED", "READY",
+                documentAssetId, documentVersionId, text(request, "signature_mode", "ELECTRONIC"), text(request, "seal_scheme_id", null),
+                text(request, "sign_order_mode", "SERIAL"), fingerprint, idempotencyKey, snapshot, binding, auditRecords,
+                Instant.now().toString(), text(request, "created_by", text(request, "operator_user_id", null)));
+        signatureRequests.put(signatureRequestId, state);
+        if (idempotencyKey != null && !idempotencyKey.isBlank()) {
+            signatureIdempotencyIndex.put(idempotencyKey, signatureRequestId);
+        }
+        return ResponseEntity.status(HttpStatus.CREATED).body(signatureRequestBody(state, false, true));
+    }
+
+    Map<String, Object> signatureRequest(String signatureRequestId) {
+        return signatureRequestBody(requireSignatureRequest(signatureRequestId), false, false);
+    }
+
     Map<String, Object> contractMaster(String contractId) {
         return contractBody(requireContract(contractId));
     }
@@ -687,6 +742,107 @@ class CoreChainService {
         input.put("document_version_ref", document == null ? null : batch3DocumentVersionRef(document));
         input.put("approval_summary", contract.approvalSummary());
         return input;
+    }
+
+    private ResponseEntity<Map<String, Object>> signatureAdmissionRejection(ContractState contract, DocumentRef currentDocument,
+                                                                            String documentAssetId, String documentVersionId) {
+        String finalResult = contract.approvalSummary() == null ? null : String.valueOf(contract.approvalSummary().get("final_result"));
+        if ("TERMINATED".equals(finalResult)) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(error("APPROVAL_WITHDRAWN", "审批已撤回或终止，不能发起签章"));
+        }
+        if (!"APPROVED".equals(finalResult)) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(error("APPROVAL_NOT_PASSED", "审批未通过，不能发起签章"));
+        }
+        if (!"APPROVED".equals(contract.contractStatus())) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(error("CONTRACT_STATUS_CONFLICT", "合同状态不允许发起签章"));
+        }
+        if (currentDocument == null
+                || !currentDocument.documentAssetId().equals(documentAssetId)
+                || !currentDocument.documentVersionId().equals(documentVersionId)) {
+            Map<String, Object> body = error("FILE_VALIDATION_FAILED", "签章输入稿不是合同当前有效正式版本");
+            body.put("current_document_version_id", currentDocument == null ? null : currentDocument.documentVersionId());
+            body.put("requested_document_version_id", documentVersionId);
+            return ResponseEntity.unprocessableEntity().body(body);
+        }
+        String approvedDocumentVersionId = approvedDocumentVersionId(contract);
+        if (!documentVersionId.equals(approvedDocumentVersionId)) {
+            Map<String, Object> body = error("FILE_VALIDATION_FAILED", "签章输入稿不是审批通过版本");
+            body.put("approved_document_version_id", approvedDocumentVersionId);
+            body.put("requested_document_version_id", documentVersionId);
+            return ResponseEntity.unprocessableEntity().body(body);
+        }
+        DocumentAssetState asset = requireDocumentAsset(documentAssetId);
+        DocumentVersionState version = requireDocumentVersion(documentVersionId);
+        if (!"CONTRACT".equals(asset.ownerType()) || !contract.contractId().equals(asset.ownerId())
+                || !asset.documentAssetId().equals(version.documentAssetId())) {
+            return ResponseEntity.unprocessableEntity().body(error("FILE_VALIDATION_FAILED", "签章输入稿未绑定当前合同主链"));
+        }
+        return null;
+    }
+
+    private String approvedDocumentVersionId(ContractState contract) {
+        ProcessState process = contract.processId() == null ? null : processes.get(contract.processId());
+        return process == null ? null : process.documentVersionId();
+    }
+
+    private Map<String, Object> signatureApplicationSnapshot(ContractState contract) {
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("contract_id", contract.contractId());
+        snapshot.put("contract_status", contract.contractStatus());
+        snapshot.put("approval_summary", contract.approvalSummary() == null ? null : new LinkedHashMap<>(contract.approvalSummary()));
+        snapshot.put("contract_snapshot_version", contract.processId());
+        return snapshot;
+    }
+
+    private Map<String, Object> signatureInputBinding(String contractId, String signatureRequestId, String documentAssetId, String documentVersionId) {
+        Map<String, Object> binding = new LinkedHashMap<>();
+        binding.put("binding_id", "sig-bind-" + UUID.randomUUID());
+        binding.put("contract_id", contractId);
+        binding.put("signature_request_id", signatureRequestId);
+        binding.put("binding_role", "SOURCE_MAIN");
+        binding.put("binding_status", "BOUND");
+        binding.put("document_asset_id", documentAssetId);
+        binding.put("document_version_id", documentVersionId);
+        binding.put("bound_at", Instant.now().toString());
+        return binding;
+    }
+
+    private Map<String, Object> signatureAudit(String actionType, String contractId, String signatureRequestId, String traceId) {
+        Map<String, Object> audit = new LinkedHashMap<>();
+        audit.put("signature_audit_event_id", "sig-audit-" + UUID.randomUUID());
+        audit.put("audit_action_type", actionType);
+        audit.put("audit_level", "HIGH");
+        audit.put("contract_id", contractId);
+        audit.put("signature_request_id", signatureRequestId);
+        audit.put("audit_result", "SUCCESS");
+        audit.put("trace_id", traceId);
+        audit.put("occurred_at", Instant.now().toString());
+        return audit;
+    }
+
+    private Map<String, Object> signatureRequestBody(SignatureRequestState state, boolean idempotencyReplayed, boolean includeAdmissionDetails) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("signature_request_id", state.signatureRequestId());
+        body.put("contract_id", state.contractId());
+        body.put("request_status", state.requestStatus());
+        body.put("signature_status", state.signatureStatus());
+        body.put("main_document_asset_id", state.mainDocumentAssetId());
+        body.put("main_document_version_id", state.mainDocumentVersionId());
+        body.put("signature_mode", state.signatureMode());
+        body.put("seal_scheme_id", state.sealSchemeId());
+        body.put("sign_order_mode", state.signOrderMode());
+        body.put("request_fingerprint", state.requestFingerprint());
+        body.put("created_at", state.createdAt());
+        body.put("created_by", state.createdBy());
+        if (idempotencyReplayed) {
+            body.put("idempotency_replayed", true);
+        }
+        if (includeAdmissionDetails) {
+            body.put("application_snapshot", state.applicationSnapshot());
+            body.put("input_document_binding", state.inputDocumentBinding());
+            body.put("audit_record", state.auditRecords());
+        }
+        return body;
     }
 
     private Map<String, Object> batch3DocumentInput(DocumentRef document) {
@@ -1111,6 +1267,14 @@ class CoreChainService {
         return contract;
     }
 
+    private SignatureRequestState requireSignatureRequest(String signatureRequestId) {
+        SignatureRequestState state = signatureRequests.get(signatureRequestId);
+        if (state == null) {
+            throw new IllegalArgumentException("signature_request_id 不存在: " + signatureRequestId);
+        }
+        return state;
+    }
+
     private DocumentAssetState requireDocumentAsset(String documentAssetId) {
         DocumentAssetState asset = documentAssets.get(documentAssetId);
         if (asset == null) {
@@ -1311,6 +1475,14 @@ class CoreChainService {
     }
 
     private record CompensationTaskState(String taskId, String taskType, String contractId, String processId,
-                                         String compensationStatus, String traceId, String createdAt) {
+                                          String compensationStatus, String traceId, String createdAt) {
+    }
+
+    private record SignatureRequestState(String signatureRequestId, String contractId, String requestStatus,
+                                         String signatureStatus, String mainDocumentAssetId, String mainDocumentVersionId,
+                                         String signatureMode, String sealSchemeId, String signOrderMode,
+                                         String requestFingerprint, String idempotencyKey,
+                                         Map<String, Object> applicationSnapshot, Map<String, Object> inputDocumentBinding,
+                                         List<Map<String, Object>> auditRecords, String createdAt, String createdBy) {
     }
 }

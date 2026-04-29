@@ -129,14 +129,16 @@
 ### 归档原因
 
 - 第三批第一项挂载点验收与共享契约冻结已经完成实现、修复、独立质量审查复审与完整验证。
+- 第三批第二项电子签章申请与准入能力已经完成实现、修复、独立质量审查复审与完整验证。
 - `current.md` 继续维护第三批当前推进状态，本节记录已经全绿的阶段性完成事实。
 
 ### 已归档任务批次
 
 - [✓] 第三批工作树与分支创建：基于最新 `main` 创建 `feature/batch3-dependent-business-capabilities` 与 `.worktrees/feature/batch3-dependent-business-capabilities`，基线验证 `./scripts/verify-all.sh` 通过。
 - [✓] 第三批挂载点验收与共享契约冻结：已按测试驱动开发完成，经历独立质量审查、修复与复审，复审结论为通过，没问题；完整验证 `./scripts/verify-all.sh` 通过。
+- [✓] 电子签章申请与准入能力：已按测试驱动开发完成，经历独立质量审查、修复与复审，复审结论为通过，没问题；完整验证 `./scripts/verify-all.sh` 通过。
 
 ### 迁移说明
 
 - 第三批后续功能点继续以 [`102-03-batch-3-dependent-business-capabilities-implementation-plan.md`](../superpowers/plans/102-03-batch-3-dependent-business-capabilities-implementation-plan.md) 为执行依据。
-- 已全绿的第三批第一项不再作为未完成任务处理。
+- 已全绿的第三批第一项、第二项不再作为未完成任务处理。
