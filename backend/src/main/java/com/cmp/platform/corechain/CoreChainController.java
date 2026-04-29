@@ -267,14 +267,14 @@ class CoreChainController {
 
     @PostMapping("/api/encrypted-documents/download-jobs/{jobId}/deliver")
     ResponseEntity<Map<String, Object>> deliverDecryptDownloadJob(@PathVariable String jobId,
-                                                                  @RequestBody(required = false) Map<String, Object> request) {
-        return ResponseEntity.ok(service.deliverDecryptDownloadJob(jobId, request == null ? Map.of() : request));
+                                                                   @RequestBody(required = false) Map<String, Object> request) {
+        return service.deliverDecryptDownloadJob(jobId, request == null ? Map.of() : request);
     }
 
     @PostMapping("/api/encrypted-documents/download-jobs/{jobId}/expire")
     ResponseEntity<Map<String, Object>> expireDecryptDownloadJob(@PathVariable String jobId,
-                                                                 @RequestBody(required = false) Map<String, Object> request) {
-        return ResponseEntity.ok(service.expireDecryptDownloadJob(jobId, request == null ? Map.of() : request));
+                                                                  @RequestBody(required = false) Map<String, Object> request) {
+        return service.expireDecryptDownloadJob(jobId, request == null ? Map.of() : request);
     }
 
     @GetMapping("/api/encrypted-documents/audit-events")
@@ -311,6 +311,7 @@ class CoreChainService {
     private final Map<String, DecryptAccessState> decryptAccesses = new ConcurrentHashMap<>();
     private final Map<String, DownloadAuthorizationState> downloadAuthorizations = new ConcurrentHashMap<>();
     private final Map<String, DecryptDownloadJobState> decryptDownloadJobs = new ConcurrentHashMap<>();
+    private final List<Map<String, Object>> encryptedDocumentAuditRecords = new ArrayList<>();
 
     Map<String, Object> createContract(Map<String, Object> request) {
         String contractId = "ctr-" + UUID.randomUUID();
@@ -1143,24 +1144,34 @@ class CoreChainService {
         return ResponseEntity.status(HttpStatus.CREATED).body(body);
     }
 
-    Map<String, Object> deliverDecryptDownloadJob(String jobId, Map<String, Object> request) {
+    ResponseEntity<Map<String, Object>> deliverDecryptDownloadJob(String jobId, Map<String, Object> request) {
         DecryptDownloadJobState job = requireDecryptDownloadJob(jobId);
+        ResponseEntity<Map<String, Object>> conflict = rejectDownloadJobTransitionUnlessReady(job, "DELIVERED");
+        if (conflict != null) {
+            return conflict;
+        }
         DecryptDownloadJobState delivered = updateDecryptDownloadJobStatus(job, "DELIVERED", "DOWNLOAD_DELIVERED", "明文导出已交付");
         Map<String, Object> audit = auditDownloadJob(delivered, "DOWNLOAD_DELIVERED", "SUCCESS", text(request, "trace_id", null));
-        return decryptDownloadJobBody(delivered, audit);
+        return ResponseEntity.ok(decryptDownloadJobBody(delivered, audit));
     }
 
-    Map<String, Object> expireDecryptDownloadJob(String jobId, Map<String, Object> request) {
+    ResponseEntity<Map<String, Object>> expireDecryptDownloadJob(String jobId, Map<String, Object> request) {
         DecryptDownloadJobState job = requireDecryptDownloadJob(jobId);
+        ResponseEntity<Map<String, Object>> conflict = rejectDownloadJobTransitionUnlessReady(job, "EXPIRED");
+        if (conflict != null) {
+            return conflict;
+        }
         DecryptDownloadJobState expired = updateDecryptDownloadJobStatus(job, "EXPIRED", "DOWNLOAD_EXPIRED", "下载入口已过期回收");
         Map<String, Object> audit = auditDownloadJob(expired, "DOWNLOAD_EXPIRED", "SUCCESS", text(request, "trace_id", null));
-        return decryptDownloadJobBody(expired, audit);
+        return ResponseEntity.ok(decryptDownloadJobBody(expired, audit));
     }
 
     Map<String, Object> encryptedDocumentAuditEvents(String documentAssetId, String contractId, String eventType) {
-        List<Map<String, Object>> items = documentAssets.values().stream()
-                .filter(asset -> documentAssetId == null || documentAssetId.equals(asset.documentAssetId()))
-                .flatMap(asset -> asset.auditRecords().stream())
+        DocumentAssetState scopedAsset = documentAssetId == null ? null : requireDocumentAsset(documentAssetId);
+        List<Map<String, Object>> items = encryptedDocumentAuditRecords.stream()
+                .filter(event -> documentAssetId == null
+                        || documentAssetId.equals(text(event, "document_asset_id", null))
+                        || scopedAsset.ownerId().equals(text(event, "contract_id", null)))
                 .filter(event -> contractId == null || contractId.equals(text(event, "contract_id", null)))
                 .filter(event -> eventType == null || eventType.equals(text(event, "event_type", null)))
                 .toList();
@@ -1750,6 +1761,7 @@ class CoreChainService {
         audit.put("related_resource_id", relatedResourceId);
         audit.put("trace_id", traceId);
         audit.put("occurred_at", Instant.now().toString());
+        encryptedDocumentAuditRecords.add(audit);
         return audit;
     }
 
@@ -1938,6 +1950,17 @@ class CoreChainService {
                 job.downloadExpiresAt(), job.attemptCount(), job.platformJobId(), resultCode, resultMessage, job.requestedAt(), Instant.now().toString());
         decryptDownloadJobs.put(updated.decryptDownloadJobId(), updated);
         return updated;
+    }
+
+    private ResponseEntity<Map<String, Object>> rejectDownloadJobTransitionUnlessReady(DecryptDownloadJobState job, String targetStatus) {
+        if ("READY".equals(job.jobStatus())) {
+            return null;
+        }
+        Map<String, Object> body = error("DOWNLOAD_JOB_STATUS_CONFLICT", "仅 READY 下载作业允许流转到 " + targetStatus);
+        body.put("current_job_status", job.jobStatus());
+        body.put("requested_job_status", targetStatus);
+        body.put("decrypt_download_job_id", job.decryptDownloadJobId());
+        return ResponseEntity.status(HttpStatus.CONFLICT).body(body);
     }
 
     private Map<String, Object> auditDownloadJob(DecryptDownloadJobState job, String eventType, String eventResult, String traceId) {

@@ -57,7 +57,7 @@ class IntegrationHubAccessAdapterTests {
     @Test
     void signedInboundIsAcceptedNormalizedAuditedAndPersisted() throws Exception {
         String response = mockMvc.perform(post("/api/integration-hub/inbound-messages")
-                        .headers(signatureHeaders("INBOUND", "CRM", "DEFAULT_INBOUND", "nonce-inbound-ok", "2026-04-28T08:00:00Z", """
+                        .headers(signatureHeaders("INBOUND", "CRM", "DEFAULT_INBOUND", "nonce-inbound-ok", Instant.now().toString(), """
                                 {"source_system":"CRM","message_type":"MASTER_DATA","external_request_id":"crm-req-001","trace_id":"trace-ih-inbound-ok","payload":{"customerName":"星邦客户","externalId":"crm-cus-001"}}
                                 """))
                         .contentType(MediaType.APPLICATION_JSON)
@@ -137,7 +137,7 @@ class IntegrationHubAccessAdapterTests {
     void replayedInboundNonceIsRejectedAndAudited() throws Exception {
         acceptInbound("replay-inbound-001", "trace-ih-replay-first", "nonce-replay-inbound");
 
-        mockMvc.perform(signedPost("/api/integration-hub/inbound-messages", "INBOUND", "CRM", "DEFAULT_INBOUND", "nonce-replay-inbound", "2026-04-28T08:00:00Z", """
+        mockMvc.perform(signedPost("/api/integration-hub/inbound-messages", "INBOUND", "CRM", "DEFAULT_INBOUND", "nonce-replay-inbound", Instant.now().toString(), """
                         {"source_system":"CRM","message_type":"MASTER_DATA","external_request_id":"replay-inbound-002","trace_id":"trace-ih-replay-second","payload":{"customerName":"星邦客户"}}
                         """))
                 .andExpect(status().isUnauthorized())
@@ -151,7 +151,7 @@ class IntegrationHubAccessAdapterTests {
     void inboundSameIdempotencyKeyWithDifferentPayloadReturnsConflictAndAudits() throws Exception {
         acceptInbound("idem-inbound-conflict", "trace-ih-inbound-conflict-1", "nonce-inbound-conflict-1");
 
-        mockMvc.perform(signedPost("/api/integration-hub/inbound-messages", "INBOUND", "CRM", "DEFAULT_INBOUND", "nonce-inbound-conflict-2", "2026-04-28T08:00:01Z", """
+        mockMvc.perform(signedPost("/api/integration-hub/inbound-messages", "INBOUND", "CRM", "DEFAULT_INBOUND", "nonce-inbound-conflict-2", Instant.now().toString(), """
                         {"source_system":"CRM","message_type":"MASTER_DATA","external_request_id":"idem-inbound-conflict","trace_id":"trace-ih-inbound-conflict-2","payload":{"customerName":"另一客户"}}
                         """))
                 .andExpect(status().isConflict())
@@ -176,7 +176,7 @@ class IntegrationHubAccessAdapterTests {
     void callbackSameIdempotencyKeyWithDifferentPayloadReturnsConflictAndAudits() throws Exception {
         acceptCallback("wecom-cb-conflict", "trace-ih-callback-conflict-1", "nonce-callback-conflict-1");
 
-        mockMvc.perform(signedPost("/api/integration-hub/callback-receipts/wecom", "CALLBACK", "WECOM", "DEFAULT_CALLBACK", "nonce-callback-conflict-2", "2026-04-28T08:00:02Z", """
+        mockMvc.perform(signedPost("/api/integration-hub/callback-receipts/wecom", "CALLBACK", "WECOM", "DEFAULT_CALLBACK", "nonce-callback-conflict-2", Instant.now().toString(), """
                         {"external_receipt_id":"wecom-cb-conflict","receipt_type":"MESSAGE_DELIVERY","trace_id":"trace-ih-callback-conflict-2","payload":{"status":"FAILED"}}
                         """))
                 .andExpect(status().isConflict())
@@ -261,7 +261,7 @@ class IntegrationHubAccessAdapterTests {
     @Test
     void wecomTicketExchangeHandsOffToIdentityAccessWithoutPlatformToken() throws Exception {
         mockMvc.perform(post("/api/integration-hub/wecom/protocol-exchanges")
-                        .headers(signatureHeaders("INBOUND", "WECOM", "WECOM_TICKET_EXCHANGE", "nonce-wecom-ticket", "2026-04-28T08:00:00Z", """
+                        .headers(signatureHeaders("INBOUND", "WECOM", "WECOM_TICKET_EXCHANGE", "nonce-wecom-ticket", Instant.now().toString(), """
                                 {"code":"wecom-code-001","state":"state-001","trace_id":"trace-ih-wecom-ticket"}
                                 """))
                         .contentType(MediaType.APPLICATION_JSON)
@@ -384,7 +384,7 @@ class IntegrationHubAccessAdapterTests {
         String body = """
                 {"external_receipt_id":"cb-process-ok","receipt_type":"MESSAGE_DELIVERY","linked_dispatch_id":"%s","trace_id":"trace-ih-callback-process-ok","payload":{"status":"DELIVERED"}}
                 """.formatted(dispatchId);
-        String callback = mockMvc.perform(signedPost("/api/integration-hub/callback-receipts/wecom", "CALLBACK", "WECOM", "DEFAULT_CALLBACK", "nonce-callback-process-ok", "2026-04-28T08:00:00Z", body))
+        String callback = mockMvc.perform(signedPost("/api/integration-hub/callback-receipts/wecom", "CALLBACK", "WECOM", "DEFAULT_CALLBACK", "nonce-callback-process-ok", Instant.now().toString(), body))
                 .andExpect(status().isAccepted())
                 .andReturn().getResponse().getContentAsString();
         String callbackReceiptId = jsonString(callback, "callback_receipt_id");
@@ -479,7 +479,7 @@ class IntegrationHubAccessAdapterTests {
         String body = """
                 {"external_receipt_id":"cb-reconcile-ok","receipt_type":"MESSAGE_DELIVERY","linked_dispatch_id":"%s","trace_id":"trace-ih-reconcile","payload":{"status":"DELIVERED"}}
                 """.formatted(dispatchId);
-        String callback = mockMvc.perform(signedPost("/api/integration-hub/callback-receipts/wecom", "CALLBACK", "WECOM", "DEFAULT_CALLBACK", "nonce-callback-reconcile-ok", "2026-04-28T08:00:00Z", body))
+        String callback = mockMvc.perform(signedPost("/api/integration-hub/callback-receipts/wecom", "CALLBACK", "WECOM", "DEFAULT_CALLBACK", "nonce-callback-reconcile-ok", Instant.now().toString(), body))
                 .andExpect(status().isAccepted())
                 .andReturn().getResponse().getContentAsString();
         mockMvc.perform(post("/api/integration-hub/callback-receipts/{callback_receipt_id}/process", jsonString(callback, "callback_receipt_id"))
@@ -582,7 +582,7 @@ class IntegrationHubAccessAdapterTests {
         assertThat(jsonString(second, "inbound_message_id")).isEqualTo(jsonString(first, "inbound_message_id"));
         assertThat(second).contains("\"duplicate\":true");
 
-        mockMvc.perform(signedPost("/api/integration-hub/inbound-messages", "INBOUND", "CRM", "DEFAULT_INBOUND", "nonce-business-equivalent-3", "2026-04-28T08:00:03Z", """
+        mockMvc.perform(signedPost("/api/integration-hub/inbound-messages", "INBOUND", "CRM", "DEFAULT_INBOUND", "nonce-business-equivalent-3", Instant.now().toString(), """
                         {"source_system":"CRM","message_type":"MASTER_DATA","external_request_id":"trace-change-retry","trace_id":"trace-ih-business-equivalent-3","payload":{"customerName":"另一客户"}}
                         """))
                 .andExpect(status().isConflict())
@@ -597,11 +597,11 @@ class IntegrationHubAccessAdapterTests {
         String secondBody = """
                 {"payload":{"externalId":"crm-cus-order","customerName":"星邦客户"},"trace_id":"trace-ih-field-order-2","external_request_id":"field-order-retry","message_type":"MASTER_DATA","source_system":"CRM"}
                 """;
-        String first = mockMvc.perform(signedPost("/api/integration-hub/inbound-messages", "INBOUND", "CRM", "DEFAULT_INBOUND", "nonce-field-order-1", "2026-04-28T08:00:00Z", firstBody))
+        String first = mockMvc.perform(signedPost("/api/integration-hub/inbound-messages", "INBOUND", "CRM", "DEFAULT_INBOUND", "nonce-field-order-1", Instant.now().toString(), firstBody))
                 .andExpect(status().isAccepted())
                 .andReturn().getResponse().getContentAsString();
 
-        String second = mockMvc.perform(signedPost("/api/integration-hub/inbound-messages", "INBOUND", "CRM", "DEFAULT_INBOUND", "nonce-field-order-2", "2026-04-28T08:00:01Z", secondBody))
+        String second = mockMvc.perform(signedPost("/api/integration-hub/inbound-messages", "INBOUND", "CRM", "DEFAULT_INBOUND", "nonce-field-order-2", Instant.now().toString(), secondBody))
                 .andExpect(status().isAccepted())
                 .andReturn().getResponse().getContentAsString();
 
@@ -615,7 +615,7 @@ class IntegrationHubAccessAdapterTests {
         String body = """
                 {"external_receipt_id":"cb-missing-dispatch","receipt_type":"MESSAGE_DELIVERY","linked_dispatch_id":"ih-out-missing","trace_id":"trace-ih-callback-missing-dispatch","payload":{"status":"DELIVERED"}}
                 """;
-        String callback = mockMvc.perform(signedPost("/api/integration-hub/callback-receipts/wecom", "CALLBACK", "WECOM", "DEFAULT_CALLBACK", "nonce-callback-missing-dispatch", "2026-04-28T08:00:00Z", body))
+        String callback = mockMvc.perform(signedPost("/api/integration-hub/callback-receipts/wecom", "CALLBACK", "WECOM", "DEFAULT_CALLBACK", "nonce-callback-missing-dispatch", Instant.now().toString(), body))
                 .andExpect(status().isAccepted())
                 .andReturn().getResponse().getContentAsString();
         String callbackReceiptId = jsonString(callback, "callback_receipt_id");
@@ -741,7 +741,7 @@ class IntegrationHubAccessAdapterTests {
         String body = """
                 {"source_system":"CRM","message_type":"MASTER_DATA","external_request_id":"%s","trace_id":"%s","payload":{"customerName":"星邦客户"}}
                 """.formatted(externalRequestId, traceId);
-        return mockMvc.perform(signedPost("/api/integration-hub/inbound-messages", "INBOUND", "CRM", "DEFAULT_INBOUND", nonce, "2026-04-28T08:00:00Z", body))
+        return mockMvc.perform(signedPost("/api/integration-hub/inbound-messages", "INBOUND", "CRM", "DEFAULT_INBOUND", nonce, Instant.now().toString(), body))
                 .andExpect(status().isAccepted())
                 .andReturn().getResponse().getContentAsString();
     }
@@ -750,7 +750,7 @@ class IntegrationHubAccessAdapterTests {
         String body = """
                 {"external_receipt_id":"%s","receipt_type":"MESSAGE_DELIVERY","trace_id":"%s","payload":{"status":"DELIVERED"}}
                 """.formatted(externalReceiptId, traceId);
-        return mockMvc.perform(signedPost("/api/integration-hub/callback-receipts/wecom", "CALLBACK", "WECOM", "DEFAULT_CALLBACK", nonce, "2026-04-28T08:00:00Z", body))
+        return mockMvc.perform(signedPost("/api/integration-hub/callback-receipts/wecom", "CALLBACK", "WECOM", "DEFAULT_CALLBACK", nonce, Instant.now().toString(), body))
                 .andExpect(status().isAccepted())
                 .andReturn().getResponse().getContentAsString();
     }
@@ -767,21 +767,19 @@ class IntegrationHubAccessAdapterTests {
 
     private MockHttpServletRequestBuilder signedPost(String path, String direction, String systemName, String endpointCode,
                                                      String nonce, String timestamp, String body) throws Exception {
-        String currentTimestamp = Instant.now().toString();
         return post(path)
-                .headers(signatureHeaders(direction, systemName, endpointCode, nonce, currentTimestamp, body))
+                .headers(signatureHeaders(direction, systemName, endpointCode, nonce, timestamp, body))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body);
     }
 
     private HttpHeaders signatureHeaders(String direction, String systemName, String endpointCode, String nonce, String timestamp, String body) throws Exception {
-        String signedTimestamp = Instant.now().toString();
         HttpHeaders headers = new HttpHeaders();
-        headers.add("X-CMP-Timestamp", signedTimestamp);
+        headers.add("X-CMP-Timestamp", timestamp);
         headers.add("X-CMP-Nonce", nonce);
         headers.add("X-CMP-Security-Profile-Version", "security-v1");
         headers.add("X-CMP-Certificate-Version", "cert-v1");
-        headers.add("X-CMP-Signature", signature(direction, systemName, endpointCode, signedTimestamp, nonce, body));
+        headers.add("X-CMP-Signature", signature(direction, systemName, endpointCode, timestamp, nonce, body));
         return headers;
     }
 

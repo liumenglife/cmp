@@ -310,6 +310,12 @@ class EncryptedDocumentControlledAccessTests {
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.decision").value("DENIED"))
                 .andExpect(jsonPath("$.reason_code").value("DOWNLOAD_AUTHORIZATION_NOT_FOUND"));
+
+        mockMvc.perform(get("/api/encrypted-documents/audit-events"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[?(@.event_type == 'DOWNLOAD_AUTH_GRANTED' && @.scope_type == 'DOCUMENT_ROLE' && @.trace_id == 'trace-ed-auth-dept')]").exists())
+                .andExpect(jsonPath("$.items[?(@.event_type == 'DOWNLOAD_AUTH_REVOKED' && @.scope_type == 'CONTRACT' && @.trace_id == 'trace-ed-auth-revoke')]").exists())
+                .andExpect(jsonPath("$.items[?(@.event_type == 'DOWNLOAD_AUTH_GRANTED' && @.scope_type == 'GLOBAL' && @.trace_id == 'trace-ed-auth-expired')]").exists());
     }
 
     @Test
@@ -342,12 +348,11 @@ class EncryptedDocumentControlledAccessTests {
         mockMvc.perform(post("/api/encrypted-documents/download-jobs/{job_id}/expire", jobId)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"trace_id\":\"trace-ed-job-expire\"}"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.job_status").value("EXPIRED"))
-                .andExpect(jsonPath("$.export_artifact.artifact_status").value("EXPIRED"))
-                .andExpect(jsonPath("$.audit_event.event_type").value("DOWNLOAD_EXPIRED"));
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error_code").value("DOWNLOAD_JOB_STATUS_CONFLICT"))
+                .andExpect(jsonPath("$.current_job_status").value("DELIVERED"));
 
-        mockMvc.perform(post("/api/encrypted-documents/download-jobs")
+        String failedJob = mockMvc.perform(post("/api/encrypted-documents/download-jobs")
                         .header("X-CMP-Permissions", "CONTRACT_VIEW")
                         .contentType(MediaType.APPLICATION_JSON)
                         .content(downloadJobRequest(sample, "u-job", "dept-job", true, "trace-ed-job-fail")))
@@ -355,7 +360,23 @@ class EncryptedDocumentControlledAccessTests {
                 .andExpect(jsonPath("$.job_status").value("FAILED"))
                 .andExpect(jsonPath("$.result_code").value("EXPORT_GENERATION_FAILED"))
                 .andExpect(jsonPath("$.compensation_task.task_type").value("ED_DECRYPT_DOWNLOAD_EXPORT"))
-                .andExpect(jsonPath("$.audit_event.event_type").value("DOWNLOAD_EXPORT_FAILED"));
+                .andExpect(jsonPath("$.audit_event.event_type").value("DOWNLOAD_EXPORT_FAILED"))
+                .andReturn().getResponse().getContentAsString();
+        String failedJobId = jsonString(failedJob, "decrypt_download_job_id");
+
+        mockMvc.perform(post("/api/encrypted-documents/download-jobs/{job_id}/deliver", failedJobId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"trace_id\":\"trace-ed-job-failed-deliver\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error_code").value("DOWNLOAD_JOB_STATUS_CONFLICT"))
+                .andExpect(jsonPath("$.current_job_status").value("FAILED"));
+
+        mockMvc.perform(post("/api/encrypted-documents/download-jobs/{job_id}/expire", failedJobId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"trace_id\":\"trace-ed-job-failed-expire\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error_code").value("DOWNLOAD_JOB_STATUS_CONFLICT"))
+                .andExpect(jsonPath("$.current_job_status").value("FAILED"));
     }
 
     @Test

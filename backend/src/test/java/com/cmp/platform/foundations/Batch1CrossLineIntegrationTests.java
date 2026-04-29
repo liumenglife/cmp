@@ -89,7 +89,7 @@ class Batch1CrossLineIntegrationTests {
     void wecomTicketEntersThroughIntegrationHubAndPlatformTokenIsIssuedOnlyByIdentityAccess() throws Exception {
         createUser("u-wecom-cross");
 
-        String handoff = mockMvc.perform(signedPost("/api/integration-hub/wecom/protocol-exchanges", "INBOUND", "WECOM", "WECOM_TICKET_EXCHANGE", "nonce-cross-wecom", "2026-04-28T08:00:00Z", """
+        String handoff = mockMvc.perform(signedPost("/api/integration-hub/wecom/protocol-exchanges", "INBOUND", "WECOM", "WECOM_TICKET_EXCHANGE", "nonce-cross-wecom", Instant.now().toString(), """
                         {"code":"trusted:wecom-cross","state":"state-cross","trace_id":"trace-cross-wecom"}
                         """))
                 .andExpect(status().isAccepted())
@@ -200,7 +200,7 @@ class Batch1CrossLineIntegrationTests {
     @Test
     void crossLineAuditTraceReturnsIdentityAgentAndIntegrationEvents() throws Exception {
         seedAuthorizedAgentUser("u-audit-cross", "dept-audit-cross", "ctr-audit-cross");
-        mockMvc.perform(signedPost("/api/integration-hub/inbound-messages", "INBOUND", "CRM", "DEFAULT_INBOUND", "nonce-cross-audit-in", "2026-04-28T08:00:00Z", """
+        mockMvc.perform(signedPost("/api/integration-hub/inbound-messages", "INBOUND", "CRM", "DEFAULT_INBOUND", "nonce-cross-audit-in", Instant.now().toString(), """
                         {"source_system":"CRM","message_type":"MASTER_DATA","external_request_id":"crm-cross-audit","trace_id":"trace-cross-audit","payload":{"customerName":"星邦客户"}}
                         """))
                 .andExpect(status().isAccepted());
@@ -316,9 +316,8 @@ class Batch1CrossLineIntegrationTests {
     }
 
     private MockHttpServletRequestBuilder signedPost(String path, String direction, String system, String endpoint, String nonce, String timestamp, String body) throws Exception {
-        String currentTimestamp = Instant.now().toString();
         return post(path)
-                .headers(signatureHeaders(direction, system, endpoint, nonce, currentTimestamp, body))
+                .headers(signatureHeaders(direction, system, endpoint, nonce, timestamp, body))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body);
     }
