@@ -242,6 +242,165 @@ class EncryptedDocumentControlledAccessTests {
                 .andExpect(jsonPath("$.audit_record[?(@.event_type == 'DECRYPT_ACCESS_DENIED' && @.trace_id == 'trace-ed-external-denied')]").exists());
     }
 
+    @Test
+    void downloadAuthorizationSupportsDepartmentUserScopesPriorityRevocationExpirationAndExplanation() throws Exception {
+        ContractDocument sample = createContractDocument("授权规则合同", "trace-ed-auth", false);
+
+        mockMvc.perform(post("/api/encrypted-documents/download-authorizations")
+                        .header("X-CMP-Permissions", "ENCRYPTED_DOCUMENT_AUTH_MANAGE")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"authorization_name":"法务部门正文下载","subject_type":"DEPARTMENT","subject_id":"dept-legal","scope_type":"DOCUMENT_ROLE","scope_value":"MAIN_BODY","effective_start_offset_seconds":-60,"effective_end_offset_seconds":3600,"priority_no":10,"granted_by":"admin-ed","trace_id":"trace-ed-auth-dept"}
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.authorization_status").value("ACTIVE"))
+                .andExpect(jsonPath("$.subject_type").value("DEPARTMENT"))
+                .andExpect(jsonPath("$.policy_snapshot.scope_expression.expression_code").value("DOCUMENT_ROLE:MAIN_BODY"))
+                .andExpect(jsonPath("$.audit_event.event_type").value("DOWNLOAD_AUTH_GRANTED"));
+
+        String userAuth = mockMvc.perform(post("/api/encrypted-documents/download-authorizations")
+                        .header("X-CMP-Permissions", "ENCRYPTED_DOCUMENT_AUTH_MANAGE")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"authorization_name":"专员合同下载","subject_type":"USER","subject_id":"u-auth","scope_type":"CONTRACT","scope_value":"%s","effective_start_offset_seconds":-60,"effective_end_offset_seconds":3600,"priority_no":100,"granted_by":"admin-ed","trace_id":"trace-ed-auth-user"}
+                                """.formatted(sample.contractId())))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        String userAuthorizationId = jsonString(userAuth, "authorization_id");
+
+        mockMvc.perform(post("/api/encrypted-documents/download-authorizations/explain")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(downloadExplainRequest(sample, "u-auth", "dept-legal", "trace-ed-auth-hit-user")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.decision").value("ALLOWED"))
+                .andExpect(jsonPath("$.matched_authorization.authorization_id").value(userAuthorizationId))
+                .andExpect(jsonPath("$.matched_authorization.subject_type").value("USER"))
+                .andExpect(jsonPath("$.matched_authorization.scope_type").value("CONTRACT"))
+                .andExpect(jsonPath("$.explanation.priority_no").value(100))
+                .andExpect(jsonPath("$.authorization_snapshot.document_version_id").value(sample.documentVersionId()));
+
+        mockMvc.perform(post("/api/encrypted-documents/download-authorizations/{authorization_id}/revoke", userAuthorizationId)
+                        .header("X-CMP-Permissions", "ENCRYPTED_DOCUMENT_AUTH_MANAGE")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"revoked_by\":\"admin-ed\",\"trace_id\":\"trace-ed-auth-revoke\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.authorization_status").value("REVOKED"))
+                .andExpect(jsonPath("$.audit_event.event_type").value("DOWNLOAD_AUTH_REVOKED"));
+
+        mockMvc.perform(post("/api/encrypted-documents/download-authorizations/explain")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(downloadExplainRequest(sample, "u-auth", "dept-legal", "trace-ed-auth-hit-dept")))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.decision").value("ALLOWED"))
+                .andExpect(jsonPath("$.matched_authorization.subject_type").value("DEPARTMENT"))
+                .andExpect(jsonPath("$.matched_authorization.scope_type").value("DOCUMENT_ROLE"));
+
+        mockMvc.perform(post("/api/encrypted-documents/download-authorizations")
+                        .header("X-CMP-Permissions", "ENCRYPTED_DOCUMENT_AUTH_MANAGE")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"authorization_name":"已过期授权","subject_type":"USER","subject_id":"u-expired","scope_type":"GLOBAL","scope_value":"*","effective_start_offset_seconds":-3600,"effective_end_offset_seconds":-1,"priority_no":200,"granted_by":"admin-ed","trace_id":"trace-ed-auth-expired"}
+                                """))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.authorization_status").value("EXPIRED"));
+
+        mockMvc.perform(post("/api/encrypted-documents/download-authorizations/explain")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(downloadExplainRequest(sample, "u-expired", "dept-expired", "trace-ed-auth-expired-denied")))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.decision").value("DENIED"))
+                .andExpect(jsonPath("$.reason_code").value("DOWNLOAD_AUTHORIZATION_NOT_FOUND"));
+    }
+
+    @Test
+    void decryptDownloadJobFreezesAuthorizationGeneratesDetachedPlaintextArtifactExpiresAndCompensatesFailure() throws Exception {
+        ContractDocument sample = createContractDocument("下载作业合同", "trace-ed-job", false);
+        grantUserDownloadAuthorization(sample, "u-job", "trace-ed-job-auth");
+
+        String job = mockMvc.perform(post("/api/encrypted-documents/download-jobs")
+                        .header("X-CMP-Permissions", "CONTRACT_VIEW")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(downloadJobRequest(sample, "u-job", "dept-job", false, "trace-ed-job-ready")))
+                .andExpect(status().isCreated())
+                .andExpect(jsonPath("$.job_status").value("READY"))
+                .andExpect(jsonPath("$.authorization_snapshot.authorization_id").exists())
+                .andExpect(jsonPath("$.export_artifact.package_id").exists())
+                .andExpect(jsonPath("$.export_artifact.plaintext_detached_usable").value(true))
+                .andExpect(jsonPath("$.export_artifact.document_center_truth_replaced").value(false))
+                .andExpect(jsonPath("$.download_url.expires_at").exists())
+                .andExpect(jsonPath("$.audit_event.event_type").value("DOWNLOAD_READY"))
+                .andReturn().getResponse().getContentAsString();
+        String jobId = jsonString(job, "decrypt_download_job_id");
+
+        mockMvc.perform(post("/api/encrypted-documents/download-jobs/{job_id}/deliver", jobId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"trace_id\":\"trace-ed-job-deliver\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.job_status").value("DELIVERED"))
+                .andExpect(jsonPath("$.audit_event.event_type").value("DOWNLOAD_DELIVERED"));
+
+        mockMvc.perform(post("/api/encrypted-documents/download-jobs/{job_id}/expire", jobId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"trace_id\":\"trace-ed-job-expire\"}"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.job_status").value("EXPIRED"))
+                .andExpect(jsonPath("$.export_artifact.artifact_status").value("EXPIRED"))
+                .andExpect(jsonPath("$.audit_event.event_type").value("DOWNLOAD_EXPIRED"));
+
+        mockMvc.perform(post("/api/encrypted-documents/download-jobs")
+                        .header("X-CMP-Permissions", "CONTRACT_VIEW")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(downloadJobRequest(sample, "u-job", "dept-job", true, "trace-ed-job-fail")))
+                .andExpect(status().isAccepted())
+                .andExpect(jsonPath("$.job_status").value("FAILED"))
+                .andExpect(jsonPath("$.result_code").value("EXPORT_GENERATION_FAILED"))
+                .andExpect(jsonPath("$.compensation_task.task_type").value("ED_DECRYPT_DOWNLOAD_EXPORT"))
+                .andExpect(jsonPath("$.audit_event.event_type").value("DOWNLOAD_EXPORT_FAILED"));
+    }
+
+    @Test
+    void highSensitivityAuditCanQueryGrantHitExportSuccessFailureExpirationAndUnauthorizedDenial() throws Exception {
+        ContractDocument sample = createContractDocument("高敏审计合同", "trace-ed-audit", false);
+        grantUserDownloadAuthorization(sample, "u-audit", "trace-ed-audit-grant");
+
+        mockMvc.perform(post("/api/encrypted-documents/download-jobs")
+                        .header("X-CMP-Permissions", "CONTRACT_VIEW")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(downloadJobRequest(sample, "u-no-auth", "dept-no-auth", false, "trace-ed-audit-denied")))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error_code").value("DOWNLOAD_AUTHORIZATION_DENIED"))
+                .andExpect(jsonPath("$.audit_event.event_type").value("DOWNLOAD_AUTH_DENIED"));
+
+        String ready = mockMvc.perform(post("/api/encrypted-documents/download-jobs")
+                        .header("X-CMP-Permissions", "CONTRACT_VIEW")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(downloadJobRequest(sample, "u-audit", "dept-audit", false, "trace-ed-audit-ready")))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        String jobId = jsonString(ready, "decrypt_download_job_id");
+
+        mockMvc.perform(post("/api/encrypted-documents/download-jobs/{job_id}/expire", jobId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"trace_id\":\"trace-ed-audit-expire\"}"))
+                .andExpect(status().isOk());
+
+        mockMvc.perform(post("/api/encrypted-documents/download-jobs")
+                        .header("X-CMP-Permissions", "CONTRACT_VIEW")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(downloadJobRequest(sample, "u-audit", "dept-audit", true, "trace-ed-audit-fail")))
+                .andExpect(status().isAccepted());
+
+        mockMvc.perform(get("/api/encrypted-documents/audit-events")
+                        .param("document_asset_id", sample.documentAssetId()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[?(@.event_type == 'DOWNLOAD_AUTH_GRANTED' && @.trace_id == 'trace-ed-audit-grant')]").exists())
+                .andExpect(jsonPath("$.items[?(@.event_type == 'DOWNLOAD_AUTH_HIT' && @.trace_id == 'trace-ed-audit-ready')]").exists())
+                .andExpect(jsonPath("$.items[?(@.event_type == 'DOWNLOAD_READY' && @.trace_id == 'trace-ed-audit-ready')]").exists())
+                .andExpect(jsonPath("$.items[?(@.event_type == 'DOWNLOAD_EXPORT_FAILED' && @.trace_id == 'trace-ed-audit-fail')]").exists())
+                .andExpect(jsonPath("$.items[?(@.event_type == 'DOWNLOAD_EXPIRED' && @.trace_id == 'trace-ed-audit-expire')]").exists())
+                .andExpect(jsonPath("$.items[?(@.event_type == 'DOWNLOAD_AUTH_DENIED' && @.trace_id == 'trace-ed-audit-denied')]").exists());
+    }
+
     private void assertControlledAccess(ContractDocument sample, String scene, String subjectType, String subjectId, String mode) throws Exception {
         mockMvc.perform(post("/api/encrypted-documents/access")
                         .header("X-CMP-Permissions", "CONTRACT_VIEW")
@@ -280,6 +439,30 @@ class EncryptedDocumentControlledAccessTests {
         return """
                 {"document_asset_id":"%s","document_version_id":"%s","access_scene":"%s","access_subject_type":"%s","access_subject_id":"%s","actor_department_id":"dept-ed","trace_id":"trace-ed-access"}
                 """.formatted(sample.documentAssetId(), sample.documentVersionId(), scene, subjectType, subjectId);
+    }
+
+    private String grantUserDownloadAuthorization(ContractDocument sample, String userId, String traceId) throws Exception {
+        String body = mockMvc.perform(post("/api/encrypted-documents/download-authorizations")
+                        .header("X-CMP-Permissions", "ENCRYPTED_DOCUMENT_AUTH_MANAGE")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"authorization_name":"用户下载授权","subject_type":"USER","subject_id":"%s","scope_type":"CONTRACT","scope_value":"%s","effective_start_offset_seconds":-60,"effective_end_offset_seconds":3600,"priority_no":100,"granted_by":"admin-ed","trace_id":"%s"}
+                                """.formatted(userId, sample.contractId(), traceId)))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        return jsonString(body, "authorization_id");
+    }
+
+    private String downloadExplainRequest(ContractDocument sample, String userId, String departmentId, String traceId) {
+        return """
+                {"document_asset_id":"%s","document_version_id":"%s","requester_user_id":"%s","requester_department_id":"%s","trace_id":"%s"}
+                """.formatted(sample.documentAssetId(), sample.documentVersionId(), userId, departmentId, traceId);
+    }
+
+    private String downloadJobRequest(ContractDocument sample, String userId, String departmentId, boolean simulateFailure, String traceId) {
+        return """
+                {"document_asset_id":"%s","document_version_id":"%s","requested_by":"%s","requested_department_id":"%s","download_reason":"验收导出","request_idempotency_key":"%s","simulate_export_failure":%s,"trace_id":"%s"}
+                """.formatted(sample.documentAssetId(), sample.documentVersionId(), userId, departmentId, traceId, simulateFailure, traceId);
     }
 
     private ContractDocument createContractDocument(String contractName, String tracePrefix, boolean simulateEncryptionFailure) throws Exception {

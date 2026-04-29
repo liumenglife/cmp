@@ -9,6 +9,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.time.Instant;
 import java.util.Map;
 import java.util.TreeMap;
 import org.junit.jupiter.api.BeforeEach;
@@ -315,8 +316,9 @@ class Batch1CrossLineIntegrationTests {
     }
 
     private MockHttpServletRequestBuilder signedPost(String path, String direction, String system, String endpoint, String nonce, String timestamp, String body) throws Exception {
+        String currentTimestamp = Instant.now().toString();
         return post(path)
-                .headers(signatureHeaders(direction, system, endpoint, nonce, timestamp, body))
+                .headers(signatureHeaders(direction, system, endpoint, nonce, currentTimestamp, body))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body);
     }

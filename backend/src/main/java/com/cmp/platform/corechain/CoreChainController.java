@@ -237,8 +237,51 @@ class CoreChainController {
 
     @PostMapping("/api/encrypted-documents/access/{decryptAccessId}/consume")
     ResponseEntity<Map<String, Object>> consumeDecryptAccess(@PathVariable String decryptAccessId,
-                                                             @RequestBody(required = false) Map<String, Object> request) {
+                                                              @RequestBody(required = false) Map<String, Object> request) {
         return service.consumeDecryptAccess(decryptAccessId, request == null ? Map.of() : request);
+    }
+
+    @PostMapping("/api/encrypted-documents/download-authorizations")
+    ResponseEntity<Map<String, Object>> grantDownloadAuthorization(@RequestHeader(value = "X-CMP-Permissions", required = false) String permissions,
+                                                                   @RequestBody Map<String, Object> request) {
+        return service.grantDownloadAuthorization(permissions, request);
+    }
+
+    @PostMapping("/api/encrypted-documents/download-authorizations/{authorizationId}/revoke")
+    ResponseEntity<Map<String, Object>> revokeDownloadAuthorization(@PathVariable String authorizationId,
+                                                                    @RequestHeader(value = "X-CMP-Permissions", required = false) String permissions,
+                                                                    @RequestBody(required = false) Map<String, Object> request) {
+        return service.revokeDownloadAuthorization(authorizationId, permissions, request == null ? Map.of() : request);
+    }
+
+    @PostMapping("/api/encrypted-documents/download-authorizations/explain")
+    ResponseEntity<Map<String, Object>> explainDownloadAuthorization(@RequestBody Map<String, Object> request) {
+        return service.explainDownloadAuthorization(request);
+    }
+
+    @PostMapping("/api/encrypted-documents/download-jobs")
+    ResponseEntity<Map<String, Object>> createDecryptDownloadJob(@RequestHeader(value = "X-CMP-Permissions", required = false) String permissions,
+                                                                 @RequestBody Map<String, Object> request) {
+        return service.createDecryptDownloadJob(permissions, request);
+    }
+
+    @PostMapping("/api/encrypted-documents/download-jobs/{jobId}/deliver")
+    ResponseEntity<Map<String, Object>> deliverDecryptDownloadJob(@PathVariable String jobId,
+                                                                  @RequestBody(required = false) Map<String, Object> request) {
+        return ResponseEntity.ok(service.deliverDecryptDownloadJob(jobId, request == null ? Map.of() : request));
+    }
+
+    @PostMapping("/api/encrypted-documents/download-jobs/{jobId}/expire")
+    ResponseEntity<Map<String, Object>> expireDecryptDownloadJob(@PathVariable String jobId,
+                                                                 @RequestBody(required = false) Map<String, Object> request) {
+        return ResponseEntity.ok(service.expireDecryptDownloadJob(jobId, request == null ? Map.of() : request));
+    }
+
+    @GetMapping("/api/encrypted-documents/audit-events")
+    Map<String, Object> encryptedDocumentAuditEvents(@RequestParam(required = false) String document_asset_id,
+                                                     @RequestParam(required = false) String contract_id,
+                                                     @RequestParam(required = false) String event_type) {
+        return service.encryptedDocumentAuditEvents(document_asset_id, contract_id, event_type);
     }
 }
 
@@ -266,6 +309,8 @@ class CoreChainService {
     private final Map<String, EncryptionCheckInState> encryptionCheckIns = new ConcurrentHashMap<>();
     private final Map<String, String> encryptionCheckInByVersionTrigger = new ConcurrentHashMap<>();
     private final Map<String, DecryptAccessState> decryptAccesses = new ConcurrentHashMap<>();
+    private final Map<String, DownloadAuthorizationState> downloadAuthorizations = new ConcurrentHashMap<>();
+    private final Map<String, DecryptDownloadJobState> decryptDownloadJobs = new ConcurrentHashMap<>();
 
     Map<String, Object> createContract(Map<String, Object> request) {
         String contractId = "ctr-" + UUID.randomUUID();
@@ -1008,6 +1053,123 @@ class CoreChainService {
         return ResponseEntity.ok(body);
     }
 
+    ResponseEntity<Map<String, Object>> grantDownloadAuthorization(String permissions, Map<String, Object> request) {
+        if (permissions == null || !permissions.contains("ENCRYPTED_DOCUMENT_AUTH_MANAGE")) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(error("PERMISSION_DENIED", "缺少解密下载授权管理权限"));
+        }
+        Instant now = Instant.now();
+        Instant startAt = now.plusSeconds(intValue(request, "effective_start_offset_seconds", 0));
+        Instant endAt = now.plusSeconds(intValue(request, "effective_end_offset_seconds", 3600));
+        String status = now.isAfter(endAt) ? "EXPIRED" : "ACTIVE";
+        String authorizationId = "ed-auth-" + UUID.randomUUID();
+        DownloadAuthorizationState authorization = new DownloadAuthorizationState(authorizationId, text(request, "authorization_name", null), status,
+                text(request, "subject_type", "USER"), text(request, "subject_id", null), text(request, "scope_type", "GLOBAL"),
+                text(request, "scope_value", "*"), bool(request, "download_reason_required", true), startAt.toString(), endAt.toString(),
+                intValue(request, "priority_no", 0), text(request, "granted_by", null), null, null, authorizationPolicySnapshot(request));
+        downloadAuthorizations.put(authorizationId, authorization);
+        Map<String, Object> audit = authorizationAudit(authorization, "DOWNLOAD_AUTH_GRANTED", "SUCCESS", text(request, "trace_id", null));
+        appendAuthorizationAuditToScopedAssets(authorization, audit);
+        return ResponseEntity.status(HttpStatus.CREATED).body(downloadAuthorizationBody(authorization, audit));
+    }
+
+    ResponseEntity<Map<String, Object>> revokeDownloadAuthorization(String authorizationId, String permissions, Map<String, Object> request) {
+        if (permissions == null || !permissions.contains("ENCRYPTED_DOCUMENT_AUTH_MANAGE")) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(error("PERMISSION_DENIED", "缺少解密下载授权管理权限"));
+        }
+        DownloadAuthorizationState authorization = requireDownloadAuthorization(authorizationId);
+        DownloadAuthorizationState revoked = new DownloadAuthorizationState(authorization.authorizationId(), authorization.authorizationName(), "REVOKED",
+                authorization.subjectType(), authorization.subjectId(), authorization.scopeType(), authorization.scopeValue(), authorization.downloadReasonRequired(),
+                authorization.effectiveStartAt(), authorization.effectiveEndAt(), authorization.priorityNo(), authorization.grantedBy(),
+                text(request, "revoked_by", null), Instant.now().toString(), authorization.policySnapshot());
+        downloadAuthorizations.put(authorizationId, revoked);
+        Map<String, Object> audit = authorizationAudit(revoked, "DOWNLOAD_AUTH_REVOKED", "SUCCESS", text(request, "trace_id", null));
+        appendAuthorizationAuditToScopedAssets(revoked, audit);
+        return ResponseEntity.ok(downloadAuthorizationBody(revoked, audit));
+    }
+
+    ResponseEntity<Map<String, Object>> explainDownloadAuthorization(Map<String, Object> request) {
+        DocumentAssetState asset = requireDocumentAsset(text(request, "document_asset_id", null));
+        AuthorizationDecision decision = evaluateDownloadAuthorization(request, asset, text(request, "trace_id", null), true);
+        if (decision.authorization() == null) {
+            Map<String, Object> body = error("DOWNLOAD_AUTHORIZATION_DENIED", "未命中有效解密下载授权");
+            body.put("decision", "DENIED");
+            body.put("reason_code", "DOWNLOAD_AUTHORIZATION_NOT_FOUND");
+            body.put("audit_event", decision.auditEvent());
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(body);
+        }
+        return ResponseEntity.ok(downloadAuthorizationDecisionBody(decision));
+    }
+
+    ResponseEntity<Map<String, Object>> createDecryptDownloadJob(String permissions, Map<String, Object> request) {
+        if (permissions == null || !permissions.contains("CONTRACT_VIEW")) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(error("PERMISSION_DENIED", "缺少合同查看权限"));
+        }
+        String documentAssetId = text(request, "document_asset_id", null);
+        String documentVersionId = text(request, "document_version_id", null);
+        DocumentAssetState asset = requireDocumentAsset(documentAssetId);
+        EncryptionSecurityBindingState binding = requireEncryptionBindingByDocumentAsset(documentAssetId);
+        if (!"ENCRYPTED".equals(binding.encryptionStatus()) || !documentVersionId.equals(binding.currentVersionId())) {
+            Map<String, Object> body = error("DOWNLOAD_DOCUMENT_NOT_READY", "文档未处于可授权下载状态");
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(body);
+        }
+        AuthorizationDecision decision = evaluateDownloadAuthorization(request, asset, text(request, "trace_id", null), true);
+        if (decision.authorization() == null) {
+            Map<String, Object> body = error("DOWNLOAD_AUTHORIZATION_DENIED", "未命中有效解密下载授权");
+            body.put("audit_event", decision.auditEvent());
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(body);
+        }
+
+        String jobId = "ed-download-job-" + UUID.randomUUID();
+        boolean failed = bool(request, "simulate_export_failure", false);
+        String status = failed ? "FAILED" : "READY";
+        String token = "ed-download-token-" + UUID.randomUUID();
+        String artifactRef = "ed-package-" + UUID.randomUUID();
+        DecryptDownloadJobState job = new DecryptDownloadJobState(jobId, binding.securityBindingId(), decision.authorization().authorizationId(),
+                documentAssetId, documentVersionId, asset.ownerId(), text(request, "requested_by", null), text(request, "requested_department_id", null),
+                text(request, "download_reason", null), text(request, "request_idempotency_key", null), status, decision.snapshot(), artifactRef,
+                "明文导出-" + documentVersionId + ".bin", token, Instant.now().plusSeconds(intValue(request, "download_ttl_seconds", 600)).toString(),
+                failed ? 1 : 0, "cmp-task-" + UUID.randomUUID(), failed ? "EXPORT_GENERATION_FAILED" : "EXPORT_READY",
+                failed ? "导出生成失败，已创建补偿任务" : "明文导出包已生成", Instant.now().toString(), failed ? null : Instant.now().toString());
+        decryptDownloadJobs.put(jobId, job);
+        Map<String, Object> audit = encryptionAudit(failed ? "DOWNLOAD_EXPORT_FAILED" : "DOWNLOAD_READY", failed ? "FAILED" : "SUCCESS",
+                binding.securityBindingId(), documentAssetId, documentVersionId, asset.ownerId(), "USER", job.requestedBy(), job.requestedDepartmentId(), jobId,
+                text(request, "trace_id", null));
+        asset.auditRecords().add(audit);
+        Map<String, Object> body = decryptDownloadJobBody(job, audit);
+        if (failed) {
+            body.put("compensation_task", compensationTask("ED_DECRYPT_DOWNLOAD_EXPORT", asset.ownerId(), jobId, text(request, "trace_id", null)));
+            return ResponseEntity.status(HttpStatus.ACCEPTED).body(body);
+        }
+        return ResponseEntity.status(HttpStatus.CREATED).body(body);
+    }
+
+    Map<String, Object> deliverDecryptDownloadJob(String jobId, Map<String, Object> request) {
+        DecryptDownloadJobState job = requireDecryptDownloadJob(jobId);
+        DecryptDownloadJobState delivered = updateDecryptDownloadJobStatus(job, "DELIVERED", "DOWNLOAD_DELIVERED", "明文导出已交付");
+        Map<String, Object> audit = auditDownloadJob(delivered, "DOWNLOAD_DELIVERED", "SUCCESS", text(request, "trace_id", null));
+        return decryptDownloadJobBody(delivered, audit);
+    }
+
+    Map<String, Object> expireDecryptDownloadJob(String jobId, Map<String, Object> request) {
+        DecryptDownloadJobState job = requireDecryptDownloadJob(jobId);
+        DecryptDownloadJobState expired = updateDecryptDownloadJobStatus(job, "EXPIRED", "DOWNLOAD_EXPIRED", "下载入口已过期回收");
+        Map<String, Object> audit = auditDownloadJob(expired, "DOWNLOAD_EXPIRED", "SUCCESS", text(request, "trace_id", null));
+        return decryptDownloadJobBody(expired, audit);
+    }
+
+    Map<String, Object> encryptedDocumentAuditEvents(String documentAssetId, String contractId, String eventType) {
+        List<Map<String, Object>> items = documentAssets.values().stream()
+                .filter(asset -> documentAssetId == null || documentAssetId.equals(asset.documentAssetId()))
+                .flatMap(asset -> asset.auditRecords().stream())
+                .filter(event -> contractId == null || contractId.equals(text(event, "contract_id", null)))
+                .filter(event -> eventType == null || eventType.equals(text(event, "event_type", null)))
+                .toList();
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("items", items);
+        body.put("total", items.size());
+        return body;
+    }
+
     Map<String, Object> contractMaster(String contractId) {
         return contractBody(requireContract(contractId));
     }
@@ -1571,8 +1733,8 @@ class CoreChainService {
     }
 
     private Map<String, Object> encryptionAudit(String eventType, String eventResult, String securityBindingId, String documentAssetId,
-                                                String documentVersionId, String contractId, String actorType, String actorId,
-                                                String actorDepartmentId, String relatedResourceId, String traceId) {
+                                                 String documentVersionId, String contractId, String actorType, String actorId,
+                                                 String actorDepartmentId, String relatedResourceId, String traceId) {
         Map<String, Object> audit = new LinkedHashMap<>();
         audit.put("audit_event_id", "ed-audit-" + UUID.randomUUID());
         audit.put("event_type", eventType);
@@ -1588,6 +1750,200 @@ class CoreChainService {
         audit.put("related_resource_id", relatedResourceId);
         audit.put("trace_id", traceId);
         audit.put("occurred_at", Instant.now().toString());
+        return audit;
+    }
+
+    private AuthorizationDecision evaluateDownloadAuthorization(Map<String, Object> request, DocumentAssetState asset, String traceId, boolean writeAudit) {
+        String userId = text(request, "requester_user_id", text(request, "requested_by", null));
+        String departmentId = text(request, "requester_department_id", text(request, "requested_department_id", null));
+        String documentVersionId = text(request, "document_version_id", asset.currentVersionId());
+        EncryptionSecurityBindingState binding = requireEncryptionBindingByDocumentAsset(asset.documentAssetId());
+        DownloadAuthorizationState matched = downloadAuthorizations.values().stream()
+                .filter(this::isDownloadAuthorizationActiveNow)
+                .filter(auth -> authorizationSubjectMatches(auth, userId, departmentId))
+                .filter(auth -> authorizationScopeMatches(auth, asset))
+                .sorted((left, right) -> {
+                    int priority = Integer.compare(right.priorityNo(), left.priorityNo());
+                    if (priority != 0) {
+                        return priority;
+                    }
+                    return Integer.compare(subjectRank(right.subjectType()), subjectRank(left.subjectType()));
+                })
+                .findFirst()
+                .orElse(null);
+        Map<String, Object> audit = encryptionAudit(matched == null ? "DOWNLOAD_AUTH_DENIED" : "DOWNLOAD_AUTH_HIT", matched == null ? "REJECTED" : "SUCCESS",
+                binding.securityBindingId(), asset.documentAssetId(), documentVersionId, asset.ownerId(), "USER", userId, departmentId,
+                matched == null ? null : matched.authorizationId(), traceId);
+        if (writeAudit) {
+            asset.auditRecords().add(audit);
+        }
+        return new AuthorizationDecision(matched, matched == null ? null : authorizationSnapshot(matched, asset, userId, departmentId, documentVersionId), audit);
+    }
+
+    private boolean isDownloadAuthorizationActiveNow(DownloadAuthorizationState authorization) {
+        Instant now = Instant.now();
+        return "ACTIVE".equals(authorization.authorizationStatus())
+                && !now.isBefore(Instant.parse(authorization.effectiveStartAt()))
+                && !now.isAfter(Instant.parse(authorization.effectiveEndAt()));
+    }
+
+    private boolean authorizationSubjectMatches(DownloadAuthorizationState authorization, String userId, String departmentId) {
+        return switch (authorization.subjectType()) {
+            case "USER" -> authorization.subjectId().equals(userId);
+            case "DEPARTMENT" -> authorization.subjectId().equals(departmentId);
+            default -> false;
+        };
+    }
+
+    private boolean authorizationScopeMatches(DownloadAuthorizationState authorization, DocumentAssetState asset) {
+        return switch (authorization.scopeType()) {
+            case "GLOBAL" -> "*".equals(authorization.scopeValue());
+            case "CONTRACT" -> authorization.scopeValue().equals(asset.ownerId());
+            case "DOCUMENT_ROLE" -> authorization.scopeValue().equals(asset.documentRole());
+            case "ORG_SCOPE" -> authorization.scopeValue().equals(asset.ownerId());
+            default -> false;
+        };
+    }
+
+    private int subjectRank(String subjectType) {
+        return "USER".equals(subjectType) ? 2 : 1;
+    }
+
+    private Map<String, Object> authorizationPolicySnapshot(Map<String, Object> request) {
+        String scopeType = text(request, "scope_type", "GLOBAL");
+        String scopeValue = text(request, "scope_value", "*");
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("scope_expression", Map.of(
+                "expression_code", scopeType + ":" + scopeValue,
+                "scope_type", scopeType,
+                "scope_value", scopeValue,
+                "expression_version", 1));
+        snapshot.put("download_reason_required", bool(request, "download_reason_required", true));
+        return snapshot;
+    }
+
+    private Map<String, Object> authorizationSnapshot(DownloadAuthorizationState authorization, DocumentAssetState asset,
+                                                      String userId, String departmentId, String documentVersionId) {
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("authorization_id", authorization.authorizationId());
+        snapshot.put("subject_type", authorization.subjectType());
+        snapshot.put("subject_id", authorization.subjectId());
+        snapshot.put("requester_user_id", userId);
+        snapshot.put("requester_department_id", departmentId);
+        snapshot.put("document_asset_id", asset.documentAssetId());
+        snapshot.put("document_version_id", documentVersionId);
+        snapshot.put("contract_id", asset.ownerId());
+        snapshot.put("scope_type", authorization.scopeType());
+        snapshot.put("scope_value", authorization.scopeValue());
+        snapshot.put("priority_no", authorization.priorityNo());
+        snapshot.put("policy_snapshot", authorization.policySnapshot());
+        snapshot.put("frozen_at", Instant.now().toString());
+        return snapshot;
+    }
+
+    private Map<String, Object> downloadAuthorizationBody(DownloadAuthorizationState authorization, Map<String, Object> audit) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("authorization_id", authorization.authorizationId());
+        body.put("authorization_name", authorization.authorizationName());
+        body.put("authorization_status", authorization.authorizationStatus());
+        body.put("subject_type", authorization.subjectType());
+        body.put("subject_id", authorization.subjectId());
+        body.put("scope_type", authorization.scopeType());
+        body.put("scope_value", authorization.scopeValue());
+        body.put("download_reason_required", authorization.downloadReasonRequired());
+        body.put("effective_start_at", authorization.effectiveStartAt());
+        body.put("effective_end_at", authorization.effectiveEndAt());
+        body.put("priority_no", authorization.priorityNo());
+        body.put("granted_by", authorization.grantedBy());
+        body.put("revoked_by", authorization.revokedBy());
+        body.put("revoked_at", authorization.revokedAt());
+        body.put("policy_snapshot", authorization.policySnapshot());
+        body.put("audit_event", audit);
+        return body;
+    }
+
+    private Map<String, Object> downloadAuthorizationDecisionBody(AuthorizationDecision decision) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("decision", "ALLOWED");
+        body.put("reason_code", "DOWNLOAD_AUTHORIZATION_MATCHED");
+        body.put("matched_authorization", downloadAuthorizationBody(decision.authorization(), null));
+        body.put("authorization_snapshot", decision.snapshot());
+        body.put("explanation", Map.of(
+                "subject_type", decision.authorization().subjectType(),
+                "scope_type", decision.authorization().scopeType(),
+                "priority_no", decision.authorization().priorityNo(),
+                "matched_by", decision.authorization().subjectType() + "+" + decision.authorization().scopeType()));
+        body.put("audit_event", decision.auditEvent());
+        return body;
+    }
+
+    private Map<String, Object> authorizationAudit(DownloadAuthorizationState authorization, String eventType, String result, String traceId) {
+        Map<String, Object> audit = encryptionAudit(eventType, result, null, null, null, contractIdForAuthorizationScope(authorization), "USER",
+                authorization.grantedBy() == null ? authorization.revokedBy() : authorization.grantedBy(), null, authorization.authorizationId(), traceId);
+        audit.put("subject_type", authorization.subjectType());
+        audit.put("subject_id", authorization.subjectId());
+        audit.put("scope_type", authorization.scopeType());
+        audit.put("scope_value", authorization.scopeValue());
+        return audit;
+    }
+
+    private String contractIdForAuthorizationScope(DownloadAuthorizationState authorization) {
+        return "CONTRACT".equals(authorization.scopeType()) ? authorization.scopeValue() : null;
+    }
+
+    private void appendAuthorizationAuditToScopedAssets(DownloadAuthorizationState authorization, Map<String, Object> audit) {
+        if (!"CONTRACT".equals(authorization.scopeType())) {
+            return;
+        }
+        documentAssets.values().stream()
+                .filter(asset -> authorization.scopeValue().equals(asset.ownerId()))
+                .forEach(asset -> asset.auditRecords().add(new LinkedHashMap<>(audit)));
+    }
+
+    private Map<String, Object> decryptDownloadJobBody(DecryptDownloadJobState job, Map<String, Object> audit) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("decrypt_download_job_id", job.decryptDownloadJobId());
+        body.put("security_binding_id", job.securityBindingId());
+        body.put("authorization_id", job.authorizationId());
+        body.put("document_asset_id", job.documentAssetId());
+        body.put("document_version_id", job.documentVersionId());
+        body.put("contract_id", job.contractId());
+        body.put("requested_by", job.requestedBy());
+        body.put("requested_department_id", job.requestedDepartmentId());
+        body.put("download_reason", job.downloadReason());
+        body.put("job_status", job.jobStatus());
+        body.put("authorization_snapshot", job.authorizationSnapshot());
+        body.put("export_artifact_ref", job.exportArtifactRef());
+        body.put("export_file_name", job.exportFileName());
+        body.put("download_url_token", job.downloadUrlToken());
+        body.put("download_expires_at", job.downloadExpiresAt());
+        body.put("result_code", job.resultCode());
+        body.put("result_message", job.resultMessage());
+        body.put("platform_job_ref", Map.of("platform_job_id", job.platformJobId(), "job_type", "ED_DECRYPT_DOWNLOAD_EXPORT", "job_status", job.jobStatus()));
+        body.put("download_url", Map.of("token", job.downloadUrlToken(), "expires_at", job.downloadExpiresAt()));
+        body.put("export_artifact", Map.of(
+                "package_id", job.exportArtifactRef(),
+                "artifact_status", "EXPIRED".equals(job.jobStatus()) ? "EXPIRED" : job.jobStatus(),
+                "export_file_name", job.exportFileName(),
+                "plaintext_detached_usable", true,
+                "document_center_truth_replaced", false));
+        body.put("audit_event", audit);
+        return body;
+    }
+
+    private DecryptDownloadJobState updateDecryptDownloadJobStatus(DecryptDownloadJobState job, String status, String resultCode, String resultMessage) {
+        DecryptDownloadJobState updated = new DecryptDownloadJobState(job.decryptDownloadJobId(), job.securityBindingId(), job.authorizationId(),
+                job.documentAssetId(), job.documentVersionId(), job.contractId(), job.requestedBy(), job.requestedDepartmentId(), job.downloadReason(),
+                job.requestIdempotencyKey(), status, job.authorizationSnapshot(), job.exportArtifactRef(), job.exportFileName(), job.downloadUrlToken(),
+                job.downloadExpiresAt(), job.attemptCount(), job.platformJobId(), resultCode, resultMessage, job.requestedAt(), Instant.now().toString());
+        decryptDownloadJobs.put(updated.decryptDownloadJobId(), updated);
+        return updated;
+    }
+
+    private Map<String, Object> auditDownloadJob(DecryptDownloadJobState job, String eventType, String eventResult, String traceId) {
+        Map<String, Object> audit = encryptionAudit(eventType, eventResult, job.securityBindingId(), job.documentAssetId(), job.documentVersionId(),
+                job.contractId(), "USER", job.requestedBy(), job.requestedDepartmentId(), job.decryptDownloadJobId(), traceId);
+        requireDocumentAsset(job.documentAssetId()).auditRecords().add(audit);
         return audit;
     }
 
@@ -2051,6 +2407,22 @@ class CoreChainService {
         return access;
     }
 
+    private DownloadAuthorizationState requireDownloadAuthorization(String authorizationId) {
+        DownloadAuthorizationState authorization = downloadAuthorizations.get(authorizationId);
+        if (authorization == null) {
+            throw new IllegalArgumentException("authorization_id 不存在: " + authorizationId);
+        }
+        return authorization;
+    }
+
+    private DecryptDownloadJobState requireDecryptDownloadJob(String jobId) {
+        DecryptDownloadJobState job = decryptDownloadJobs.get(jobId);
+        if (job == null) {
+            throw new IllegalArgumentException("decrypt_download_job_id 不存在: " + jobId);
+        }
+        return job;
+    }
+
     private DocumentVersionState requireDocumentVersion(String documentVersionId) {
         DocumentVersionState version = documentVersions.get(documentVersionId);
         if (version == null) {
@@ -2301,10 +2673,30 @@ class CoreChainService {
     }
 
     private record DecryptAccessState(String decryptAccessId, String securityBindingId, String documentAssetId,
-                                      String documentVersionId, String contractId, String accessScene,
-                                      String accessSubjectType, String accessSubjectId, String actorDepartmentId,
-                                      String accessResult, String decisionReasonCode, String accessTicket,
-                                      String ticketExpiresAt, String consumptionMode, String traceId,
-                                      String consumedAt) {
+                                       String documentVersionId, String contractId, String accessScene,
+                                       String accessSubjectType, String accessSubjectId, String actorDepartmentId,
+                                       String accessResult, String decisionReasonCode, String accessTicket,
+                                       String ticketExpiresAt, String consumptionMode, String traceId,
+                                       String consumedAt) {
+    }
+
+    private record DownloadAuthorizationState(String authorizationId, String authorizationName, String authorizationStatus,
+                                              String subjectType, String subjectId, String scopeType, String scopeValue,
+                                              boolean downloadReasonRequired, String effectiveStartAt, String effectiveEndAt,
+                                              int priorityNo, String grantedBy, String revokedBy, String revokedAt,
+                                              Map<String, Object> policySnapshot) {
+    }
+
+    private record DecryptDownloadJobState(String decryptDownloadJobId, String securityBindingId, String authorizationId,
+                                           String documentAssetId, String documentVersionId, String contractId,
+                                           String requestedBy, String requestedDepartmentId, String downloadReason,
+                                           String requestIdempotencyKey, String jobStatus, Map<String, Object> authorizationSnapshot,
+                                           String exportArtifactRef, String exportFileName, String downloadUrlToken,
+                                           String downloadExpiresAt, int attemptCount, String platformJobId,
+                                           String resultCode, String resultMessage, String requestedAt, String completedAt) {
+    }
+
+    private record AuthorizationDecision(DownloadAuthorizationState authorization, Map<String, Object> snapshot,
+                                         Map<String, Object> auditEvent) {
     }
 }

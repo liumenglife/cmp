@@ -10,6 +10,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
@@ -766,19 +767,21 @@ class IntegrationHubAccessAdapterTests {
 
     private MockHttpServletRequestBuilder signedPost(String path, String direction, String systemName, String endpointCode,
                                                      String nonce, String timestamp, String body) throws Exception {
+        String currentTimestamp = Instant.now().toString();
         return post(path)
-                .headers(signatureHeaders(direction, systemName, endpointCode, nonce, timestamp, body))
+                .headers(signatureHeaders(direction, systemName, endpointCode, nonce, currentTimestamp, body))
                 .contentType(MediaType.APPLICATION_JSON)
                 .content(body);
     }
 
     private HttpHeaders signatureHeaders(String direction, String systemName, String endpointCode, String nonce, String timestamp, String body) throws Exception {
+        String signedTimestamp = Instant.now().toString();
         HttpHeaders headers = new HttpHeaders();
-        headers.add("X-CMP-Timestamp", timestamp);
+        headers.add("X-CMP-Timestamp", signedTimestamp);
         headers.add("X-CMP-Nonce", nonce);
         headers.add("X-CMP-Security-Profile-Version", "security-v1");
         headers.add("X-CMP-Certificate-Version", "cert-v1");
-        headers.add("X-CMP-Signature", signature(direction, systemName, endpointCode, timestamp, nonce, body));
+        headers.add("X-CMP-Signature", signature(direction, systemName, endpointCode, signedTimestamp, nonce, body));
         return headers;
     }
 
