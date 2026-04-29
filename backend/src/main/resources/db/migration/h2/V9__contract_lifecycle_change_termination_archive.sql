@@ -88,3 +88,7 @@ create table cl_lifecycle_process_ref (
 
 create index idx_cl_process_ref_contract on cl_lifecycle_process_ref(contract_id, process_purpose);
 create index idx_cl_process_ref_instance on cl_lifecycle_process_ref(workflow_instance_id);
+
+alter table cl_lifecycle_summary add column change_summary_json clob;
+alter table cl_lifecycle_summary add column termination_summary_json clob;
+alter table cl_lifecycle_summary add column archive_summary_json clob;

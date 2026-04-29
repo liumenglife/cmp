@@ -83,3 +83,7 @@ create table cl_lifecycle_process_ref (
     key idx_cl_process_ref_contract (contract_id, process_purpose),
     key idx_cl_process_ref_instance (workflow_instance_id)
 );
+
+alter table cl_lifecycle_summary add column change_summary_json text;
+alter table cl_lifecycle_summary add column termination_summary_json text;
+alter table cl_lifecycle_summary add column archive_summary_json text;

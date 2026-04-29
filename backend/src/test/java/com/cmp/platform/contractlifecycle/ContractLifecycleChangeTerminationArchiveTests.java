@@ -1,12 +1,15 @@
 package com.cmp.platform.contractlifecycle;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -25,6 +28,9 @@ class ContractLifecycleChangeTerminationArchiveTests {
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
+
+    @Autowired
+    private ObjectMapper objectMapper;
 
     @BeforeEach
     void cleanLifecycleTables() {
@@ -194,6 +200,169 @@ class ContractLifecycleChangeTerminationArchiveTests {
                 .andExpect(jsonPath("$.timeline_summary[?(@.event_type == 'TERMINATION_COMPLETED')]", org.hamcrest.Matchers.hasSize(1)))
                 .andExpect(jsonPath("$.timeline_summary[?(@.event_type == 'ARCHIVE_COMPLETED' && @.visible_to_notify == true)]", org.hamcrest.Matchers.hasSize(1)))
                 .andExpect(jsonPath("$.audit_record[?(@.event_type == 'ARCHIVE_COMPLETED')]", org.hamcrest.Matchers.hasSize(1)));
+    }
+
+    @Test
+    void rejectedChangeAndTerminationDoNotWriteCompletionMilestonesOrCompletionTimestamps() throws Exception {
+        LifecycleSample changeSample = createPerformedContractSample("变更驳回合同", "trace-cl-change-reject");
+        String agreement = createDocument(changeSample.contractId(), "CHANGE_AGREEMENT", "驳回补充协议.pdf", "trace-cl-change-reject-agreement");
+        String change = mockMvc.perform(post("/api/contracts/{contract_id}/changes", changeSample.contractId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"change_type":"TERM","change_reason":"驳回演示","change_summary":"不应生效","effective_date":"2026-06-01","supplemental_document_asset_id":"%s","supplemental_document_version_id":"%s","workflow_instance_id":"wf-change-rejected","operator_user_id":"u-change-owner","trace_id":"trace-cl-change-reject-apply"}
+                                """.formatted(jsonString(agreement, "document_asset_id"), jsonString(agreement, "document_version_id"))))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+
+        mockMvc.perform(post("/api/contracts/{contract_id}/changes/{change_id}/approval-results", changeSample.contractId(), jsonString(change, "change_id"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"approval_result":"REJECTED","workflow_instance_id":"wf-change-rejected","result_summary":"不同意变更","operator_user_id":"u-change-approver","trace_id":"trace-cl-change-rejected"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.change_status").value("REJECTED"));
+
+        assertThat(jdbcTemplate.queryForObject("SELECT approved_at FROM cl_contract_change WHERE change_id = ?", String.class, jsonString(change, "change_id"))).isNull();
+        assertThat(jdbcTemplate.queryForObject("SELECT applied_at FROM cl_contract_change WHERE change_id = ?", String.class, jsonString(change, "change_id"))).isNull();
+        mockMvc.perform(get("/api/contracts/{contract_id}", changeSample.contractId()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.contract_master.contract_status").value("PERFORMED"))
+                .andExpect(jsonPath("$.contract_master.change_summary").doesNotExist())
+                .andExpect(jsonPath("$.timeline_summary[?(@.event_type == 'CHANGE_REJECTED')]", org.hamcrest.Matchers.hasSize(1)))
+                .andExpect(jsonPath("$.timeline_summary[?(@.event_type == 'CHANGE_APPLIED')]").isEmpty());
+
+        LifecycleSample terminationSample = createPerformedContractSample("终止驳回合同", "trace-cl-term-reject");
+        String material = createDocument(terminationSample.contractId(), "TERMINATION_AGREEMENT", "驳回终止协议.pdf", "trace-cl-term-reject-material");
+        String termination = mockMvc.perform(post("/api/contracts/{contract_id}/terminations", terminationSample.contractId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"termination_type":"MUTUAL_AGREEMENT","termination_reason":"驳回演示","termination_summary":"不应终止","requested_termination_date":"2026-07-01","material_document_asset_id":"%s","material_document_version_id":"%s","workflow_instance_id":"wf-term-rejected","operator_user_id":"u-term-owner","trace_id":"trace-cl-term-reject-apply"}
+                                """.formatted(jsonString(material, "document_asset_id"), jsonString(material, "document_version_id"))))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+
+        mockMvc.perform(post("/api/contracts/{contract_id}/terminations/{termination_id}/approval-results", terminationSample.contractId(), jsonString(termination, "termination_id"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"approval_result":"REJECTED","workflow_instance_id":"wf-term-rejected","operator_user_id":"u-term-approver","trace_id":"trace-cl-term-rejected"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.termination_status").value("REJECTED"));
+
+        assertThat(jdbcTemplate.queryForObject("SELECT terminated_at FROM cl_contract_termination WHERE termination_id = ?", String.class, jsonString(termination, "termination_id"))).isNull();
+        mockMvc.perform(get("/api/contracts/{contract_id}", terminationSample.contractId()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.contract_master.contract_status").value("PERFORMED"))
+                .andExpect(jsonPath("$.contract_master.termination_summary").doesNotExist())
+                .andExpect(jsonPath("$.timeline_summary[?(@.event_type == 'TERMINATION_REJECTED')]", org.hamcrest.Matchers.hasSize(1)))
+                .andExpect(jsonPath("$.timeline_summary[?(@.event_type == 'TERMINATION_COMPLETED')]").isEmpty());
+    }
+
+    @Test
+    void lifecycleSummariesAndApprovalProcessRefsPersistFinalFacts() throws Exception {
+        LifecycleSample sample = createPerformedContractSample("摘要持久化合同", "trace-cl-persist");
+        String agreement = createDocument(sample.contractId(), "CHANGE_AGREEMENT", "持久化补充协议.pdf", "trace-cl-persist-change-doc");
+        String change = mockMvc.perform(post("/api/contracts/{contract_id}/changes", sample.contractId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"change_type":"AMOUNT","change_reason":"金额调整","change_summary":"金额调整为 150000","effective_date":"2026-06-15","supplemental_document_asset_id":"%s","supplemental_document_version_id":"%s","workflow_instance_id":"wf-change-persist","operator_user_id":"u-change-owner","trace_id":"trace-cl-persist-change"}
+                                """.formatted(jsonString(agreement, "document_asset_id"), jsonString(agreement, "document_version_id"))))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        mockMvc.perform(post("/api/contracts/{contract_id}/changes/{change_id}/approval-results", sample.contractId(), jsonString(change, "change_id"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"approval_result":"APPROVED","workflow_instance_id":"wf-change-persist","approved_at":"2026-06-15T08:00:00Z","result_summary":"金额调整已生效","operator_user_id":"u-change-approver","trace_id":"trace-cl-persist-change-approved"}
+                                """))
+                .andExpect(status().isOk());
+
+        assertThat(jdbcTemplate.queryForObject("SELECT process_status_snapshot FROM cl_lifecycle_process_ref WHERE source_resource_id = ?", String.class, jsonString(change, "change_id"))).isEqualTo("APPLIED");
+        String persistedChangeSummary = jdbcTemplate.queryForObject("SELECT change_summary_json FROM cl_lifecycle_summary WHERE contract_id = ?", String.class, sample.contractId());
+        assertThat(persistedChangeSummary).contains(jsonString(change, "change_id"), "金额调整已生效");
+        assertThatCode(() -> objectMapper.readValue(persistedChangeSummary, new TypeReference<java.util.Map<String, Object>>() {})).doesNotThrowAnyException();
+
+        String material = createDocument(sample.contractId(), "TERMINATION_AGREEMENT", "持久化终止协议.pdf", "trace-cl-persist-term-doc");
+        String termination = mockMvc.perform(post("/api/contracts/{contract_id}/terminations", sample.contractId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"termination_type":"MUTUAL_AGREEMENT","termination_reason":"持久化终止","termination_summary":"终止后归档","requested_termination_date":"2026-07-01","material_document_asset_id":"%s","material_document_version_id":"%s","workflow_instance_id":"wf-term-persist","operator_user_id":"u-term-owner","trace_id":"trace-cl-persist-term"}
+                                """.formatted(jsonString(material, "document_asset_id"), jsonString(material, "document_version_id"))))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        mockMvc.perform(post("/api/contracts/{contract_id}/terminations/{termination_id}/approval-results", sample.contractId(), jsonString(termination, "termination_id"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"approval_result":"APPROVED","workflow_instance_id":"wf-term-persist","terminated_at":"2026-07-01T18:00:00Z","post_action_status":"SETTLED","settlement_summary":"结算完成","access_restriction":"READ_ONLY_AFTER_TERMINATION","operator_user_id":"u-term-approver","trace_id":"trace-cl-persist-term-approved"}
+                                """))
+                .andExpect(status().isOk());
+
+        assertThat(jdbcTemplate.queryForObject("SELECT process_status_snapshot FROM cl_lifecycle_process_ref WHERE source_resource_id = ?", String.class, jsonString(termination, "termination_id"))).isEqualTo("TERMINATED");
+        String persistedTerminationSummary = jdbcTemplate.queryForObject("SELECT termination_summary_json FROM cl_lifecycle_summary WHERE contract_id = ?", String.class, sample.contractId());
+        assertThat(persistedTerminationSummary).contains(jsonString(termination, "termination_id"), "READ_ONLY_AFTER_TERMINATION");
+        assertThatCode(() -> objectMapper.readValue(persistedTerminationSummary, new TypeReference<java.util.Map<String, Object>>() {})).doesNotThrowAnyException();
+
+        String packageDocument = createDocument(sample.contractId(), "ARCHIVE_PACKAGE", "持久化归档封包.zip", "trace-cl-persist-package");
+        String manifestDocument = createDocument(sample.contractId(), "ARCHIVE_MANIFEST", "持久化归档清单.json", "trace-cl-persist-manifest");
+        String archive = mockMvc.perform(post("/api/contracts/{contract_id}/archives", sample.contractId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"archive_batch_no":"ARCH-PERSIST-001","archive_type":"FINAL","input_set":["CONTRACT_MASTER","MAIN_BODY","PERFORMANCE_SUMMARY","TERMINATION_SUMMARY"],"package_document_asset_id":"%s","package_document_version_id":"%s","manifest_document_asset_id":"%s","manifest_document_version_id":"%s","operator_user_id":"u-archiver","trace_id":"trace-cl-persist-archive"}
+                                """.formatted(jsonString(packageDocument, "document_asset_id"), jsonString(packageDocument, "document_version_id"), jsonString(manifestDocument, "document_asset_id"), jsonString(manifestDocument, "document_version_id"))))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        String persistedArchiveSummary = jdbcTemplate.queryForObject("SELECT archive_summary_json FROM cl_lifecycle_summary WHERE contract_id = ?", String.class, sample.contractId());
+        assertThat(persistedArchiveSummary).contains(jsonString(archive, "archive_record_id"), "ARCH-PERSIST-001");
+        assertThatCode(() -> objectMapper.readValue(persistedArchiveSummary, new TypeReference<java.util.Map<String, Object>>() {})).doesNotThrowAnyException();
+    }
+
+    @Test
+    void archiveRejectsPackageAndManifestDocumentsWithWrongRoles() throws Exception {
+        LifecycleSample sample = createTerminatedContractSample("归档角色校验合同", "trace-cl-archive-role");
+        String wrongPackage = createDocument(sample.contractId(), "MAIN_BODY", "不能冒充封包.docx", "trace-cl-archive-wrong-package");
+        String wrongManifest = createDocument(sample.contractId(), "CHANGE_AGREEMENT", "不能冒充清单.pdf", "trace-cl-archive-wrong-manifest");
+
+        mockMvc.perform(post("/api/contracts/{contract_id}/archives", sample.contractId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"archive_batch_no":"ARCH-WRONG-ROLE","archive_type":"FINAL","input_set":["CONTRACT_MASTER","MAIN_BODY","PERFORMANCE_SUMMARY","TERMINATION_SUMMARY"],"package_document_asset_id":"%s","package_document_version_id":"%s","manifest_document_asset_id":"%s","manifest_document_version_id":"%s","operator_user_id":"u-archiver","trace_id":"trace-cl-archive-wrong-role"}
+                                """.formatted(jsonString(wrongPackage, "document_asset_id"), jsonString(wrongPackage, "document_version_id"), jsonString(wrongManifest, "document_asset_id"), jsonString(wrongManifest, "document_version_id"))))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.error_code").value("ARCHIVE_DOCUMENT_ROLE_MISMATCH"));
+    }
+
+    @Test
+    void archiveBorrowReturnRejectsRepeatedReturn() throws Exception {
+        LifecycleSample sample = createTerminatedContractSample("重复归还合同", "trace-cl-borrow-state");
+        String packageDocument = createDocument(sample.contractId(), "ARCHIVE_PACKAGE", "重复归还封包.zip", "trace-cl-borrow-package");
+        String manifestDocument = createDocument(sample.contractId(), "ARCHIVE_MANIFEST", "重复归还清单.json", "trace-cl-borrow-manifest");
+        String archive = mockMvc.perform(post("/api/contracts/{contract_id}/archives", sample.contractId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"archive_batch_no":"ARCH-BORROW-STATE","archive_type":"FINAL","input_set":["CONTRACT_MASTER","MAIN_BODY","PERFORMANCE_SUMMARY","TERMINATION_SUMMARY"],"package_document_asset_id":"%s","package_document_version_id":"%s","manifest_document_asset_id":"%s","manifest_document_version_id":"%s","operator_user_id":"u-archiver","trace_id":"trace-cl-borrow-archive"}
+                                """.formatted(jsonString(packageDocument, "document_asset_id"), jsonString(packageDocument, "document_version_id"), jsonString(manifestDocument, "document_asset_id"), jsonString(manifestDocument, "document_version_id"))))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        String borrow = mockMvc.perform(post("/api/contracts/{contract_id}/archives/{archive_record_id}/borrows", sample.contractId(), jsonString(archive, "archive_record_id"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"borrow_purpose":"状态机复核","requested_by":"u-auditor","requested_org_unit_id":"dept-audit","due_at":"2026-08-01T00:00:00Z","trace_id":"trace-cl-borrow-state"}
+                                """))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+
+        mockMvc.perform(post("/api/contracts/{contract_id}/archive-borrows/{borrow_record_id}/return", sample.contractId(), jsonString(borrow, "borrow_record_id"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"returned_by":"u-auditor","trace_id":"trace-cl-borrow-return"}
+                                """))
+                .andExpect(status().isOk());
+        mockMvc.perform(post("/api/contracts/{contract_id}/archive-borrows/{borrow_record_id}/return", sample.contractId(), jsonString(borrow, "borrow_record_id"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"returned_by":"u-auditor","trace_id":"trace-cl-borrow-return-again"}
+                                """))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error_code").value("ARCHIVE_BORROW_STATUS_CONFLICT"));
     }
 
     private LifecycleSample createTerminatedContractSample(String contractName, String tracePrefix) throws Exception {

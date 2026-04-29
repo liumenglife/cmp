@@ -7,6 +7,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -398,9 +400,11 @@ class CoreChainService {
     private final List<Map<String, Object>> lifecycleTimelineEvents = new ArrayList<>();
     private final List<Map<String, Object>> lifecycleAuditEvents = new ArrayList<>();
     private final JdbcTemplate jdbcTemplate;
+    private final ObjectMapper objectMapper;
 
-    CoreChainService(JdbcTemplate jdbcTemplate) {
+    CoreChainService(JdbcTemplate jdbcTemplate, ObjectMapper objectMapper) {
         this.jdbcTemplate = jdbcTemplate;
+        this.objectMapper = objectMapper;
     }
 
     Map<String, Object> createContract(Map<String, Object> request) {
@@ -1474,23 +1478,31 @@ class CoreChainService {
             return ResponseEntity.status(HttpStatus.CONFLICT).body(error("CHANGE_CONTRACT_MISMATCH", "变更记录未绑定当前合同"));
         }
         String result = text(request, "approval_result", "APPROVED");
-        String nextStatus = "APPROVED".equals(result) ? "APPLIED" : "REJECTED";
+        boolean approved = "APPROVED".equals(result);
+        String nextStatus = approved ? "APPLIED" : "REJECTED";
+        Map<String, Object> processRef = lifecycleProcessRef(change.processRef(), text(request, "workflow_instance_id", change.workflowInstanceId()), nextStatus);
         ContractChangeState updated = new ContractChangeState(change.changeId(), change.contractId(), change.changeType(), change.changeReason(),
                 change.changeSummary(), change.impactScope(), change.effectiveDate(), nextStatus, text(request, "workflow_instance_id", change.workflowInstanceId()),
-                change.documentRef(), lifecycleProcessRef(contractId, "CONTRACT_CHANGE", changeId, text(request, "workflow_instance_id", change.workflowInstanceId()),
-                        "CONTRACT_CHANGE_APPROVAL", nextStatus), text(request, "approved_at", Instant.now().toString()),
-                "APPROVED".equals(result) ? Instant.now().toString() : null, text(request, "result_summary", change.changeSummary()), change.resultVersionNo() + 1);
+                change.documentRef(), processRef, approved ? text(request, "approved_at", Instant.now().toString()) : null,
+                approved ? Instant.now().toString() : null, approved ? text(request, "result_summary", change.changeSummary()) : null, change.resultVersionNo() + 1);
         contractChanges.put(changeId, updated);
         persistChange(updated);
-        Map<String, Object> summary = changeSummary(updated);
-        changeSummaries.put(contractId, summary);
-        refreshLifecycleSummary(contractId, "CHANGE", nextStatus, "CHANGE_APPROVED");
-        if ("APPROVED".equals(result)) {
+        persistLifecycleProcessRef(processRef);
+        if (approved) {
+            Map<String, Object> summary = changeSummary(updated);
+            changeSummaries.put(contractId, summary);
+            refreshLifecycleSummary(contractId, "CHANGE", nextStatus, "CHANGE_APPROVED");
             appendContractEvent(contractId, "CHANGE_APPLIED", changeId, text(request, "trace_id", null), "CHANGED");
             appendLifecycleTimeline(contractId, "CHANGE_APPLIED", "CONTRACT_CHANGE", changeId, "CHANGE_APPROVED",
                     text(request, "operator_user_id", null), "APPLIED", lifecycleDocumentRefId(updated.documentRef()), text(request, "trace_id", null));
             appendLifecycleAudit(contractId, "CHANGE_APPLIED", "CONTRACT_CHANGE", changeId,
                     text(request, "operator_user_id", null), "SUCCESS", "APPLIED", lifecycleDocumentRefId(updated.documentRef()), text(request, "trace_id", null));
+        } else {
+            refreshLifecycleSummary(contractId, "CHANGE", nextStatus, "CHANGE_REJECTED");
+            appendLifecycleTimeline(contractId, "CHANGE_REJECTED", "CONTRACT_CHANGE", changeId, "CHANGE_REJECTED",
+                    text(request, "operator_user_id", null), "REJECTED", lifecycleDocumentRefId(updated.documentRef()), text(request, "trace_id", null));
+            appendLifecycleAudit(contractId, "CHANGE_REJECTED", "CONTRACT_CHANGE", changeId,
+                    text(request, "operator_user_id", null), "REJECTED", "REJECTED", lifecycleDocumentRefId(updated.documentRef()), text(request, "trace_id", null));
         }
         return ResponseEntity.ok(changeBody(updated));
     }
@@ -1526,25 +1538,33 @@ class CoreChainService {
             return ResponseEntity.status(HttpStatus.CONFLICT).body(error("TERMINATION_CONTRACT_MISMATCH", "终止记录未绑定当前合同"));
         }
         String result = text(request, "approval_result", "APPROVED");
-        String nextStatus = "APPROVED".equals(result) ? "TERMINATED" : "REJECTED";
+        boolean approved = "APPROVED".equals(result);
+        String nextStatus = approved ? "TERMINATED" : "REJECTED";
+        Map<String, Object> processRef = lifecycleProcessRef(termination.processRef(), text(request, "workflow_instance_id", termination.workflowInstanceId()), nextStatus);
         ContractTerminationState updated = new ContractTerminationState(termination.terminationId(), termination.contractId(), termination.terminationType(),
                 termination.terminationReason(), termination.terminationSummary(), termination.requestedTerminationDate(),
                 text(request, "settlement_summary", termination.settlementSummary()), nextStatus,
                 text(request, "workflow_instance_id", termination.workflowInstanceId()), termination.documentRef(),
-                lifecycleProcessRef(contractId, "CONTRACT_TERMINATION", terminationId, text(request, "workflow_instance_id", termination.workflowInstanceId()),
-                        "CONTRACT_TERMINATION_APPROVAL", nextStatus), text(request, "terminated_at", Instant.now().toString()),
+                processRef, approved ? text(request, "terminated_at", Instant.now().toString()) : null,
                 text(request, "post_action_status", termination.postActionStatus()), text(request, "access_restriction", "READ_ONLY_AFTER_TERMINATION"));
         contractTerminations.put(terminationId, updated);
         persistTermination(updated);
-        Map<String, Object> summary = terminationSummary(updated);
-        terminationSummaries.put(contractId, summary);
-        refreshLifecycleSummary(contractId, "TERMINATION", nextStatus, "TERMINATION_COMPLETED");
-        if ("APPROVED".equals(result)) {
+        persistLifecycleProcessRef(processRef);
+        if (approved) {
+            Map<String, Object> summary = terminationSummary(updated);
+            terminationSummaries.put(contractId, summary);
+            refreshLifecycleSummary(contractId, "TERMINATION", nextStatus, "TERMINATION_COMPLETED");
             appendContractEvent(contractId, "TERMINATION_COMPLETED", terminationId, text(request, "trace_id", null), "TERMINATED");
             appendLifecycleTimeline(contractId, "TERMINATION_COMPLETED", "CONTRACT_TERMINATION", terminationId, "TERMINATION_COMPLETED",
                     text(request, "operator_user_id", null), "TERMINATED", lifecycleDocumentRefId(updated.documentRef()), text(request, "trace_id", null));
             appendLifecycleAudit(contractId, "TERMINATION_COMPLETED", "CONTRACT_TERMINATION", terminationId,
                     text(request, "operator_user_id", null), "SUCCESS", "TERMINATED", lifecycleDocumentRefId(updated.documentRef()), text(request, "trace_id", null));
+        } else {
+            refreshLifecycleSummary(contractId, "TERMINATION", nextStatus, "TERMINATION_REJECTED");
+            appendLifecycleTimeline(contractId, "TERMINATION_REJECTED", "CONTRACT_TERMINATION", terminationId, "TERMINATION_REJECTED",
+                    text(request, "operator_user_id", null), "REJECTED", lifecycleDocumentRefId(updated.documentRef()), text(request, "trace_id", null));
+            appendLifecycleAudit(contractId, "TERMINATION_REJECTED", "CONTRACT_TERMINATION", terminationId,
+                    text(request, "operator_user_id", null), "REJECTED", "REJECTED", lifecycleDocumentRefId(updated.documentRef()), text(request, "trace_id", null));
         }
         return ResponseEntity.ok(terminationBody(updated));
     }
@@ -1555,13 +1575,9 @@ class CoreChainService {
             return ResponseEntity.status(HttpStatus.CONFLICT).body(error("CONTRACT_NOT_READY_FOR_ARCHIVE", "合同未满足归档准入条件"));
         }
         List<String> inputSet = listStrings(request.get("input_set"));
-        List<String> required = List.of("CONTRACT_MASTER", "MAIN_BODY", "PERFORMANCE_SUMMARY");
-        boolean missingRequired = !inputSet.containsAll(required) || ("TERMINATED".equals(contract.contractStatus()) && !inputSet.contains("TERMINATION_SUMMARY"));
-        if (missingRequired) {
-            Map<String, Object> body = error("ARCHIVE_INPUT_SET_INCOMPLETE", "归档输入集缺少必需项");
-            body.put("required_input_set", required);
-            body.put("actual_input_set", inputSet);
-            return ResponseEntity.unprocessableEntity().body(body);
+        ResponseEntity<Map<String, Object>> inputRejection = validateArchiveInputs(contract, inputSet, request);
+        if (inputRejection != null) {
+            return inputRejection;
         }
         String archiveId = "cl-archive-" + UUID.randomUUID();
         Map<String, Object> packageRef = lifecycleDocumentRef(contractId, "ARCHIVE_RECORD", archiveId, "ARCHIVE_PACKAGE",
@@ -1608,6 +1624,11 @@ class CoreChainService {
         ArchiveBorrowState borrow = requireBorrow(borrowRecordId);
         if (!contractId.equals(borrow.contractId())) {
             return ResponseEntity.status(HttpStatus.CONFLICT).body(error("BORROW_CONTRACT_MISMATCH", "借阅记录未绑定当前合同"));
+        }
+        if (!"BORROWED".equals(borrow.borrowStatus())) {
+            Map<String, Object> body = error("ARCHIVE_BORROW_STATUS_CONFLICT", "只有 BORROWED 状态允许归还");
+            body.put("current_borrow_status", borrow.borrowStatus());
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(body);
         }
         ArchiveBorrowState returned = new ArchiveBorrowState(borrow.borrowRecordId(), borrow.contractId(), borrow.archiveRecordId(), borrow.archiveBatchNo(),
                 borrow.packageRef(), borrow.manifestRef(), "RETURNED", borrow.borrowPurpose(), borrow.requestedBy(), borrow.requestedOrgUnitId(),
@@ -2222,6 +2243,49 @@ class CoreChainService {
         return ref;
     }
 
+    private Map<String, Object> lifecycleProcessRef(Map<String, Object> currentRef, String workflowInstanceId, String status) {
+        Map<String, Object> ref = new LinkedHashMap<>(currentRef);
+        ref.put("workflow_instance_id", workflowInstanceId);
+        ref.put("process_status_snapshot", status);
+        return ref;
+    }
+
+    private ResponseEntity<Map<String, Object>> validateArchiveInputs(ContractState contract, List<String> inputSet, Map<String, Object> request) {
+        List<String> required = new ArrayList<>(List.of("CONTRACT_MASTER", "MAIN_BODY", "PERFORMANCE_SUMMARY"));
+        if ("TERMINATED".equals(contract.contractStatus())) {
+            required.add("TERMINATION_SUMMARY");
+        }
+        boolean missingRequired = !inputSet.containsAll(required)
+                || !hasContractDocumentRole(contract.contractId(), "MAIN_BODY")
+                || !performanceSummaries.containsKey(contract.contractId())
+                || (required.contains("TERMINATION_SUMMARY") && !terminationSummaries.containsKey(contract.contractId()));
+        if (missingRequired) {
+            Map<String, Object> body = error("ARCHIVE_INPUT_SET_INCOMPLETE", "归档输入集缺少必需项或对应事实不存在");
+            body.put("required_input_set", required);
+            body.put("actual_input_set", inputSet);
+            return ResponseEntity.unprocessableEntity().body(body);
+        }
+        if (!documentRefMatchesRole(contract.contractId(), text(request, "package_document_asset_id", null), text(request, "package_document_version_id", null), "ARCHIVE_PACKAGE")
+                || !documentRefMatchesRole(contract.contractId(), text(request, "manifest_document_asset_id", null), text(request, "manifest_document_version_id", null), "ARCHIVE_MANIFEST")) {
+            return ResponseEntity.unprocessableEntity().body(error("ARCHIVE_DOCUMENT_ROLE_MISMATCH", "归档封包和清单文档必须存在且角色匹配"));
+        }
+        return null;
+    }
+
+    private boolean hasContractDocumentRole(String contractId, String documentRole) {
+        return documentAssets.values().stream()
+                .anyMatch(asset -> contractId.equals(asset.ownerId()) && documentRole.equals(asset.documentRole()));
+    }
+
+    private boolean documentRefMatchesRole(String contractId, String documentAssetId, String documentVersionId, String documentRole) {
+        DocumentAssetState asset = documentAssets.get(documentAssetId);
+        DocumentVersionState version = documentVersions.get(documentVersionId);
+        return asset != null && version != null
+                && contractId.equals(asset.ownerId())
+                && asset.documentAssetId().equals(version.documentAssetId())
+                && documentRole.equals(asset.documentRole());
+    }
+
     private Map<String, Object> changeBody(ContractChangeState change) {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("change_id", change.changeId());
@@ -2387,12 +2451,13 @@ class CoreChainService {
         String stageStatus = text(summary, "stage_status", text(performanceSummary, "performance_status", "IN_PROGRESS"));
         jdbcTemplate.update("DELETE FROM cl_lifecycle_summary WHERE contract_id = ?", contractId);
         jdbcTemplate.update("""
-                INSERT INTO cl_lifecycle_summary (contract_id, current_stage, stage_status, performance_record_id, performance_status, progress_percent, risk_level, open_node_count, overdue_node_count, issue_count, latest_milestone_code, latest_milestone_at, summary_version, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                INSERT INTO cl_lifecycle_summary (contract_id, current_stage, stage_status, performance_record_id, performance_status, progress_percent, risk_level, open_node_count, overdue_node_count, issue_count, latest_milestone_code, latest_milestone_at, summary_version, updated_at, change_summary_json, termination_summary_json, archive_summary_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, contractId, currentStage, stageStatus, text(performanceSummary, "performance_record_id", null),
                 text(performanceSummary, "performance_status", null), intValue(performanceSummary, "progress_percent", 0), text(riskSummary, "risk_level", "LOW"),
                 intValue(performanceSummary, "open_node_count", 0), intValue(performanceSummary, "overdue_node_count", 0), intValue(riskSummary, "issue_count", 0),
-                text(summary, "latest_milestone_code", null), Instant.now().toString(), "cl-summary-v1", Instant.now().toString());
+                text(summary, "latest_milestone_code", null), Instant.now().toString(), "cl-summary-v1", Instant.now().toString(),
+                summaryJson(summary.get("change_summary")), summaryJson(summary.get("termination_summary")), summaryJson(summary.get("archive_summary")));
     }
 
     private void persistChange(ContractChangeState change) {
@@ -3611,6 +3676,17 @@ class CoreChainService {
     private String text(Map<String, Object> request, String field, String defaultValue) {
         Object value = request.get(field);
         return value == null || value.toString().isBlank() ? defaultValue : value.toString();
+    }
+
+    private String summaryJson(Object value) {
+        if (value == null) {
+            return null;
+        }
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (JsonProcessingException exception) {
+            throw new IllegalArgumentException("生命周期摘要无法序列化", exception);
+        }
     }
 
     private record ContractState(String contractId, String contractNo, String contractName, String contractStatus,
