@@ -48,14 +48,25 @@ class Batch3CrossModuleLifecycleIntegrationTests {
         assertThat(signatureSession).contains("task_center_task_id");
         String approvalProcess = startApprovalTaskCenterFlow(contractId, "trace-xm-task-master");
         String approvalProcessId = jsonString(approvalProcess, "process_id");
-        mockMvc.perform(get("/api/approval-engine/tasks")
+        String approvalTasks = mockMvc.perform(get("/api/approval-engine/tasks")
                         .param("process_id", approvalProcessId)
                         .param("task_status", "PENDING_ACTION"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.items[0].task_center_ref.task_center_task_id").exists())
+                .andExpect(jsonPath("$.items[0].task_center_ref.process_id").value(approvalProcessId))
+                .andExpect(jsonPath("$.items[0].task_center_ref.source_resource_type").value("APPROVAL_TASK"))
+                .andExpect(jsonPath("$.items[0].task_center_ref.business_object_type").value("CONTRACT"))
+                .andExpect(jsonPath("$.items[0].task_center_ref.business_object_id").value(contractId))
                 .andExpect(jsonPath("$.items[0].resolver_snapshot.resolved_assignee_list").exists())
                 .andExpect(jsonPath("$.items[0].task_center_ref.resolver_snapshot").doesNotExist())
-                .andExpect(jsonPath("$.items[0].task_center_ref.candidate_list").doesNotExist());
+                .andExpect(jsonPath("$.items[0].task_center_ref.candidate_list").doesNotExist())
+                .andReturn().getResponse().getContentAsString();
+        String approvalTaskId = jsonString(approvalTasks, "task_id");
+        assertThat(jsonString(approvalTasks, "process_id")).isEqualTo(approvalProcessId);
+        assertThat(jsonString(approvalTasks, "task_status")).isEqualTo("PENDING_ACTION");
+        assertThat(jsonString(approvalTasks, "task_center_task_id")).isEqualTo("task-center-" + approvalTaskId);
+        assertThat(jsonString(approvalTasks, "source_resource_id")).isEqualTo(approvalTaskId);
+        assertThat(jsonString(approvalTasks, "task_center_status")).isEqualTo("PUBLISHED");
         sign(sessionId, "u-signer-a", 1, "trace-xm-sign-a");
         sign(sessionId, "u-signer-b", 2, "trace-xm-sign-b");
 

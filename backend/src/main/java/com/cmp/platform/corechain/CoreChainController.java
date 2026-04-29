@@ -3321,6 +3321,11 @@ class CoreChainService {
         Map<String, Object> taskCenterRef = new LinkedHashMap<>();
         taskCenterRef.put("task_center_task_id", "task-center-" + taskId);
         taskCenterRef.put("task_center_status", "PUBLISHED");
+        taskCenterRef.put("process_id", process.processId());
+        taskCenterRef.put("source_resource_type", "APPROVAL_TASK");
+        taskCenterRef.put("source_resource_id", taskId);
+        taskCenterRef.put("business_object_type", "CONTRACT");
+        taskCenterRef.put("business_object_id", process.contractId());
         return new ApprovalTaskState(taskId, process.processId(), text(node, "node_key", null), "COUNTERSIGN".equals(participantMode) ? "COUNTERSIGN" : "APPROVAL",
                 "PENDING_ACTION", "USER".equals(bindingType) ? bindingObjectId : null, "ORG_UNIT".equals(bindingType) ? bindingObjectId : null,
                 candidateList, resolverSnapshot, sequenceIndex, participantMode, null, taskCenterRef);
