@@ -144,23 +144,21 @@ class ContractLifecyclePerformanceTests {
         mockMvc.perform(patch("/api/contracts/{contract_id}/performance-nodes/{node_id}", sample.contractId(), nodeId)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
-                                {"node_status":"COMPLETED","progress_percent":100,"risk_level":"LOW","issue_count":0,"actual_at":"2026-05-04","result_summary":"首付款已完成","trace_id":"trace-cl-writeback-complete"}
+                                {"node_status":"COMPLETED","progress_percent":100,"risk_level":"LOW","issue_count":0,"is_overdue":false,"actual_at":"2026-05-04","result_summary":"首付款已完成","trace_id":"trace-cl-writeback-complete"}
                                 """))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.performance_summary.performance_status").value("COMPLETED"))
-                .andExpect(jsonPath("$.performance_summary.progress_percent").value(100))
-                .andExpect(jsonPath("$.performance_summary.risk_summary.risk_level").value("LOW"));
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error_code").value("PERFORMANCE_COMPLETION_BLOCKED"));
 
         mockMvc.perform(get("/api/contracts/{contract_id}", sample.contractId()))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.contract_master.contract_id").value(sample.contractId()))
-                .andExpect(jsonPath("$.contract_master.contract_status").value("PERFORMED"))
-                .andExpect(jsonPath("$.contract_master.performance_summary.performance_status").value("COMPLETED"))
-                .andExpect(jsonPath("$.contract_master.performance_summary.latest_milestone_code").value("PERFORMANCE_COMPLETED"))
-                .andExpect(jsonPath("$.lifecycle_summary.performance_summary.performance_status").value("COMPLETED"))
+                .andExpect(jsonPath("$.contract_master.contract_status").value("SIGNED"))
+                .andExpect(jsonPath("$.contract_master.performance_summary.performance_status").value("AT_RISK"))
+                .andExpect(jsonPath("$.contract_master.performance_summary.latest_milestone_code").value("PAYMENT_RECEIVED"))
+                .andExpect(jsonPath("$.lifecycle_summary.performance_summary.performance_status").value("AT_RISK"))
                 .andExpect(jsonPath("$.timeline_summary[?(@.event_type == 'PERFORMANCE_NODE_OVERDUE')]", org.hamcrest.Matchers.hasSize(1)))
-                .andExpect(jsonPath("$.timeline_summary[?(@.event_type == 'PERFORMANCE_COMPLETED')]", org.hamcrest.Matchers.hasSize(1)))
-                .andExpect(jsonPath("$.audit_record[?(@.event_type == 'PERFORMANCE_RISK_CHANGED')]", org.hamcrest.Matchers.hasSize(2)));
+                .andExpect(jsonPath("$.timeline_summary[?(@.event_type == 'PERFORMANCE_COMPLETED')]", org.hamcrest.Matchers.hasSize(0)))
+                .andExpect(jsonPath("$.audit_record[?(@.event_type == 'PERFORMANCE_RISK_CHANGED')]", org.hamcrest.Matchers.hasSize(1)));
     }
 
     @Test
@@ -210,12 +208,87 @@ class ContractLifecyclePerformanceTests {
         mockMvc.perform(patch("/api/contracts/{contract_id}/performance-nodes/{node_id}", sample.contractId(), nodeId)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("""
+                                {"node_status":"IN_PROGRESS","progress_percent":20,"risk_level":"CRITICAL","trace_id":"trace-cl-state-invalid-risk"}
+                                """))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.error_code").value("PERFORMANCE_RISK_LEVEL_INVALID"));
+
+        mockMvc.perform(patch("/api/contracts/{contract_id}/performance-nodes/{node_id}", sample.contractId(), nodeId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"node_status":"IN_PROGRESS","progress_percent":101,"risk_level":"LOW","trace_id":"trace-cl-state-invalid-progress"}
+                                """))
+                .andExpect(status().isUnprocessableEntity())
+                .andExpect(jsonPath("$.error_code").value("PERFORMANCE_PROGRESS_INVALID"));
+
+        mockMvc.perform(patch("/api/contracts/{contract_id}/performance-nodes/{node_id}", sample.contractId(), nodeId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
                                 {"node_status":"COMPLETED","progress_percent":100,"risk_level":"HIGH","issue_count":1,"actual_at":"2026-05-05","trace_id":"trace-cl-state-risk-block"}
                                 """))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.error_code").value("PERFORMANCE_COMPLETION_BLOCKED"));
 
-        assertRowCount("cl_performance_node", "performance_node_id = ? and node_status = ? and risk_level = ? and progress_percent = ?", 1, nodeId, "PENDING", "LOW", 0);
+        mockMvc.perform(patch("/api/contracts/{contract_id}/performance-nodes/{node_id}", sample.contractId(), nodeId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"node_status":"COMPLETED","progress_percent":99,"risk_level":"LOW","issue_count":0,"actual_at":"2026-05-05","trace_id":"trace-cl-state-progress-block"}
+                                """))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error_code").value("PERFORMANCE_COMPLETION_BLOCKED"));
+
+        mockMvc.perform(patch("/api/contracts/{contract_id}/performance-nodes/{node_id}", sample.contractId(), nodeId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"node_status":"COMPLETED","progress_percent":100,"risk_level":"LOW","issue_count":0,"actual_at":"2026-05-05","trace_id":"trace-cl-state-complete"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.node_status").value("COMPLETED"));
+
+        mockMvc.perform(patch("/api/contracts/{contract_id}/performance-nodes/{node_id}", sample.contractId(), nodeId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"node_status":"IN_PROGRESS","progress_percent":80,"risk_level":"LOW","trace_id":"trace-cl-state-regress"}
+                                """))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.error_code").value("PERFORMANCE_NODE_TRANSITION_INVALID"));
+
+        assertRowCount("cl_performance_node", "performance_node_id = ? and node_status = ? and risk_level = ? and progress_percent = ?", 1, nodeId, "COMPLETED", "LOW", 100);
+        assertRowCount("cl_performance_record", "performance_record_id = ? and performance_status = ?", 1, recordId, "COMPLETED");
+    }
+
+    @Test
+    void contractCannotWriteBackPerformedWhenAnyPerformanceNodeRemainsOpen() throws Exception {
+        LifecycleSample sample = createSignedContractSample("履约未完成节点阻断合同", "trace-cl-open-node");
+        String recordId = createPerformanceRecord(sample.contractId(), "trace-cl-open-node-record");
+        String completedNode = mockMvc.perform(post("/api/contracts/{contract_id}/performance-nodes", sample.contractId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"performance_record_id":"%s","node_type":"DELIVERY","node_name":"已完成节点","milestone_code":"DELIVERY_ACCEPTED","trace_id":"trace-cl-open-node-completed-create"}
+                                """.formatted(recordId)))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        mockMvc.perform(post("/api/contracts/{contract_id}/performance-nodes", sample.contractId())
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"performance_record_id":"%s","node_type":"PAYMENT","node_name":"未完成节点","milestone_code":"PAYMENT_RECEIVED","trace_id":"trace-cl-open-node-pending-create"}
+                                """.formatted(recordId)))
+                .andExpect(status().isCreated());
+
+        mockMvc.perform(patch("/api/contracts/{contract_id}/performance-nodes/{node_id}", sample.contractId(), jsonString(completedNode, "performance_node_id"))
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"node_status":"COMPLETED","progress_percent":100,"risk_level":"LOW","issue_count":0,"actual_at":"2026-05-05","trace_id":"trace-cl-open-node-complete"}
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.performance_summary.performance_status").value("IN_PROGRESS"))
+                .andExpect(jsonPath("$.performance_summary.open_node_count").value(1));
+
+        mockMvc.perform(get("/api/contracts/{contract_id}", sample.contractId()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.contract_master.contract_status").value("SIGNED"))
+                .andExpect(jsonPath("$.contract_master.performance_summary.performance_status").value("IN_PROGRESS"));
+
         assertRowCount("cl_performance_record", "performance_record_id = ? and performance_status = ?", 1, recordId, "IN_PROGRESS");
     }
 

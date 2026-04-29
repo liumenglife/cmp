@@ -1348,7 +1348,7 @@ class CoreChainService {
         if (stateRejection != null) {
             return stateRejection;
         }
-        boolean overdue = bool(request, "is_overdue", "OVERDUE".equals(nodeStatus));
+        boolean overdue = node.overdue() || bool(request, "is_overdue", "OVERDUE".equals(nodeStatus)) || "OVERDUE".equals(nodeStatus);
         PerformanceNodeState updated = new PerformanceNodeState(node.performanceNodeId(), node.performanceRecordId(), node.contractId(),
                 node.nodeType(), node.nodeName(), node.milestoneCode(), node.plannedAt(), node.dueAt(), text(request, "actual_at", node.actualAt()),
                 nodeStatus, progressPercent, riskLevel, issueCount,
@@ -1930,8 +1930,9 @@ class CoreChainService {
         }
         if ("COMPLETED".equals(nextStatus)) {
             String actualAt = text(request, "actual_at", current.actualAt());
+            boolean overdueFact = current.overdue() || "OVERDUE".equals(current.nodeStatus()) || bool(request, "is_overdue", false);
             boolean completionBlocked = progressPercent != 100 || !"LOW".equals(riskLevel) || issueCount != 0
-                    || bool(request, "is_overdue", false) || actualAt == null || actualAt.isBlank();
+                    || overdueFact || actualAt == null || actualAt.isBlank();
             if (completionBlocked) {
                 Map<String, Object> body = error("PERFORMANCE_COMPLETION_BLOCKED", "履约完成必须满足进度、风险、问题、逾期和实际完成时间校验");
                 body.put("required_progress_percent", 100);
