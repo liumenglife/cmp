@@ -142,6 +142,7 @@
 8. [第二批合同文档挂接闭环实现验证报告](./reports/verification/102-15-contract-document-binding-implementation.md)
 9. [第二批审批发起、审批承接与合同状态回写闭环验证报告](./reports/verification/102-16-approval-status-writeback-implementation.md)
 10. [第二批最小端到端闭环实现验证报告](./reports/verification/102-17-batch2-end-to-end-implementation.md)
+11. [第二批合同核心主链路质量收口报告](./reports/qa/102-18-batch2-release-gate-qa.md)
 
 ## 七、上游来源材料
 
