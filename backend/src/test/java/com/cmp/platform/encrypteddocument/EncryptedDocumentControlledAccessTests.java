@@ -122,6 +122,7 @@ class EncryptedDocumentControlledAccessTests {
                 .andExpect(status().isCreated())
                 .andReturn().getResponse().getContentAsString();
         String accessId = jsonString(approved, "decrypt_access_id");
+        String accessTicket = jsonString(approved, "access_ticket");
 
         mockMvc.perform(post("/api/encrypted-documents/access/{decrypt_access_id}/expire", accessId)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -131,7 +132,9 @@ class EncryptedDocumentControlledAccessTests {
                 .andExpect(jsonPath("$.audit_event.event_type").value("DECRYPT_ACCESS_EXPIRED"));
         mockMvc.perform(post("/api/encrypted-documents/access/{decrypt_access_id}/consume", accessId)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"trace_id\":\"trace-ed-consume-expired\"}"))
+                        .content("""
+                                {"access_ticket":"%s","trace_id":"trace-ed-consume-expired"}
+                                """.formatted(accessTicket)))
                 .andExpect(status().isGone())
                 .andExpect(jsonPath("$.error_code").value("ACCESS_TICKET_EXPIRED"));
 
@@ -142,6 +145,7 @@ class EncryptedDocumentControlledAccessTests {
                 .andExpect(status().isCreated())
                 .andReturn().getResponse().getContentAsString();
         String revocableAccessId = jsonString(revocable, "decrypt_access_id");
+        String revocableTicket = jsonString(revocable, "access_ticket");
         mockMvc.perform(post("/api/encrypted-documents/access/{decrypt_access_id}/revoke", revocableAccessId)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"trace_id\":\"trace-ed-revoke\"}"))
@@ -150,9 +154,92 @@ class EncryptedDocumentControlledAccessTests {
                 .andExpect(jsonPath("$.audit_event.event_type").value("DECRYPT_ACCESS_REVOKED"));
         mockMvc.perform(post("/api/encrypted-documents/access/{decrypt_access_id}/consume", revocableAccessId)
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"trace_id\":\"trace-ed-consume-revoked\"}"))
+                        .content("""
+                                {"access_ticket":"%s","trace_id":"trace-ed-consume-revoked"}
+                                """.formatted(revocableTicket)))
                 .andExpect(status().isForbidden())
                 .andExpect(jsonPath("$.error_code").value("ACCESS_TICKET_REVOKED"));
+    }
+
+    @Test
+    void controlledAccessConsumeRequiresMatchingTicketAndRejectsNaturallyExpiredTicketWithAudit() throws Exception {
+        ContractDocument sample = createContractDocument("票据消费校验合同", "trace-ed-ticket", false);
+
+        String approved = mockMvc.perform(post("/api/encrypted-documents/access")
+                        .header("X-CMP-Permissions", "CONTRACT_VIEW")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(accessRequest(sample, "PREVIEW", "USER", "u-ticket")))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        String accessId = jsonString(approved, "decrypt_access_id");
+
+        mockMvc.perform(post("/api/encrypted-documents/access/{decrypt_access_id}/consume", accessId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"trace_id\":\"trace-ed-ticket-missing\"}"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error_code").value("ACCESS_TICKET_INVALID"))
+                .andExpect(jsonPath("$.audit_event.event_type").value("DECRYPT_ACCESS_DENIED"));
+
+        String expired = mockMvc.perform(post("/api/encrypted-documents/access")
+                        .header("X-CMP-Permissions", "CONTRACT_VIEW")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"document_asset_id":"%s","document_version_id":"%s","access_scene":"PREVIEW","access_subject_type":"USER","access_subject_id":"u-ticket-expired","actor_department_id":"dept-ed","ttl_seconds":-1,"trace_id":"trace-ed-ticket-expired"}
+                                """.formatted(sample.documentAssetId(), sample.documentVersionId())))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        String expiredAccessId = jsonString(expired, "decrypt_access_id");
+        String expiredTicket = jsonString(expired, "access_ticket");
+
+        mockMvc.perform(post("/api/encrypted-documents/access/{decrypt_access_id}/consume", expiredAccessId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"access_ticket":"%s","trace_id":"trace-ed-ticket-natural-expired"}
+                                """.formatted(expiredTicket)))
+                .andExpect(status().isGone())
+                .andExpect(jsonPath("$.error_code").value("ACCESS_TICKET_EXPIRED"))
+                .andExpect(jsonPath("$.audit_event.event_type").value("DECRYPT_ACCESS_EXPIRED"));
+
+        mockMvc.perform(get("/api/document-center/assets/{document_asset_id}", sample.documentAssetId()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.audit_record[?(@.event_type == 'DECRYPT_ACCESS_DENIED' && @.trace_id == 'trace-ed-ticket-missing')]").exists())
+                .andExpect(jsonPath("$.audit_record[?(@.event_type == 'DECRYPT_ACCESS_EXPIRED' && @.trace_id == 'trace-ed-ticket-natural-expired')]").exists());
+    }
+
+    @Test
+    void controlledAccessRejectsUnknownSceneWithPersistentAudit() throws Exception {
+        ContractDocument sample = createContractDocument("未知场景拒绝合同", "trace-ed-unknown-scene", false);
+
+        mockMvc.perform(post("/api/encrypted-documents/access")
+                        .header("X-CMP-Permissions", "CONTRACT_VIEW")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(accessRequest(sample, "UNKNOWN_SCENE", "USER", "u-unknown-scene")))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error_code").value("CONTROLLED_ACCESS_SCENE_DENIED"))
+                .andExpect(jsonPath("$.audit_event.event_type").value("DECRYPT_ACCESS_DENIED"));
+
+        mockMvc.perform(get("/api/document-center/assets/{document_asset_id}", sample.documentAssetId()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.audit_record[?(@.event_type == 'DECRYPT_ACCESS_DENIED' && @.trace_id == 'trace-ed-access')]").exists());
+    }
+
+    @Test
+    void externalDownloadRejectionIsPersistedInDocumentAssetAuditRecord() throws Exception {
+        ContractDocument sample = createContractDocument("外放拒绝审计合同", "trace-ed-external-audit", false);
+
+        mockMvc.perform(post("/api/encrypted-documents/access")
+                        .header("X-CMP-Permissions", "CONTRACT_VIEW")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"document_asset_id":"%s","document_version_id":"%s","access_scene":"EXTERNAL_DOWNLOAD","access_subject_type":"USER","access_subject_id":"u-download","actor_department_id":"dept-ed","trace_id":"trace-ed-external-denied"}
+                                """.formatted(sample.documentAssetId(), sample.documentVersionId())))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.error_code").value("PLAINTEXT_EXPORT_NOT_ALLOWED"))
+                .andExpect(jsonPath("$.audit_event.event_type").value("DECRYPT_ACCESS_DENIED"));
+
+        mockMvc.perform(get("/api/document-center/assets/{document_asset_id}", sample.documentAssetId()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.audit_record[?(@.event_type == 'DECRYPT_ACCESS_DENIED' && @.trace_id == 'trace-ed-external-denied')]").exists());
     }
 
     private void assertControlledAccess(ContractDocument sample, String scene, String subjectType, String subjectId, String mode) throws Exception {
@@ -171,6 +258,22 @@ class EncryptedDocumentControlledAccessTests {
                 .andExpect(jsonPath("$.audit_event.event_type").value("DECRYPT_ACCESS_APPROVED"))
                 .andExpect(jsonPath("$.plaintext_download_url").doesNotExist())
                 .andExpect(jsonPath("$.export_artifact_ref").doesNotExist());
+
+        String body = mockMvc.perform(post("/api/encrypted-documents/access")
+                        .header("X-CMP-Permissions", "CONTRACT_VIEW")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content(accessRequest(sample, scene, subjectType, subjectId + "-consume")))
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        String accessId = jsonString(body, "decrypt_access_id");
+        String ticket = jsonString(body, "access_ticket");
+        mockMvc.perform(post("/api/encrypted-documents/access/{decrypt_access_id}/consume", accessId)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {"access_ticket":"%s","trace_id":"trace-ed-consume"}
+                                """.formatted(ticket)))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.consume_result").value("CONSUMED"));
     }
 
     private String accessRequest(ContractDocument sample, String scene, String subjectType, String subjectId) {

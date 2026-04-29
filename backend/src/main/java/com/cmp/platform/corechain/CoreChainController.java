@@ -922,8 +922,18 @@ class CoreChainService {
         EncryptionSecurityBindingState binding = requireEncryptionBindingByDocumentAsset(documentAssetId);
         if ("EXTERNAL_DOWNLOAD".equals(scene)) {
             Map<String, Object> body = error("PLAINTEXT_EXPORT_NOT_ALLOWED", "默认路径不允许平台外明文外放");
-            body.put("audit_event", encryptionAudit("DECRYPT_ACCESS_DENIED", "REJECTED", binding.securityBindingId(), documentAssetId, documentVersionId,
-                    asset.ownerId(), text(request, "access_subject_type", "USER"), text(request, "access_subject_id", null), text(request, "actor_department_id", null), null, traceId));
+            Map<String, Object> audit = encryptionAudit("DECRYPT_ACCESS_DENIED", "REJECTED", binding.securityBindingId(), documentAssetId, documentVersionId,
+                    asset.ownerId(), text(request, "access_subject_type", "USER"), text(request, "access_subject_id", null), text(request, "actor_department_id", null), null, traceId);
+            body.put("audit_event", audit);
+            asset.auditRecords().add(audit);
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(body);
+        }
+        if (!allowedAccessScene(scene)) {
+            Map<String, Object> audit = encryptionAudit("DECRYPT_ACCESS_DENIED", "REJECTED", binding.securityBindingId(), documentAssetId, documentVersionId,
+                    asset.ownerId(), text(request, "access_subject_type", "USER"), text(request, "access_subject_id", null), text(request, "actor_department_id", null), null, traceId);
+            Map<String, Object> body = error("CONTROLLED_ACCESS_SCENE_DENIED", "受控读取场景不在允许白名单内");
+            body.put("audit_event", audit);
+            asset.auditRecords().add(audit);
             return ResponseEntity.status(HttpStatus.FORBIDDEN).body(body);
         }
         if (permissions == null || !permissions.contains("CONTRACT_VIEW") || !"ENCRYPTED".equals(binding.encryptionStatus())
@@ -967,11 +977,26 @@ class CoreChainService {
 
     ResponseEntity<Map<String, Object>> consumeDecryptAccess(String decryptAccessId, Map<String, Object> request) {
         DecryptAccessState access = requireDecryptAccess(decryptAccessId);
+        if (!access.accessTicket().equals(text(request, "access_ticket", null))) {
+            Map<String, Object> audit = encryptionAudit("DECRYPT_ACCESS_DENIED", "REJECTED", access.securityBindingId(), access.documentAssetId(), access.documentVersionId(),
+                    access.contractId(), access.accessSubjectType(), access.accessSubjectId(), access.actorDepartmentId(), access.decryptAccessId(), text(request, "trace_id", null));
+            requireDocumentAsset(access.documentAssetId()).auditRecords().add(audit);
+            Map<String, Object> body = error("ACCESS_TICKET_INVALID", "访问票据无效");
+            body.put("audit_event", audit);
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(body);
+        }
         if ("EXPIRED".equals(access.accessResult())) {
             return ResponseEntity.status(HttpStatus.GONE).body(error("ACCESS_TICKET_EXPIRED", "访问票据已过期"));
         }
         if ("REVOKED".equals(access.accessResult())) {
             return ResponseEntity.status(HttpStatus.FORBIDDEN).body(error("ACCESS_TICKET_REVOKED", "访问票据已撤销"));
+        }
+        if (Instant.now().isAfter(Instant.parse(access.ticketExpiresAt()))) {
+            DecryptAccessState expired = updateDecryptAccessResult(access, "EXPIRED", "TICKET_EXPIRED");
+            Map<String, Object> audit = auditDecryptAccessLifecycle(expired, "DECRYPT_ACCESS_EXPIRED", text(request, "trace_id", null));
+            Map<String, Object> body = error("ACCESS_TICKET_EXPIRED", "访问票据已过期");
+            body.put("audit_event", audit);
+            return ResponseEntity.status(HttpStatus.GONE).body(body);
         }
         DecryptAccessState updated = new DecryptAccessState(access.decryptAccessId(), access.securityBindingId(), access.documentAssetId(),
                 access.documentVersionId(), access.contractId(), access.accessScene(), access.accessSubjectType(), access.accessSubjectId(),
@@ -1499,6 +1524,10 @@ class CoreChainService {
             case "SEARCH", "AI" -> "TEMP_TEXT";
             default -> "STREAM";
         };
+    }
+
+    private boolean allowedAccessScene(String scene) {
+        return List.of("PREVIEW", "SIGNATURE", "ARCHIVE", "SEARCH", "AI").contains(scene);
     }
 
     private Map<String, Object> decryptAccessBody(DecryptAccessState access, Map<String, Object> audit) {
