@@ -4,7 +4,7 @@
 
 - 第三批目标是完成依赖第二批主链路真相源的业务能力，包括电子签章、加密软件、合同生命周期三条主线。
 - 本批次必须围绕第二批已经形成的合同主档、文档版本链、审批摘要、任务、权限与审计能力运行，不复制合同、文档或审批主真相。
-- 当前分支为 `feature/encrypted-document-controlled-access`，隔离工作区为 `.worktrees/feature/encrypted-document-controlled-access`，第三批第四项编码只在该工作树推进。
+- 当前分支为 `feature/contract-lifecycle-change-termination-archive`，隔离工作区为 `.worktrees/feature/contract-lifecycle-change-termination-archive`，第三批第七项编码只在该工作树推进。
 
 ## 成功定义
 
@@ -24,9 +24,9 @@
 
 ## 当前阶段
 
-- 阶段：第三批第四项“加密软件自动加密与平台内受控访问”编码阶段。
-- 分支：`feature/encrypted-document-controlled-access`。
-- 隔离工作区：`.worktrees/feature/encrypted-document-controlled-access`。
+- 阶段：第三批第七项“合同生命周期变更、终止与归档能力”编码阶段。
+- 分支：`feature/contract-lifecycle-change-termination-archive`。
+- 隔离工作区：`.worktrees/feature/contract-lifecycle-change-termination-archive`。
 - 规格：[`102-cmp-implementation-execution-spec.md`](../superpowers/specs/102-cmp-implementation-execution-spec.md)。
 - 当前批次计划：[`102-03-batch-3-dependent-business-capabilities-implementation-plan.md`](../superpowers/plans/102-03-batch-3-dependent-business-capabilities-implementation-plan.md)。
 
@@ -39,7 +39,7 @@
 - [✓] 加密软件自动加密与平台内受控访问：已通过独立质量审查复审，没有问题。
 - [✓] 加密软件授权解密下载与高敏审计闭环：已通过独立质量审查复审，没有问题。
 - [✓] 合同生命周期履约基础能力：已通过独立质量审查复审，没有问题。
-- [ ] 合同生命周期变更、终止与归档能力。
+- [•] 合同生命周期变更、终止与归档能力。
 - [ ] 第三批跨模块综合验证。
 - [ ] 第三批整体质量收口。
 
@@ -65,7 +65,9 @@
 - [✓] 第三批第四项加密软件自动加密与平台内受控访问已完成实现、问题修复与独立质量审查复审，结论为通过，没有问题。
 - [✓] 第三批第五项加密软件授权解密下载与高敏审计闭环已完成实现、问题修复与独立质量审查复审，结论为通过，没有问题。
 - [✓] 第三批第六项合同生命周期履约基础能力已完成实现、问题修复与独立质量审查复审，结论为通过，没有问题。
-- [•] 准备派发第三批第七项：合同生命周期变更、终止与归档能力。
+- [•] 已创建第三批第七项分支与工作树：`feature/contract-lifecycle-change-termination-archive`。
+- [✓] 第三批第七项工作树基线验证已通过：`./scripts/verify-all.sh`。
+- [•] 准备派发实现子代理执行第三批第七项：合同生命周期变更、终止与归档能力。
 
 ## 已完成里程碑
 
@@ -89,7 +91,8 @@
 
 - [✓] `feature/contract-core-chain` 第二批合同核心主链路编码、整体质量收口、PR 合并与清理。
 - [✓] `feature/batch3-dependent-business-capabilities` 第三批前三项阶段性交付、PR 合并与清理。
-- [•] `feature/encrypted-document-controlled-access` 第三批加密软件能力、合同生命周期履约基础能力编码与第七项合同生命周期变更终止归档准备。
+- [✓] `feature/encrypted-document-controlled-access` 第三批加密软件能力、合同生命周期履约基础能力编码、PR 合并与清理。
+- [•] `feature/contract-lifecycle-change-termination-archive` 第三批第七项合同生命周期变更终止归档编码。
 
 ## 下一步唯一动作
 
@@ -100,4 +103,4 @@
 - 恢复时先读本文件、[`history.md`](./history.md)、[`decisions.md`](./decisions.md)。
 - 第一批底座主线历史、第二批合同核心主链路历史已迁入 [`history.md`](./history.md)，不要把已完成批次长列表写回 `current.md`。
 - 第三批正式执行依据为 [`102-cmp-implementation-execution-spec.md`](../superpowers/specs/102-cmp-implementation-execution-spec.md) 与 [`102-03-batch-3-dependent-business-capabilities-implementation-plan.md`](../superpowers/plans/102-03-batch-3-dependent-business-capabilities-implementation-plan.md)。
-- 第三批第四项当前工作树为 `.worktrees/feature/encrypted-document-controlled-access`，不要在主工作区直接编码。
+- 第三批第七项当前工作树为 `.worktrees/feature/contract-lifecycle-change-termination-archive`，不要在主工作区直接编码。

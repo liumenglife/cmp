@@ -203,3 +203,9 @@
 - 决策：第三批第四项“加密软件自动加密与平台内受控访问”使用 `feature/encrypted-document-controlled-access` 分支和 `.worktrees/feature/encrypted-document-controlled-access` 隔离工作区推进。
 - 原因：第三批前三项已经通过 PR 合并到 `main` 并完成旧工作树清理；第四项需要基于最新 `main` 启动，聚焦加密软件自动加密与平台内受控访问，避免继续沿用已完成阶段性交付分支。
 - 影响：第四项所有编码、验证、独立质量审查与提交均在该工作树内完成；主工作区保持 `main` 同步入口，不直接承载第四项生产代码修改。
+
+### 决策 33：第三批第七项使用独立工作树分支推进
+
+- 决策：第三批第七项“合同生命周期变更、终止与归档能力”使用 `feature/contract-lifecycle-change-termination-archive` 分支和 `.worktrees/feature/contract-lifecycle-change-termination-archive` 隔离工作区推进。
+- 原因：第三批第四至第六项已经通过 PR 合并到 `main` 并完成旧工作树清理；第七项需要基于最新 `main` 启动，聚焦合同生命周期变更、终止与归档能力，避免继续沿用已完成阶段性交付分支。
+- 影响：第七项所有编码、验证、独立质量审查与提交均在该工作树内完成；主工作区保持 `main` 同步入口，不直接承载第七项生产代码修改。
