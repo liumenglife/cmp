@@ -197,3 +197,9 @@
 - 决策：第三批依赖主链路真相源的业务能力编码使用 `feature/batch3-dependent-business-capabilities` 分支和 `.worktrees/feature/batch3-dependent-business-capabilities` 隔离工作区推进。
 - 原因：第二批合同核心主链路已合并到 `main` 并完成清理；第三批必须基于最新 `main` 启动，围绕第二批合同、文档、审批真相源扩展电子签章、加密软件和合同生命周期能力。
 - 影响：第三批所有编码、验证、独立质量审查与提交均在该工作树内完成；主工作区保持 `main` 同步入口，不直接承载第三批生产代码修改。
+
+### 决策 32：第三批第四项使用独立工作树分支推进
+
+- 决策：第三批第四项“加密软件自动加密与平台内受控访问”使用 `feature/encrypted-document-controlled-access` 分支和 `.worktrees/feature/encrypted-document-controlled-access` 隔离工作区推进。
+- 原因：第三批前三项已经通过 PR 合并到 `main` 并完成旧工作树清理；第四项需要基于最新 `main` 启动，聚焦加密软件自动加密与平台内受控访问，避免继续沿用已完成阶段性交付分支。
+- 影响：第四项所有编码、验证、独立质量审查与提交均在该工作树内完成；主工作区保持 `main` 同步入口，不直接承载第四项生产代码修改。
