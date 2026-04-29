@@ -135,6 +135,14 @@
 1. [查询引擎驱动薄运行内核与外围治理能力分析报告](./reports/Harness/%E6%9F%A5%E8%AF%A2%E5%BC%95%E6%93%8E%E9%A9%B1%E5%8A%A8%E8%96%84%E8%BF%90%E8%A1%8C%E5%86%85%E6%A0%B8%E4%B8%8E%E5%A4%96%E5%9B%B4%E6%B2%BB%E7%90%86%E8%83%BD%E5%8A%9B%E5%88%86%E6%9E%90%E6%8A%A5%E5%91%8A.md)
 2. [第一批跨主线联调实现验证报告](./reports/verification/102-09-batch1-cross-line-integration-implementation.md)
 3. [第一批底座主线质量审查与发布前门禁报告](./reports/qa/102-10-batch1-release-gate-qa.md)
+4. [第二批合同核心主链路接口冻结清单](./reports/verification/102-11-batch2-contract-interface-freeze.md)
+5. [第二批合同主档与编辑基础能力实现验证报告](./reports/verification/102-12-contract-core-master-edit-implementation.md)
+6. [第二批文档中心文档主档与版本链基础能力实现验证报告](./reports/verification/102-13-document-center-asset-version-implementation.md)
+7. [第二批流程引擎审批定义与平台运行时基础能力验证报告](./reports/verification/102-14-workflow-engine-runtime-implementation.md)
+8. [第二批合同文档挂接闭环实现验证报告](./reports/verification/102-15-contract-document-binding-implementation.md)
+9. [第二批审批发起、审批承接与合同状态回写闭环验证报告](./reports/verification/102-16-approval-status-writeback-implementation.md)
+10. [第二批最小端到端闭环实现验证报告](./reports/verification/102-17-batch2-end-to-end-implementation.md)
+11. [第二批合同核心主链路质量收口报告](./reports/qa/102-18-batch2-release-gate-qa.md)
 
 ## 七、上游来源材料
 
@@ -256,6 +264,13 @@
 | 过程报告 | [查询引擎驱动薄运行内核与外围治理能力分析报告](./reports/Harness/%E6%9F%A5%E8%AF%A2%E5%BC%95%E6%93%8E%E9%A9%B1%E5%8A%A8%E8%96%84%E8%BF%90%E8%A1%8C%E5%86%85%E6%A0%B8%E4%B8%8E%E5%A4%96%E5%9B%B4%E6%B2%BB%E7%90%86%E8%83%BD%E5%8A%9B%E5%88%86%E6%9E%90%E6%8A%A5%E5%91%8A.md) | 智能体操作系统查询引擎驱动薄运行内核与外围治理能力分析报告 | 已存在 |
 | 过程报告 | [第一批跨主线联调实现验证报告](./reports/verification/102-09-batch1-cross-line-integration-implementation.md) | 第一批底座三条主线最小跨主线联调验证报告 | 已存在 |
 | 过程报告 | [第一批底座主线质量审查与发布前门禁报告](./reports/qa/102-10-batch1-release-gate-qa.md) | 第一批底座三条主线质量审查与发布前门禁报告 | 已存在 |
+| 过程报告 | [第二批合同核心主链路接口冻结清单](./reports/verification/102-11-batch2-contract-interface-freeze.md) | 第二批合同、文档、审批共享字段与最小状态集合冻结清单 | 已存在 |
+| 过程报告 | [第二批合同主档与编辑基础能力实现验证报告](./reports/verification/102-12-contract-core-master-edit-implementation.md) | 第二批合同主档创建、编辑、台账与详情基础能力实现验证报告 | 已存在 |
+| 过程报告 | [第二批文档中心文档主档与版本链基础能力实现验证报告](./reports/verification/102-13-document-center-asset-version-implementation.md) | 第二批文档中心文档主档创建、合同绑定、版本追加与主版本切换实现验证报告 | 已存在 |
+| 过程报告 | [第二批流程引擎审批定义与平台运行时基础能力验证报告](./reports/verification/102-14-workflow-engine-runtime-implementation.md) | 第二批流程定义发布、组织绑定校验、平台审批实例与任务推进实现验证报告 | 已存在 |
+| 过程报告 | [第二批合同文档挂接闭环实现验证报告](./reports/verification/102-15-contract-document-binding-implementation.md) | 第二批合同主正文、附件挂接、文档摘要回写与主版本切换实现验证报告 | 已存在 |
+| 过程报告 | [第二批审批发起、审批承接与合同状态回写闭环验证报告](./reports/verification/102-16-approval-status-writeback-implementation.md) | 第二批统一审批入口、OA 主路径桥接、平台承接路径、合同状态回写与补偿任务实现验证报告 | 已存在 |
+| 过程报告 | [第二批最小端到端闭环实现验证报告](./reports/verification/102-17-batch2-end-to-end-implementation.md) | 第二批合同创建、编辑、文档挂接、审批通过、状态回写、详情查看与关键异常闭环验证报告 | 已存在 |
 | 上游来源材料 | [docs/specifications/湖南星邦智能装备股份有限公司合同管理平台招标技术要求.pdf](./specifications/%E6%B9%96%E5%8D%97%E6%98%9F%E9%82%A6%E6%99%BA%E8%83%BD%E8%A3%85%E5%A4%87%E8%82%A1%E4%BB%BD%E6%9C%89%E9%99%90%E5%85%AC%E5%8F%B8%E5%90%88%E5%90%8C%E7%AE%A1%E7%90%86%E5%B9%B3%E5%8F%B0%E6%8B%9B%E6%A0%87%E6%8A%80%E6%9C%AF%E8%A6%81%E6%B1%82.pdf) | 正式上游来源材料 | 已存在 |
 
 ## 十、维护规则

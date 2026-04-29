@@ -100,3 +100,26 @@
 
 - 第一批底座主线不再写入 `current.md`。
 - 如需恢复第一批执行背景，读取 [`102-01-batch-1-foundations-implementation-plan.md`](../superpowers/plans/102-01-batch-1-foundations-implementation-plan.md)、各验证报告与发布前门禁报告。
+
+## 2026-04-28 第二批合同核心主链路批次归档
+
+### 归档原因
+
+- 第二批合同核心主链路已经完成全部实现、独立 QA 与整体质量收口。
+- `contract-core`、`document-center`、`workflow-engine` 已形成合同创建、编辑、文档挂接、审批承接与状态回写的核心闭环。
+
+### 已归档任务批次
+
+- [✓] 批次启动门禁与接口冻结：已按 TDD 完成，经历独立 QA、修复与复审，提交 `0554cdf`，验证报告为 [`102-11-batch2-contract-interface-freeze.md`](../reports/verification/102-11-batch2-contract-interface-freeze.md)。
+- [✓] `contract-core` 合同主档与编辑基础能力：已按 TDD 完成，独立 QA 结论为通过，没有问题，提交 `f427682`，验证报告为 [`102-12-contract-core-master-edit-implementation.md`](../reports/verification/102-12-contract-core-master-edit-implementation.md)。
+- [✓] `document-center` 文档主档与版本链基础能力：已按 TDD 完成，独立 QA 结论为通过，没有问题，提交 `02abc87`，验证报告为 [`102-13-document-center-asset-version-implementation.md`](../reports/verification/102-13-document-center-asset-version-implementation.md)。
+- [✓] `workflow-engine` 审批定义与平台运行时基础能力：已按 TDD 完成，独立 QA 结论为通过，没有问题，提交 `5100490`，验证报告为 [`102-14-workflow-engine-runtime-implementation.md`](../reports/verification/102-14-workflow-engine-runtime-implementation.md)。
+- [✓] 合同文档挂接闭环：已按 TDD 完成，独立 QA 结论为通过，没有问题，提交 `4632600`，验证报告为 [`102-15-contract-document-binding-implementation.md`](../reports/verification/102-15-contract-document-binding-implementation.md)。
+- [✓] 审批发起、审批承接与合同状态回写闭环：已按 TDD 完成，独立 QA 结论为通过，没有问题，提交 `7a7c4df`，验证报告为 [`102-16-approval-status-writeback-implementation.md`](../reports/verification/102-16-approval-status-writeback-implementation.md)。
+- [✓] 第二批最小端到端闭环验证：已按 TDD 完成，独立 QA 结论为通过，没有问题，提交 `79523ff`，验证报告为 [`102-17-batch2-end-to-end-implementation.md`](../reports/verification/102-17-batch2-end-to-end-implementation.md)。
+- [✓] 第二批整体质量收口：独立 QA 结论为通过，没有问题，报告为 [`102-18-batch2-release-gate-qa.md`](../reports/qa/102-18-batch2-release-gate-qa.md)。
+
+### 迁移说明
+
+- 第二批合同核心主链路不再作为未完成任务处理。
+- 后续第三批启动前，应基于第二批合并后的最新 `main` 创建新的隔离工作区和分支。
