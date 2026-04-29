@@ -3,9 +3,12 @@ package com.cmp.platform.corechain;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -113,9 +116,58 @@ class CoreChainController {
 
     @GetMapping("/api/intelligent-applications/ocr/results")
     Map<String, Object> ocrResults(@RequestParam(required = false) String document_asset_id,
-                                   @RequestParam(required = false) String document_version_id,
-                                   @RequestParam(required = false, defaultValue = "false") boolean default_only) {
+                                    @RequestParam(required = false) String document_version_id,
+                                    @RequestParam(required = false, defaultValue = "false") boolean default_only) {
         return service.ocrResults(document_asset_id, document_version_id, default_only);
+    }
+
+    @PostMapping("/api/intelligent-applications/search/sources/refresh")
+    ResponseEntity<Map<String, Object>> refreshSearchSources(@RequestHeader(value = "X-CMP-Permissions", required = false) String permissions,
+                                                             @RequestBody Map<String, Object> request) {
+        return service.refreshSearchSources(permissions, request);
+    }
+
+    @PostMapping("/api/intelligent-applications/search/query")
+    ResponseEntity<Map<String, Object>> search(@RequestHeader(value = "X-CMP-Permissions", required = false) String permissions,
+                                               @RequestHeader(value = "X-CMP-Org-Scope", required = false) String orgScope,
+                                               @RequestHeader(value = "X-CMP-Deny-Objects", required = false) String deniedObjects,
+                                               @RequestBody Map<String, Object> request) {
+        return service.search(permissions, orgScope, deniedObjects, request);
+    }
+
+    @GetMapping("/api/intelligent-applications/search/snapshots/{resultSetId}")
+    ResponseEntity<Map<String, Object>> searchSnapshot(@PathVariable String resultSetId,
+                                                       @RequestHeader(value = "X-CMP-Permissions", required = false) String permissions,
+                                                       @RequestHeader(value = "X-CMP-Org-Scope", required = false) String orgScope) {
+        return service.searchSnapshot(resultSetId, permissions, orgScope);
+    }
+
+    @PostMapping("/api/intelligent-applications/search/snapshots/{resultSetId}/export")
+    ResponseEntity<Map<String, Object>> exportSearchSnapshot(@PathVariable String resultSetId,
+                                                             @RequestHeader(value = "X-CMP-Permissions", required = false) String permissions,
+                                                             @RequestHeader(value = "X-CMP-Org-Scope", required = false) String orgScope,
+                                                             @RequestBody(required = false) Map<String, Object> request) {
+        return service.exportSearchSnapshot(resultSetId, permissions, orgScope, request == null ? Map.of() : request);
+    }
+
+    @PostMapping("/api/intelligent-applications/search/snapshots/{resultSetId}/replay")
+    ResponseEntity<Map<String, Object>> replaySearchSnapshot(@PathVariable String resultSetId,
+                                                             @RequestHeader(value = "X-CMP-Permissions", required = false) String permissions,
+                                                             @RequestHeader(value = "X-CMP-Org-Scope", required = false) String orgScope,
+                                                             @RequestBody(required = false) Map<String, Object> request) {
+        return service.replaySearchSnapshot(resultSetId, permissions, orgScope, request == null ? Map.of() : request);
+    }
+
+    @PostMapping("/api/intelligent-applications/search/rebuilds")
+    ResponseEntity<Map<String, Object>> rebuildSearchIndex(@RequestHeader(value = "X-CMP-Permissions", required = false) String permissions,
+                                                           @RequestBody Map<String, Object> request) {
+        return service.rebuildSearchIndex(permissions, request);
+    }
+
+    @PostMapping("/api/intelligent-applications/search/permissions/changed")
+    ResponseEntity<Map<String, Object>> expireSearchSnapshotsForPermissionChange(@RequestHeader(value = "X-CMP-Permissions", required = false) String permissions,
+                                                                                 @RequestBody Map<String, Object> request) {
+        return service.expireSearchSnapshotsForPermissionChange(permissions, request);
     }
 
     @GetMapping("/api/document-center/assets")
@@ -451,6 +503,10 @@ class CoreChainService {
     private final Map<String, String> currentOcrResultByDocumentVersion = new ConcurrentHashMap<>();
     private final Map<String, List<Map<String, Object>>> ocrAuditEvents = new ConcurrentHashMap<>();
     private final Map<String, List<Map<String, Object>>> ocrRetryFacts = new ConcurrentHashMap<>();
+    private final Map<String, SearchSourceEnvelopeState> searchSourceEnvelopes = new ConcurrentHashMap<>();
+    private final Map<String, SearchDocumentState> searchDocuments = new ConcurrentHashMap<>();
+    private final Map<String, SearchResultSetState> searchResultSets = new ConcurrentHashMap<>();
+    private int activeSearchGeneration = 1;
     private final List<Map<String, Object>> lifecycleTimelineEvents = new ArrayList<>();
     private final List<Map<String, Object>> lifecycleAuditEvents = new ArrayList<>();
     private final JdbcTemplate jdbcTemplate;
@@ -707,6 +763,494 @@ class CoreChainService {
         body.put("items", items);
         body.put("total", items.size());
         return body;
+    }
+
+    ResponseEntity<Map<String, Object>> refreshSearchSources(String permissions, Map<String, Object> request) {
+        if (permissions == null || !permissions.contains("SEARCH_INDEX_MANAGE")) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(error("SEARCH_INDEX_PERMISSION_DENIED", "缺少搜索索引管理权限"));
+        }
+        List<String> sourceTypes = listStrings(request.get("source_types"));
+        if (sourceTypes.isEmpty()) {
+            sourceTypes = List.of("CONTRACT", "DOCUMENT", "OCR", "CLAUSE");
+        }
+        List<SearchSourceEnvelopeState> envelopes = new ArrayList<>();
+        for (String sourceType : sourceTypes) {
+            SearchSourceEnvelopeState envelope = buildSearchSourceEnvelope(sourceType, request);
+            envelopes.add(envelope);
+            searchSourceEnvelopes.put(envelope.envelopeId(), envelope);
+            persistSearchSourceEnvelope(envelope);
+            if ("DOCUMENT".equals(envelope.docType())) {
+                markOldDocumentVersionsStale(envelope.documentAssetId(), envelope.documentVersionId());
+            }
+            SearchDocumentState document = mapSearchDocument(envelope, activeSearchGeneration);
+            searchDocuments.put(searchDocumentKey(document.searchDocId(), document.rebuildGeneration()), document);
+            persistSearchDocument(document);
+        }
+        createPlatformJob("IA_SEARCH_REINDEX", "intelligent-applications", "intelligent-applications", "SEARCH_SOURCE",
+                text(request, "contract_id", null), "CONTRACT", text(request, "contract_id", null), text(request, "trace_id", null), "ia-search-reindex-runner");
+        appendSearchAudit("SEARCH_SOURCE_REFRESHED", text(request, "actor_id", "system"), text(request, "contract_id", null), null, "SUCCESS", text(request, "trace_id", null));
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("refresh_status", "ACCEPTED");
+        body.put("accepted_count", envelopes.size());
+        body.put("source_envelopes", envelopes.stream().map(this::searchSourceEnvelopeBody).toList());
+        body.put("search_documents", envelopes.stream()
+                .map(envelope -> searchDocuments.get(searchDocumentKey(searchDocId(envelope.docType(), envelope.sourceObjectId(), envelope.sourceVersionDigest()), activeSearchGeneration)))
+                .map(document -> searchDocumentBody(document, false))
+                .toList());
+        return ResponseEntity.status(HttpStatus.ACCEPTED).body(body);
+    }
+
+    ResponseEntity<Map<String, Object>> search(String permissions, String orgScope, String deniedObjects, Map<String, Object> request) {
+        if (permissions == null || !permissions.contains("SEARCH_QUERY") || !permissions.contains("CONTRACT_VIEW")) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(error("SEARCH_QUERY_PERMISSION_DENIED", "缺少搜索查询权限"));
+        }
+        boolean degraded = bool(request, "simulate_engine_unavailable", false);
+        List<SearchDocumentState> allCandidates = searchCandidates(request, orgScope, deniedObjects, degraded);
+        int page = intValue(request, "page", 1);
+        int pageSize = intValue(request, "page_size", 10);
+        List<SearchDocumentState> candidates = allCandidates.stream()
+                .skip(Math.max(0, page - 1) * (long) pageSize)
+                .limit(pageSize)
+                .toList();
+        String resultSetId = "search-rs-" + UUID.randomUUID();
+        String actorId = text(request, "actor_id", "system");
+        String permissionDigest = permissionDigest(permissions, orgScope);
+        List<Map<String, Object>> views = candidates.stream().map(doc -> searchResultView(doc, permissions)).toList();
+        String stableOrderDigest = "sha256:" + Integer.toHexString(views.stream().map(item -> text(item, "search_doc_id", "")).toList().toString().hashCode());
+        Map<String, Object> facets = facets(allCandidates);
+        SearchResultSetState resultSet = new SearchResultSetState(resultSetId, "READY", json(request), json(views), json(facets), allCandidates.size(),
+                "DEFAULT_STABLE", Instant.now().plusSeconds(900).toString(), false, permissionDigest, actorId, activeSearchGeneration, stableOrderDigest, Instant.now().toString());
+        searchResultSets.put(resultSetId, resultSet);
+        persistSearchResultSet(resultSet);
+        appendSearchAudit(degraded ? "SEARCH_DEGRADED_QUERY" : "SEARCH_QUERY_SNAPSHOT_CREATED", actorId, null, resultSetId, "SUCCESS", text(request, "trace_id", null));
+
+        Map<String, Object> body = searchResultSetBody(resultSet, views, facets);
+        body.put("degraded_query", degraded);
+        if (degraded) {
+            body.put("degrade_reason", "SEARCH_ENGINE_UNAVAILABLE");
+        }
+        return ResponseEntity.ok(body);
+    }
+
+    ResponseEntity<Map<String, Object>> searchSnapshot(String resultSetId, String permissions, String orgScope) {
+        if (!hasSearchQueryPermission(permissions)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(error("SEARCH_QUERY_PERMISSION_DENIED", "缺少搜索查询权限"));
+        }
+        SearchResultSetState resultSet = requireSearchResultSet(resultSetId);
+        if (!"READY".equals(resultSet.resultStatus())) {
+            return ResponseEntity.status(HttpStatus.GONE).body(error("SEARCH_SNAPSHOT_EXPIRED", "搜索快照已失效"));
+        }
+        if (isSearchSnapshotExpired(resultSet)) {
+            expireSearchResultSet(resultSet);
+            return ResponseEntity.status(HttpStatus.GONE).body(error("SEARCH_SNAPSHOT_EXPIRED", "搜索快照已过期"));
+        }
+        if (!resultSet.permissionScopeDigest().equals(permissionDigest(permissions, orgScope))) {
+            expireSearchResultSet(resultSet);
+            return ResponseEntity.status(HttpStatus.GONE).body(error("SEARCH_SNAPSHOT_EXPIRED", "搜索快照权限语义已失效"));
+        }
+        Map<String, Object> body = searchResultSetBody(resultSet, listMapsFromJson(resultSet.itemPayloadJson()), mapFromJson(resultSet.facetPayloadJson()));
+        body.put("snapshot_status", resultSet.resultStatus());
+        return ResponseEntity.ok(body);
+    }
+
+    ResponseEntity<Map<String, Object>> exportSearchSnapshot(String resultSetId, String permissions, String orgScope, Map<String, Object> request) {
+        if (permissions == null || !permissions.contains("SEARCH_EXPORT")) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(error("SEARCH_EXPORT_PERMISSION_DENIED", "缺少搜索导出权限"));
+        }
+        ResponseEntity<Map<String, Object>> snapshot = searchSnapshot(resultSetId, permissions, orgScope);
+        if (!snapshot.getStatusCode().is2xxSuccessful()) {
+            return snapshot;
+        }
+        String exportId = "search-export-" + UUID.randomUUID();
+        String artifactRef = "search-export://" + exportId;
+        jdbcTemplate.update("""
+                insert into ia_search_export_record
+                (export_id, result_set_id, export_profile_code, export_status, artifact_ref, item_count, permission_scope_digest, trace_id, created_at)
+                values (?, ?, ?, 'READY', ?, ?, ?, ?, ?)
+                """, exportId, resultSetId, text(request, "export_profile_code", "DEFAULT"), artifactRef,
+                intValue(snapshot.getBody(), "total", 0), permissionDigest(permissions, orgScope), text(request, "trace_id", null), Timestamp.from(Instant.now()));
+        appendSearchAudit("SEARCH_EXPORT_CREATED", text(request, "actor_id", "system"), null, resultSetId, "SUCCESS", text(request, "trace_id", null));
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("export_id", exportId);
+        body.put("result_set_id", resultSetId);
+        body.put("export_status", "READY");
+        body.put("artifact_ref", artifactRef);
+        body.put("items", exportItems(listMaps(snapshot.getBody().get("items"))));
+        return ResponseEntity.status(HttpStatus.CREATED).body(body);
+    }
+
+    ResponseEntity<Map<String, Object>> replaySearchSnapshot(String resultSetId, String permissions, String orgScope, Map<String, Object> request) {
+        ResponseEntity<Map<String, Object>> snapshot = searchSnapshot(resultSetId, permissions, orgScope);
+        if (!snapshot.getStatusCode().is2xxSuccessful()) {
+            return snapshot;
+        }
+        Map<String, Object> body = new LinkedHashMap<>(snapshot.getBody());
+        body.put("replay_source", "SNAPSHOT");
+        appendSearchAudit("SEARCH_SNAPSHOT_REPLAYED", text(request, "actor_id", "system"), null, resultSetId, "SUCCESS", text(request, "trace_id", null));
+        return ResponseEntity.ok(body);
+    }
+
+    ResponseEntity<Map<String, Object>> rebuildSearchIndex(String permissions, Map<String, Object> request) {
+        if (permissions == null || !permissions.contains("SEARCH_INDEX_MANAGE")) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(error("SEARCH_INDEX_PERMISSION_DENIED", "缺少搜索索引管理权限"));
+        }
+        int oldGeneration = activeSearchGeneration;
+        int nextGeneration = oldGeneration + 1;
+        boolean switchAlias = bool(request, "switch_alias", true);
+        String scopedContractId = text(map(request.get("scope")), "contract_id", null);
+        int backfilled = 0;
+        for (SearchDocumentState document : new ArrayList<>(searchDocuments.values())) {
+            if (document.rebuildGeneration() == oldGeneration && "ACTIVE".equals(document.exposureStatus()) && (scopedContractId == null || scopedContractId.equals(document.contractId()))) {
+                SearchDocumentState rebuilt = new SearchDocumentState(document.searchDocId(), document.docType(), document.sourceObjectId(), document.sourceAnchorJson(),
+                        document.sourceVersionDigest(), document.contractId(), document.documentAssetId(), document.documentVersionId(), document.semanticRefId(), document.titleText(),
+                        document.bodyText(), document.keywordText(), document.filterPayloadJson(), document.sortPayloadJson(), document.localeCode(), document.visibilityScopeJson(),
+                        "ACTIVE", nextGeneration, Instant.now().toString());
+                searchDocuments.put(searchDocumentKey(rebuilt.searchDocId(), rebuilt.rebuildGeneration()), rebuilt);
+                persistSearchDocument(rebuilt);
+                backfilled++;
+            }
+        }
+        if (switchAlias) {
+            activeSearchGeneration = nextGeneration;
+        }
+        String rebuildStatus = switchAlias ? "SWITCHED" : "BUILT";
+        String aliasStatus = switchAlias ? "ACTIVE" : "STAGED";
+        String rebuildId = "search-rebuild-" + UUID.randomUUID();
+        jdbcTemplate.update("""
+                insert into ia_search_rebuild_job
+                (rebuild_job_id, rebuild_type, rebuild_status, scope_json, old_generation, new_generation, backfilled_count, alias_status, trace_id, created_at, completed_at)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, rebuildId, text(request, "rebuild_type", "FULL"), rebuildStatus, json(request.get("scope")), oldGeneration, nextGeneration,
+                backfilled, aliasStatus, text(request, "trace_id", null), Timestamp.from(Instant.now()), Timestamp.from(Instant.now()));
+        appendSearchAudit(switchAlias ? "SEARCH_REBUILD_SWITCHED" : "SEARCH_REBUILD_BUILT", text(request, "actor_id", "system"), null, null, "SUCCESS", text(request, "trace_id", null));
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("rebuild_job_id", rebuildId);
+        body.put("rebuild_type", text(request, "rebuild_type", "FULL"));
+        body.put("rebuild_status", rebuildStatus);
+        body.put("old_generation", oldGeneration);
+        body.put("new_generation", nextGeneration);
+        body.put("backfill_result", Map.of("backfilled_count", backfilled));
+        body.put("alias_switch", Map.of("alias_status", aliasStatus, "active_generation", activeSearchGeneration, "candidate_generation", nextGeneration));
+        return ResponseEntity.status(HttpStatus.ACCEPTED).body(body);
+    }
+
+    ResponseEntity<Map<String, Object>> expireSearchSnapshotsForPermissionChange(String permissions, Map<String, Object> request) {
+        if (permissions == null || !permissions.contains("SEARCH_INDEX_MANAGE")) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(error("SEARCH_INDEX_PERMISSION_DENIED", "缺少搜索索引管理权限"));
+        }
+        String actorId = text(request, "actor_id", null);
+        int expired = 0;
+        for (SearchResultSetState resultSet : new ArrayList<>(searchResultSets.values())) {
+            if (actorId == null || actorId.equals(resultSet.actorId())) {
+                expireSearchResultSet(resultSet);
+                expired++;
+            }
+        }
+        appendSearchAudit("SEARCH_PERMISSION_SNAPSHOT_EXPIRED", actorId, null, null, "SUCCESS", text(request, "trace_id", null));
+        return ResponseEntity.ok(Map.of("expired_snapshot_count", expired));
+    }
+
+    private SearchSourceEnvelopeState buildSearchSourceEnvelope(String docType, Map<String, Object> request) {
+        String contractId = text(request, "contract_id", null);
+        String documentVersionId = text(request, "document_version_id", null);
+        String ocrResultId = text(request, "ocr_result_aggregate_id", null);
+        ContractState contract = contractId == null ? null : requireContract(contractId);
+        return switch (docType) {
+            case "CONTRACT" -> contractEnvelope(requireContract(contractId));
+            case "DOCUMENT" -> documentEnvelope(requireDocumentVersion(documentVersionId));
+            case "OCR" -> ocrEnvelope(requireOcrResult(ocrResultId));
+            case "CLAUSE" -> clauseEnvelope(contract == null ? requireContract(contractId) : contract);
+            default -> throw new IllegalArgumentException("不支持的搜索来源类型: " + docType);
+        };
+    }
+
+    private SearchSourceEnvelopeState contractEnvelope(ContractState contract) {
+        String digest = versionDigest("CONTRACT", contract.contractId(), contract.contractName(), contract.contractStatus());
+        return new SearchSourceEnvelopeState("search-env-" + UUID.randomUUID(), "CONTRACT", contract.contractId(), digest, contract.contractId(), null, null, null,
+                json(Map.of("contract_id", contract.contractId(), "target", "CONTRACT_DETAIL")), contract.contractName(), contract.contractName() + " " + contract.contractNo(),
+                contract.contractNo() + " " + classificationMasterLink(contract.contractId()).get("category_path"), contract.ownerOrgUnitId(), "zh-CN", "ADMITTED", Instant.now().toString());
+    }
+
+    private SearchSourceEnvelopeState documentEnvelope(DocumentVersionState version) {
+        DocumentAssetState asset = requireDocumentAsset(version.documentAssetId());
+        ContractState contract = requireContract(asset.ownerId());
+        String digest = versionDigest("DOCUMENT", version.documentVersionId(), asset.documentTitle(), version.versionLabel());
+        return new SearchSourceEnvelopeState("search-env-" + UUID.randomUUID(), "DOCUMENT", version.documentVersionId(), digest, asset.ownerId(), asset.documentAssetId(), version.documentVersionId(), null,
+                json(Map.of("contract_id", asset.ownerId(), "document_asset_id", asset.documentAssetId(), "document_version_id", version.documentVersionId())), asset.documentTitle(),
+                asset.documentTitle() + " " + contract.contractName(), asset.documentRole() + " " + version.versionLabel(), contract.ownerOrgUnitId(), "zh-CN", "ADMITTED", Instant.now().toString());
+    }
+
+    private SearchSourceEnvelopeState ocrEnvelope(OcrResultState result) {
+        ContractState contract = requireContract(result.contractId());
+        String text = result.textLayer().stream().map(page -> text(page, "text", "")).reduce((left, right) -> left + " " + right).orElse("");
+        String digest = versionDigest("OCR", result.ocrResultAggregateId(), result.contentFingerprint(), result.resultStatus());
+        return new SearchSourceEnvelopeState("search-env-" + UUID.randomUUID(), "OCR", result.ocrResultAggregateId(), digest, result.contractId(), result.documentAssetId(), result.documentVersionId(), null,
+                json(Map.of("contract_id", result.contractId(), "document_version_id", result.documentVersionId(), "ocr_result_aggregate_id", result.ocrResultAggregateId(), "page_no", 1)),
+                contract.contractName() + " OCR", text, "OCR " + result.qualityProfileCode(), contract.ownerOrgUnitId(), "zh-CN", result.defaultConsumable() ? "ADMITTED" : "SKIPPED", Instant.now().toString());
+    }
+
+    private SearchSourceEnvelopeState clauseEnvelope(ContractState contract) {
+        String clauseVersionId = "clause-ver-" + text(contractSemanticReferenceRefs.getOrDefault(contract.contractId(), Map.of()), "clause_library_code", "clause-lib-default");
+        String body = contract.contractName() + " 标准条款 风险标签 适用范围";
+        String digest = versionDigest("CLAUSE", clauseVersionId, body, "ACTIVE");
+        return new SearchSourceEnvelopeState("search-env-" + UUID.randomUUID(), "CLAUSE", clauseVersionId, digest, contract.contractId(), null, null, clauseVersionId,
+                json(Map.of("contract_id", contract.contractId(), "clause_version_id", clauseVersionId)), "标准条款", body, "条款 风险 语义", contract.ownerOrgUnitId(), "zh-CN", "ADMITTED", Instant.now().toString());
+    }
+
+    private SearchDocumentState mapSearchDocument(SearchSourceEnvelopeState envelope, int generation) {
+        String id = searchDocId(envelope.docType(), envelope.sourceObjectId(), envelope.sourceVersionDigest());
+        String filter = json(Map.of("owner_org_unit_id", envelope.ownerOrgUnitId(), "doc_type", envelope.docType(), "contract_id", envelope.contractId()));
+        String sort = json(Map.of("updated_at", Instant.now().toString(), "score", 1));
+        String visibility = json(Map.of("owner_org_unit_id", envelope.ownerOrgUnitId(), "contract_id", envelope.contractId()));
+        return new SearchDocumentState(id, envelope.docType(), envelope.sourceObjectId(), envelope.sourceAnchorJson(), envelope.sourceVersionDigest(), envelope.contractId(),
+                envelope.documentAssetId(), envelope.documentVersionId(), envelope.semanticRefId(), envelope.titleText(), envelope.bodyText(), envelope.keywordText(),
+                filter, sort, envelope.localeCode(), visibility, "ADMITTED".equals(envelope.admissionStatus()) ? "ACTIVE" : "HIDDEN", generation, Instant.now().toString());
+    }
+
+    private List<SearchDocumentState> searchCandidates(Map<String, Object> request, String orgScope, String deniedObjects, boolean degraded) {
+        String query = text(request, "query_text", "").toLowerCase();
+        String matchMode = text(request, "match_mode", "FUZZY");
+        Set<String> scopes = new HashSet<>(listStrings(request.get("scope_list")));
+        if (scopes.isEmpty()) {
+            scopes.addAll(List.of("CONTRACT", "DOCUMENT", "OCR", "CLAUSE"));
+        }
+        Set<String> denied = Set.of(deniedObjects == null || deniedObjects.isBlank() ? new String[0] : deniedObjects.split(","));
+        Map<String, Object> filter = map(request.get("filter_payload"));
+        List<SearchDocumentState> matched = defaultSearchDocuments().stream()
+                .filter(document -> scopes.contains(document.docType()))
+                .filter(document -> !degraded || "CONTRACT".equals(document.docType()))
+                .filter(document -> orgScope == null || orgScope.isBlank() || orgScope.equals(ownerOrg(document)))
+                .filter(document -> !denied.contains(document.contractId()))
+                .filter(document -> matchesSearchFilter(document, filter))
+                .filter(document -> matchesSearchQuery(document, query, matchMode))
+                .sorted(searchComparator(text(request, "sort_by", "updated_at"), text(request, "sort_order", "desc")))
+                .toList();
+        return matched;
+    }
+
+    private List<SearchDocumentState> defaultSearchDocuments() {
+        Map<String, SearchDocumentState> latestByDocId = new LinkedHashMap<>();
+        for (SearchDocumentState document : searchDocuments.values()) {
+            if (!"ACTIVE".equals(document.exposureStatus()) || document.rebuildGeneration() > activeSearchGeneration) {
+                continue;
+            }
+            SearchDocumentState existing = latestByDocId.get(document.searchDocId());
+            if (existing == null || document.rebuildGeneration() > existing.rebuildGeneration()) {
+                latestByDocId.put(document.searchDocId(), document);
+            }
+        }
+        return new ArrayList<>(latestByDocId.values());
+    }
+
+    private boolean matchesSearchQuery(SearchDocumentState document, String query, String matchMode) {
+        if (query.isBlank()) {
+            return true;
+        }
+        if ("EXACT".equals(matchMode)) {
+            return document.titleText().equalsIgnoreCase(query)
+                    || document.sourceObjectId().equalsIgnoreCase(query)
+                    || document.keywordText().equalsIgnoreCase(query);
+        }
+        return (document.titleText() + " " + document.bodyText() + " " + document.keywordText()).toLowerCase().contains(query);
+    }
+
+    private boolean matchesSearchFilter(SearchDocumentState document, Map<String, Object> filter) {
+        return text(filter, "owner_org_unit_id", ownerOrg(document)).equals(ownerOrg(document))
+                && text(filter, "contract_id", document.contractId()).equals(document.contractId())
+                && text(filter, "doc_type", document.docType()).equals(document.docType())
+                && text(filter, "locale_code", document.localeCode()).equals(document.localeCode());
+    }
+
+    private Comparator<SearchDocumentState> searchComparator(String sortBy, String sortOrder) {
+        Comparator<SearchDocumentState> comparator = switch (sortBy) {
+            case "title_text" -> Comparator.comparing(SearchDocumentState::titleText).thenComparing(SearchDocumentState::searchDocId);
+            case "doc_type" -> Comparator.comparing(SearchDocumentState::docType).thenComparing(SearchDocumentState::searchDocId);
+            default -> Comparator.comparing(SearchDocumentState::indexedAt).thenComparing(SearchDocumentState::searchDocId);
+        };
+        return "asc".equalsIgnoreCase(sortOrder) ? comparator : comparator.reversed();
+    }
+
+    private Map<String, Object> searchResultView(SearchDocumentState document, String permissions) {
+        Map<String, Object> body = searchDocumentBody(document, permissions != null && permissions.contains("SEARCH_VIEW_BODY"));
+        body.remove("visibility_scope_json");
+        body.remove("filter_payload_json");
+        body.remove("sort_payload_json");
+        return body;
+    }
+
+    private Map<String, Object> searchDocumentBody(SearchDocumentState document, boolean includeBody) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("search_doc_id", document.searchDocId());
+        body.put("doc_type", document.docType());
+        body.put("source_object_id", document.sourceObjectId());
+        body.put("source_version_digest", document.sourceVersionDigest());
+        body.put("contract_id", document.contractId());
+        body.put("document_asset_id", document.documentAssetId());
+        body.put("document_version_id", document.documentVersionId());
+        body.put("semantic_ref_id", document.semanticRefId());
+        body.put("title_text", document.titleText());
+        body.put("source_anchor", mapFromJson(document.sourceAnchorJson()));
+        if (includeBody) {
+            body.put("body_snippet", document.bodyText());
+        }
+        body.put("locale_code", document.localeCode());
+        body.put("exposure_status", document.exposureStatus());
+        body.put("rebuild_generation", document.rebuildGeneration());
+        return body;
+    }
+
+    private Map<String, Object> searchSourceEnvelopeBody(SearchSourceEnvelopeState envelope) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("envelope_id", envelope.envelopeId());
+        body.put("doc_type", envelope.docType());
+        body.put("source_object_id", envelope.sourceObjectId());
+        body.put("source_version_digest", envelope.sourceVersionDigest());
+        body.put("contract_id", envelope.contractId());
+        body.put("document_asset_id", envelope.documentAssetId());
+        body.put("document_version_id", envelope.documentVersionId());
+        body.put("semantic_ref_id", envelope.semanticRefId());
+        body.put("source_anchor", mapFromJson(envelope.sourceAnchorJson()));
+        body.put("admission_status", envelope.admissionStatus());
+        return body;
+    }
+
+    private Map<String, Object> searchResultSetBody(SearchResultSetState resultSet, List<Map<String, Object>> items, Map<String, Object> facets) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("result_set_id", resultSet.resultSetId());
+        body.put("result_status", resultSet.resultStatus());
+        body.put("items", items);
+        body.put("facets", facets);
+        body.put("total", resultSet.total());
+        body.put("ranking_profile_code", resultSet.rankingProfileCode());
+        body.put("expires_at", resultSet.expiresAt());
+        body.put("cache_hit_flag", resultSet.cacheHitFlag());
+        body.put("stable_order_digest", resultSet.stableOrderDigest());
+        body.put("rebuild_generation", resultSet.rebuildGeneration());
+        return body;
+    }
+
+    private Map<String, Object> facets(List<SearchDocumentState> documents) {
+        Map<String, Integer> byType = new LinkedHashMap<>();
+        Map<String, Integer> byOrg = new LinkedHashMap<>();
+        for (SearchDocumentState document : documents) {
+            byType.merge(document.docType(), 1, Integer::sum);
+            byOrg.merge(ownerOrg(document), 1, Integer::sum);
+        }
+        return Map.of("doc_type", byType, "owner_org_unit_id", byOrg);
+    }
+
+    private void markOldDocumentVersionsStale(String documentAssetId, String activeDocumentVersionId) {
+        for (SearchDocumentState document : new ArrayList<>(searchDocuments.values())) {
+            if (documentAssetId != null && documentAssetId.equals(document.documentAssetId()) && !activeDocumentVersionId.equals(document.documentVersionId())) {
+                SearchDocumentState stale = new SearchDocumentState(document.searchDocId(), document.docType(), document.sourceObjectId(), document.sourceAnchorJson(),
+                        document.sourceVersionDigest(), document.contractId(), document.documentAssetId(), document.documentVersionId(), document.semanticRefId(), document.titleText(),
+                        document.bodyText(), document.keywordText(), document.filterPayloadJson(), document.sortPayloadJson(), document.localeCode(), document.visibilityScopeJson(),
+                        "STALE", document.rebuildGeneration(), document.indexedAt());
+                searchDocuments.put(searchDocumentKey(stale.searchDocId(), stale.rebuildGeneration()), stale);
+                persistSearchDocument(stale);
+            }
+        }
+    }
+
+    private String ownerOrg(SearchDocumentState document) {
+        return text(mapFromJson(document.filterPayloadJson()), "owner_org_unit_id", null);
+    }
+
+    private String searchDocId(String docType, String sourceObjectId, String digest) {
+        return "search-doc-" + Integer.toHexString((docType + ":" + sourceObjectId + ":" + digest).hashCode());
+    }
+
+    private String searchDocumentKey(String searchDocId, int rebuildGeneration) {
+        return searchDocId + ":" + rebuildGeneration;
+    }
+
+    private String versionDigest(String docType, String sourceObjectId, String payload, String status) {
+        return "sha256:" + Integer.toHexString((docType + ":" + sourceObjectId + ":" + payload + ":" + status).hashCode());
+    }
+
+    private String permissionDigest(String permissions, String orgScope) {
+        String normalized = permissions == null ? "" : java.util.Arrays.stream(permissions.split(","))
+                .map(String::trim)
+                .filter(value -> !value.isBlank())
+                .filter(value -> !"SEARCH_EXPORT".equals(value))
+                .sorted()
+                .reduce((left, right) -> left + "," + right)
+                .orElse("");
+        return "sha256:" + Integer.toHexString((normalized + ":" + (orgScope == null ? "" : orgScope)).hashCode());
+    }
+
+    private boolean hasSearchQueryPermission(String permissions) {
+        return permissions != null && permissions.contains("SEARCH_QUERY") && permissions.contains("CONTRACT_VIEW");
+    }
+
+    private List<Map<String, Object>> exportItems(List<Map<String, Object>> items) {
+        return items.stream().map(item -> {
+            Map<String, Object> cropped = new LinkedHashMap<>(item);
+            cropped.remove("body_snippet");
+            cropped.remove("sensitive_body_text");
+            return cropped;
+        }).toList();
+    }
+
+    private void expireSearchResultSet(SearchResultSetState resultSet) {
+        SearchResultSetState expired = new SearchResultSetState(resultSet.resultSetId(), "EXPIRED", resultSet.searchQueryJson(), resultSet.itemPayloadJson(), resultSet.facetPayloadJson(),
+                resultSet.total(), resultSet.rankingProfileCode(), resultSet.expiresAt(), resultSet.cacheHitFlag(), resultSet.permissionScopeDigest(), resultSet.actorId(),
+                resultSet.rebuildGeneration(), resultSet.stableOrderDigest(), resultSet.createdAt());
+        searchResultSets.put(expired.resultSetId(), expired);
+        jdbcTemplate.update("update ia_search_result_set set result_status = 'EXPIRED' where result_set_id = ?", expired.resultSetId());
+    }
+
+    private boolean isSearchSnapshotExpired(SearchResultSetState resultSet) {
+        Timestamp expiresAt = jdbcTemplate.queryForObject("select expires_at from ia_search_result_set where result_set_id = ?", Timestamp.class, resultSet.resultSetId());
+        Instant effectiveExpiresAt = expiresAt == null ? Instant.parse(resultSet.expiresAt()) : expiresAt.toInstant();
+        return !Instant.now().isBefore(effectiveExpiresAt);
+    }
+
+    private SearchResultSetState requireSearchResultSet(String resultSetId) {
+        SearchResultSetState resultSet = searchResultSets.get(resultSetId);
+        if (resultSet == null) {
+            throw new IllegalArgumentException("result_set_id 不存在: " + resultSetId);
+        }
+        return resultSet;
+    }
+
+    private void persistSearchSourceEnvelope(SearchSourceEnvelopeState envelope) {
+        jdbcTemplate.update("""
+                insert into ia_search_source_envelope
+                (envelope_id, doc_type, source_object_id, source_version_digest, contract_id, document_asset_id, document_version_id, semantic_ref_id, source_anchor_json, title_text, body_text, keyword_text, owner_org_unit_id, locale_code, admission_status, created_at)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, envelope.envelopeId(), envelope.docType(), envelope.sourceObjectId(), envelope.sourceVersionDigest(), envelope.contractId(), envelope.documentAssetId(),
+                envelope.documentVersionId(), envelope.semanticRefId(), envelope.sourceAnchorJson(), envelope.titleText(), envelope.bodyText(), envelope.keywordText(),
+                envelope.ownerOrgUnitId(), envelope.localeCode(), envelope.admissionStatus(), Timestamp.from(Instant.now()));
+    }
+
+    private void persistSearchDocument(SearchDocumentState document) {
+        jdbcTemplate.update("DELETE FROM ia_search_document WHERE search_doc_id = ? AND rebuild_generation = ?", document.searchDocId(), document.rebuildGeneration());
+        jdbcTemplate.update("""
+                insert into ia_search_document
+                (search_doc_id, doc_type, source_object_id, source_anchor_json, source_version_digest, contract_id, document_asset_id, document_version_id, semantic_ref_id, title_text, body_text, keyword_text, filter_payload_json, sort_payload_json, locale_code, visibility_scope_json, exposure_status, rebuild_generation, indexed_at)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, document.searchDocId(), document.docType(), document.sourceObjectId(), document.sourceAnchorJson(), document.sourceVersionDigest(), document.contractId(),
+                document.documentAssetId(), document.documentVersionId(), document.semanticRefId(), document.titleText(), document.bodyText(), document.keywordText(),
+                document.filterPayloadJson(), document.sortPayloadJson(), document.localeCode(), document.visibilityScopeJson(), document.exposureStatus(), document.rebuildGeneration(), Timestamp.from(Instant.now()));
+    }
+
+    private void persistSearchResultSet(SearchResultSetState resultSet) {
+        jdbcTemplate.update("""
+                insert into ia_search_result_set
+                (result_set_id, search_query_json, result_status, item_payload_json, facet_payload_json, total, ranking_profile_code, expires_at, cache_hit_flag, permission_scope_digest, actor_id, rebuild_generation, stable_order_digest, created_at)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, resultSet.resultSetId(), resultSet.searchQueryJson(), resultSet.resultStatus(), resultSet.itemPayloadJson(), resultSet.facetPayloadJson(), resultSet.total(),
+                resultSet.rankingProfileCode(), Timestamp.from(Instant.parse(resultSet.expiresAt())), resultSet.cacheHitFlag(), resultSet.permissionScopeDigest(), resultSet.actorId(),
+                resultSet.rebuildGeneration(), resultSet.stableOrderDigest(), Timestamp.from(Instant.now()));
+    }
+
+    private void appendSearchAudit(String actionType, String actorId, String contractId, String resultSetId, String resultStatus, String traceId) {
+        jdbcTemplate.update("""
+                insert into ia_search_audit_event
+                (audit_event_id, action_type, actor_id, contract_id, result_set_id, rebuild_generation, result_status, trace_id, occurred_at)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, "search-audit-" + UUID.randomUUID(), actionType, actorId, contractId, resultSetId, activeSearchGeneration, resultStatus, traceId, Timestamp.from(Instant.now()));
     }
 
     private OcrJobState executeOcrJob(OcrJobState job, Map<String, Object> request) {
@@ -4299,6 +4843,28 @@ class CoreChainService {
         }
     }
 
+    private Map<String, Object> mapFromJson(String value) {
+        if (value == null || value.isBlank()) {
+            return new LinkedHashMap<>();
+        }
+        try {
+            return objectMapper.readValue(value, LinkedHashMap.class);
+        } catch (JsonProcessingException exception) {
+            throw new IllegalArgumentException("JSON 对象无法反序列化", exception);
+        }
+    }
+
+    private List<Map<String, Object>> listMapsFromJson(String value) {
+        if (value == null || value.isBlank()) {
+            return List.of();
+        }
+        try {
+            return objectMapper.readValue(value, List.class);
+        } catch (JsonProcessingException exception) {
+            throw new IllegalArgumentException("JSON 列表无法反序列化", exception);
+        }
+    }
+
     private String json(Object value) {
         if (value == null) {
             return "{}";
@@ -4402,6 +4968,25 @@ class CoreChainService {
             bbox.put("rotation", 0);
             return bbox;
         }
+    }
+
+    private record SearchSourceEnvelopeState(String envelopeId, String docType, String sourceObjectId, String sourceVersionDigest,
+                                             String contractId, String documentAssetId, String documentVersionId, String semanticRefId,
+                                             String sourceAnchorJson, String titleText, String bodyText, String keywordText,
+                                             String ownerOrgUnitId, String localeCode, String admissionStatus, String createdAt) {
+    }
+
+    private record SearchDocumentState(String searchDocId, String docType, String sourceObjectId, String sourceAnchorJson,
+                                       String sourceVersionDigest, String contractId, String documentAssetId, String documentVersionId,
+                                       String semanticRefId, String titleText, String bodyText, String keywordText,
+                                       String filterPayloadJson, String sortPayloadJson, String localeCode, String visibilityScopeJson,
+                                       String exposureStatus, int rebuildGeneration, String indexedAt) {
+    }
+
+    private record SearchResultSetState(String resultSetId, String resultStatus, String searchQueryJson, String itemPayloadJson,
+                                        String facetPayloadJson, int total, String rankingProfileCode, String expiresAt,
+                                        boolean cacheHitFlag, String permissionScopeDigest, String actorId, int rebuildGeneration,
+                                        String stableOrderDigest, String createdAt) {
     }
 
     private record OcrInput(DocumentAssetState asset, DocumentVersionState documentVersion) {
