@@ -17,6 +17,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -33,6 +36,22 @@ class CoreChainController {
 
     CoreChainController(CoreChainService service) {
         this.service = service;
+    }
+
+    private boolean hasI18nGovernancePermission(String permissions) {
+        if (permissions == null) {
+            return false;
+        }
+        for (String permission : permissions.split("[,\\s]+")) {
+            if ("I18N_GOVERNANCE_MANAGE".equals(permission)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private ResponseEntity<Map<String, Object>> i18nGovernancePermissionDenied() {
+        return ResponseEntity.status(HttpStatus.FORBIDDEN).body(Map.of("error_code", "I18N_GOVERNANCE_PERMISSION_DENIED", "message", "缺少多语言知识治理管理权限"));
     }
 
     @PostMapping("/api/contracts")
@@ -210,8 +229,97 @@ class CoreChainController {
 
     @PostMapping("/api/intelligent-applications/candidates/writeback-candidates")
     ResponseEntity<Map<String, Object>> createCandidateWriteback(@RequestHeader(value = "X-CMP-Permissions", required = false) String permissions,
-                                                                 @RequestBody Map<String, Object> request) {
+                                                                  @RequestBody Map<String, Object> request) {
         return service.createCandidateWriteback(permissions, request);
+    }
+
+    @PostMapping("/api/intelligent-applications/i18n/terms")
+    ResponseEntity<Map<String, Object>> createTermEntry(@RequestHeader(value = "X-CMP-Permissions", required = false) String permissions,
+                                                        @RequestBody Map<String, Object> request) {
+        if (!hasI18nGovernancePermission(permissions)) {
+            return i18nGovernancePermissionDenied();
+        }
+        return ResponseEntity.status(HttpStatus.CREATED).body(service.createTermEntry(request));
+    }
+
+    @PostMapping("/api/intelligent-applications/i18n/terms/{termEntryId}/submit-review")
+    ResponseEntity<Map<String, Object>> submitTermForReview(@PathVariable String termEntryId,
+                                                             @RequestHeader(value = "X-CMP-Permissions", required = false) String permissions,
+                                                             @RequestBody(required = false) Map<String, Object> request) {
+        if (!hasI18nGovernancePermission(permissions)) {
+            return i18nGovernancePermissionDenied();
+        }
+        return service.submitTermForReview(termEntryId, request == null ? Map.of() : request);
+    }
+
+    @PostMapping("/api/intelligent-applications/i18n/translation-units/{translationUnitId}/approve")
+    ResponseEntity<Map<String, Object>> approveTranslationUnit(@PathVariable String translationUnitId,
+                                                                @RequestHeader(value = "X-CMP-Permissions", required = false) String permissions,
+                                                                @RequestBody(required = false) Map<String, Object> request) {
+        if (!hasI18nGovernancePermission(permissions)) {
+            return i18nGovernancePermissionDenied();
+        }
+        return service.approveTranslationUnit(translationUnitId, request == null ? Map.of() : request);
+    }
+
+    @PostMapping("/api/intelligent-applications/i18n/terms/{termEntryId}/publish")
+    ResponseEntity<Map<String, Object>> publishTermEntry(@PathVariable String termEntryId,
+                                                          @RequestHeader(value = "X-CMP-Permissions", required = false) String permissions,
+                                                          @RequestBody(required = false) Map<String, Object> request) {
+        if (!hasI18nGovernancePermission(permissions)) {
+            return i18nGovernancePermissionDenied();
+        }
+        return service.publishTermEntry(termEntryId, request == null ? Map.of() : request);
+    }
+
+    @PostMapping("/api/intelligent-applications/i18n/terms/{termEntryId}/deprecate")
+    ResponseEntity<Map<String, Object>> deprecateTermEntry(@PathVariable String termEntryId,
+                                                            @RequestHeader(value = "X-CMP-Permissions", required = false) String permissions,
+                                                            @RequestBody(required = false) Map<String, Object> request) {
+        if (!hasI18nGovernancePermission(permissions)) {
+            return i18nGovernancePermissionDenied();
+        }
+        return service.deprecateTermEntry(termEntryId, request == null ? Map.of() : request);
+    }
+
+    @PostMapping("/api/intelligent-applications/i18n/terms/{termEntryId}/translations/revise")
+    ResponseEntity<Map<String, Object>> reviseTranslationUnit(@PathVariable String termEntryId,
+                                                               @RequestHeader(value = "X-CMP-Permissions", required = false) String permissions,
+                                                               @RequestBody Map<String, Object> request) {
+        if (!hasI18nGovernancePermission(permissions)) {
+            return i18nGovernancePermissionDenied();
+        }
+        return service.reviseTranslationUnit(termEntryId, request);
+    }
+
+    @GetMapping("/api/intelligent-applications/i18n/profiles/{profileCode}/versions/{profileVersion}")
+    ResponseEntity<Map<String, Object>> terminologyProfile(@PathVariable String profileCode, @PathVariable int profileVersion) {
+        return ResponseEntity.ok(service.terminologyProfile(profileCode, profileVersion));
+    }
+
+    @PostMapping("/api/intelligent-applications/i18n/profiles/{profileCode}/versions/{profileVersion}/cache/evict")
+    ResponseEntity<Map<String, Object>> evictTerminologyProfileCache(@PathVariable String profileCode, @PathVariable int profileVersion,
+                                                                      @RequestHeader(value = "X-CMP-Permissions", required = false) String permissions,
+                                                                      @RequestBody(required = false) Map<String, Object> request) {
+        if (!hasI18nGovernancePermission(permissions)) {
+            return i18nGovernancePermissionDenied();
+        }
+        return ResponseEntity.ok(service.evictTerminologyProfileCache(profileCode, profileVersion, request == null ? Map.of() : request));
+    }
+
+    @PostMapping("/api/intelligent-applications/i18n/contexts")
+    ResponseEntity<Map<String, Object>> createI18nContext(@RequestBody Map<String, Object> request) {
+        return service.createI18nContext(request);
+    }
+
+    @GetMapping("/api/intelligent-applications/i18n/contexts/{contextId}")
+    ResponseEntity<Map<String, Object>> i18nContext(@PathVariable String contextId) {
+        return ResponseEntity.ok(service.i18nContext(contextId));
+    }
+
+    @PostMapping("/api/intelligent-applications/i18n/guardrails/validate-output")
+    ResponseEntity<Map<String, Object>> validateI18nOutput(@RequestBody Map<String, Object> request) {
+        return service.validateI18nOutput(request);
     }
 
     @GetMapping("/api/document-center/assets")
@@ -557,6 +665,12 @@ class CoreChainService {
     private final Map<String, CandidateRankingSnapshotState> candidateRankingSnapshots = new ConcurrentHashMap<>();
     private final Map<String, QualityEvaluationReportState> qualityEvaluationReports = new ConcurrentHashMap<>();
     private final Map<String, CandidateWritebackGateState> candidateWritebackGates = new ConcurrentHashMap<>();
+    private final Map<String, Map<String, Object>> terminologySnapshotCache = new ConcurrentHashMap<>();
+    private final Map<String, Map<String, Object>> i18nContextCache = new ConcurrentHashMap<>();
+    private final Map<String, String> searchDocumentI18nContexts = new ConcurrentHashMap<>();
+    private final Map<String, String> aiEnvelopeI18nContexts = new ConcurrentHashMap<>();
+    private final Map<String, String> candidateRankingI18nContexts = new ConcurrentHashMap<>();
+    private final Map<String, String> candidateResultI18nContexts = new ConcurrentHashMap<>();
     private String activeCandidateProfileVersion = "v1";
     private int activeSearchGeneration = 1;
     private final List<Map<String, Object>> lifecycleTimelineEvents = new ArrayList<>();
@@ -772,6 +886,10 @@ class CoreChainService {
         }
         OcrInput input = resolveOcrInput(request);
         String jobPurpose = text(request, "job_purpose", "TEXT_EXTRACTION");
+        Map<String, Object> i18nProfileError = validateExplicitI18nProfile(request);
+        if (i18nProfileError != null) {
+            return ResponseEntity.unprocessableEntity().body(i18nProfileError);
+        }
         String idempotencyKey = text(request, "idempotency_key", idempotencyHeader == null ? "ocr-default-idem" : idempotencyHeader);
         String idempotencyFingerprint = input.documentVersion().documentVersionId() + "|" + jobPurpose + "|" + idempotencyKey;
         String existingJobId = ocrJobByIdempotency.get(idempotencyFingerprint);
@@ -796,6 +914,12 @@ class CoreChainService {
         appendOcrAudit(accepted, null, "OCR_JOB_CREATED", "ACCEPTED", null);
 
         OcrJobState completed = executeOcrJob(accepted, request);
+        if (completed.resultAggregateId() != null) {
+            Map<String, Object> i18nContext = createLinkedI18nContext("OCR_RESULT", completed.resultAggregateId(), request);
+            if (isI18nContextError(i18nContext)) {
+                return ResponseEntity.unprocessableEntity().body(i18nContext);
+            }
+        }
         HttpStatus status = existingJobId == null ? HttpStatus.CREATED : HttpStatus.OK;
         return ResponseEntity.status(status).body(ocrJobBody(completed, false));
     }
@@ -829,6 +953,10 @@ class CoreChainService {
         if (sourceTypes.isEmpty()) {
             sourceTypes = List.of("CONTRACT", "DOCUMENT", "OCR", "CLAUSE");
         }
+        Map<String, Object> i18nProfileError = validateExplicitI18nProfile(request);
+        if (i18nProfileError != null) {
+            return ResponseEntity.unprocessableEntity().body(i18nProfileError);
+        }
         List<SearchSourceEnvelopeState> envelopes = new ArrayList<>();
         for (String sourceType : sourceTypes) {
             SearchSourceEnvelopeState envelope = buildSearchSourceEnvelope(sourceType, request);
@@ -842,6 +970,18 @@ class CoreChainService {
             searchDocuments.put(searchDocumentKey(document.searchDocId(), document.rebuildGeneration()), document);
             persistSearchDocument(document);
         }
+        Map<String, Object> i18nContext = envelopes.isEmpty() ? null : createLinkedI18nContext("SEARCH_REFRESH", envelopes.get(0).envelopeId(), request);
+        if (isI18nContextError(i18nContext)) {
+            return ResponseEntity.unprocessableEntity().body(i18nContext);
+        }
+        if (i18nContext != null) {
+            for (SearchSourceEnvelopeState envelope : envelopes) {
+                SearchDocumentState document = searchDocuments.get(searchDocumentKey(searchDocId(envelope.docType(), envelope.sourceObjectId(), envelope.sourceVersionDigest()), activeSearchGeneration));
+                if (document != null) {
+                    searchDocumentI18nContexts.put(document.searchDocId(), text(i18nContext, "i18n_context_id", null));
+                }
+            }
+        }
         createPlatformJob("IA_SEARCH_REINDEX", "intelligent-applications", "intelligent-applications", "SEARCH_SOURCE",
                 text(request, "contract_id", null), "CONTRACT", text(request, "contract_id", null), text(request, "trace_id", null), "ia-search-reindex-runner");
         appendSearchAudit("SEARCH_SOURCE_REFRESHED", text(request, "actor_id", "system"), text(request, "contract_id", null), null, "SUCCESS", text(request, "trace_id", null));
@@ -853,6 +993,9 @@ class CoreChainService {
                 .map(envelope -> searchDocuments.get(searchDocumentKey(searchDocId(envelope.docType(), envelope.sourceObjectId(), envelope.sourceVersionDigest()), activeSearchGeneration)))
                 .map(document -> searchDocumentBody(document, false))
                 .toList());
+        if (i18nContext != null) {
+            body.put("i18n_context", i18nContext);
+        }
         return ResponseEntity.status(HttpStatus.ACCEPTED).body(body);
     }
 
@@ -1014,6 +1157,10 @@ class CoreChainService {
         if (!List.of("SUMMARY", "QA", "RISK_ANALYSIS", "DIFF_EXTRACTION").contains(applicationType)) {
             return ResponseEntity.unprocessableEntity().body(error("AI_APPLICATION_TYPE_INVALID", "智能应用类型不在允许范围内"));
         }
+        Map<String, Object> i18nProfileError = validateExplicitI18nProfile(request);
+        if (i18nProfileError != null) {
+            return ResponseEntity.unprocessableEntity().body(i18nProfileError);
+        }
         ContractState contract = requireContract(text(request, "contract_id", null));
         if (orgScope != null && !orgScope.isBlank() && contract.ownerOrgUnitId() != null && !orgScope.equals(contract.ownerOrgUnitId())) {
             Map<String, Object> protectedSnapshot = createStandaloneProtectedSnapshot(applicationType, contract.contractId(), "REJECT", "AI_APPLICATION_SCOPE_DENIED", request);
@@ -1056,6 +1203,16 @@ class CoreChainService {
             return ResponseEntity.unprocessableEntity().body(body);
         }
         Map<String, Object> envelope = buildAiContextEnvelope(resultContextId, jobId, contextAssemblyJobId, applicationType, contract, evidenceDocs, evidenceSegments, request);
+        Map<String, Object> i18nContext = createLinkedI18nContext("AI_JOB", jobId, request);
+        if (isI18nContextError(i18nContext)) {
+            return ResponseEntity.unprocessableEntity().body(i18nContext);
+        }
+        if (i18nContext != null) {
+            String i18nContextId = text(i18nContext, "i18n_context_id", null);
+            envelope.put("i18n_context_id", i18nContextId);
+            envelope.put("i18n_context", i18nContext);
+            aiEnvelopeI18nContexts.put(resultContextId, i18nContextId);
+        }
         persistAiContextEnvelope(resultContextId, jobId, contextAssemblyJobId, applicationType, contract.contractId(), envelope);
 
         AgentOsBinding agent = createAgentOsAiTask(jobId, applicationType, contract.contractId(), resultContextId, actorId, idempotencyKey, traceId, bool(request, "simulate_agent_timeout", false));
@@ -1140,11 +1297,22 @@ class CoreChainService {
         List<Map<String, Object>> activeCandidates = semanticCandidates.stream()
                 .filter(candidate -> "ACTIVE".equals(candidate.get("elimination_status")) || "CONFLICTED".equals(candidate.get("elimination_status")))
                 .toList();
+        Map<String, Object> i18nProfileError = validateExplicitI18nProfile(request);
+        if (i18nProfileError != null) {
+            return ResponseEntity.unprocessableEntity().body(i18nProfileError);
+        }
 
         String rankingSnapshotId = "rank-snapshot-" + UUID.randomUUID();
         CandidateRankingSnapshotState rankingSnapshot = new CandidateRankingSnapshotState(rankingSnapshotId, jobId, applicationType, contract.contractId(), documentVersionId,
                 sourceDigest, rankingProfileCode, profileVersion, qualityProfileCode, profileVersion, "READY", json(activeCandidates), json(semanticCandidates), Instant.now().plusSeconds(900).toString(), traceId, Instant.now().toString());
         candidateRankingSnapshots.put(rankingSnapshotId, rankingSnapshot);
+        Map<String, Object> i18nContext = createLinkedI18nContext("CANDIDATE_RANKING", rankingSnapshotId, request);
+        if (isI18nContextError(i18nContext)) {
+            return ResponseEntity.unprocessableEntity().body(i18nContext);
+        }
+        if (i18nContext != null) {
+            candidateRankingI18nContexts.put(rankingSnapshotId, text(i18nContext, "i18n_context_id", null));
+        }
 
         QualityDecision decision = evaluateCandidateQuality(applicationType, semanticCandidates, request);
         String qualityEvaluationId = "quality-eval-" + UUID.randomUUID();
@@ -1194,6 +1362,9 @@ class CoreChainService {
         CandidateWritebackGateState gate = new CandidateWritebackGateState(result.resultId(), rankingSnapshotId, qualityEvaluationId, decision.releaseDecision(),
                 writebackAllowed ? "READY" : "BLOCKED", writebackAllowed, traceId, Instant.now().toString());
         candidateWritebackGates.put(result.resultId(), gate);
+        if (i18nContext != null) {
+            candidateResultI18nContexts.put(result.resultId(), text(i18nContext, "i18n_context_id", null));
+        }
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("ai_application_job_id", jobId);
         body.put("result_id", result.resultId());
@@ -1205,6 +1376,9 @@ class CoreChainService {
         body.put("guarded_result", aiResultBody(result));
         body.put("writeback_gate", candidateWritebackGateBody(gate));
         body.put("agent_os", Map.of("agent_task_id", agent.taskId(), "agent_result_id", agent.resultId()));
+        if (i18nContext != null) {
+            body.put("i18n_context", i18nContext);
+        }
         if (protectedSnapshot != null) {
             body.put("protected_result_snapshot", protectedSnapshotBody(protectedSnapshot));
         }
@@ -1439,6 +1613,10 @@ class CoreChainService {
         body.put("semantic_candidates", candidates);
         body.put("slot_rankings", slotRankings(candidates));
         body.put("slot_governance", slotGovernance(candidates));
+        String i18nContextId = candidateRankingI18nContexts.get(snapshot.rankingSnapshotId());
+        if (i18nContextId != null) {
+            body.put("i18n_context_id", i18nContextId);
+        }
         body.put("selected_candidate_ref", listMapsFromJson(snapshot.selectedCandidateJson()));
         body.put("expires_at", snapshot.expiresAt());
         return body;
@@ -1510,6 +1688,13 @@ class CoreChainService {
         body.put("release_decision", gate.releaseDecision());
         body.put("writeback_gate_status", gate.writebackGateStatus());
         body.put("writeback_allowed_flag", gate.writebackAllowed());
+        String i18nContextId = candidateResultI18nContexts.get(gate.resultId());
+        if (i18nContextId != null) {
+            Map<String, Object> context = i18nContext(i18nContextId);
+            body.put("i18n_context_id", i18nContextId);
+            body.put("terminology_profile_code", text(context, "terminology_profile_code", null));
+            body.put("profile_version", context.get("profile_version"));
+        }
         return body;
     }
 
@@ -1968,6 +2153,10 @@ class CoreChainService {
         agentOs.put("failure_code", agent.failureCode());
         body.put("agent_os", agentOs);
         body.put("context_envelope", envelope);
+        String i18nContextId = aiEnvelopeI18nContexts.get(job.resultContextId());
+        if (i18nContextId != null) {
+            body.put("i18n_context", i18nContext(i18nContextId));
+        }
         body.put("guarded_result", aiResultBody(result));
         if (snapshot != null) {
             body.put("protected_result_snapshot_id", snapshot.protectedResultSnapshotId());
@@ -2015,6 +2204,526 @@ class CoreChainService {
                 (audit_event_id, ai_application_job_id, action_type, actor_id, result_status, trace_id, occurred_at)
                 values (?, ?, ?, ?, ?, ?, ?)
                 """, "ai-audit-" + UUID.randomUUID(), jobId, actionType, actorId, status, traceId, Timestamp.from(Instant.now()));
+    }
+
+    @Transactional
+    public Map<String, Object> createTermEntry(Map<String, Object> request) {
+        String termEntryId = "term-" + UUID.randomUUID();
+        String traceId = text(request, "trace_id", null);
+        String termKey = text(request, "term_key", null);
+        String canonicalLanguage = normalizeLanguage(text(request, "canonical_language", "zh-CN"));
+        jdbcTemplate.update("""
+                insert into ia_term_entry
+                (term_entry_id, term_key, domain, status, canonical_language, created_by, published_at, version_no, created_at, updated_at)
+                values (?, ?, ?, 'DRAFT', ?, ?, null, 0, ?, ?)
+                """, termEntryId, termKey, text(request, "domain", "CONTRACT"), canonicalLanguage, text(request, "created_by", "system"),
+                Timestamp.from(Instant.now()), Timestamp.from(Instant.now()));
+        Map<String, String> unitIdsByLanguage = new LinkedHashMap<>();
+        for (Map<String, Object> translation : listMaps(request.get("translations"))) {
+            String languageCode = normalizeLanguage(text(translation, "language_code", canonicalLanguage));
+            String unitId = insertTranslationUnit(termEntryId, languageCode, text(translation, "surface_form", ""), "DRAFT", 1, null, traceId);
+            unitIdsByLanguage.put(languageCode, unitId);
+        }
+        appendI18nAudit("HUMAN", text(request, "created_by", "system"), "TERM_ENTRY_CREATED", "TERM_ENTRY", termEntryId, null, null, traceId);
+        Map<String, Object> body = termEntryBody(termEntryId);
+        body.put("zh_translation_unit_id", unitIdsByLanguage.get("zh-CN"));
+        body.put("en_translation_unit_id", unitIdsByLanguage.get("en-US"));
+        body.put("es_translation_unit_id", unitIdsByLanguage.get("es-ES"));
+        return body;
+    }
+
+    @Transactional
+    public ResponseEntity<Map<String, Object>> submitTermForReview(String termEntryId, Map<String, Object> request) {
+        String status = termStatus(termEntryId);
+        if (status == null) {
+            return ResponseEntity.badRequest().body(error("I18N_TERM_ENTRY_NOT_FOUND", "术语条目不存在"));
+        }
+        if (!"DRAFT".equals(status)) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(error("I18N_TERM_ENTRY_NOT_SUBMITTABLE", "只有草稿术语条目可以提交审核"));
+        }
+        jdbcTemplate.update("update ia_term_entry set status = 'REVIEW', updated_at = ? where term_entry_id = ?", Timestamp.from(Instant.now()), termEntryId);
+        jdbcTemplate.update("update ia_translation_unit set status = 'REVIEW', updated_at = ? where term_entry_id = ? and status = 'DRAFT'", Timestamp.from(Instant.now()), termEntryId);
+        appendI18nAudit("HUMAN", text(request, "operator_id", "system"), "TERM_ENTRY_SUBMITTED", "TERM_ENTRY", termEntryId, null, null, text(request, "trace_id", null));
+        return ResponseEntity.ok(termEntryBody(termEntryId));
+    }
+
+    @Transactional
+    public ResponseEntity<Map<String, Object>> approveTranslationUnit(String translationUnitId, Map<String, Object> request) {
+        Map<String, Object> unit = requireTranslationUnitRow(translationUnitId);
+        String termEntryId = text(unit, "TERM_ENTRY_ID", text(unit, "term_entry_id", null));
+        String parentStatus = termStatus(termEntryId);
+        String unitStatus = text(unit, "STATUS", text(unit, "status", null));
+        if (!"REVIEW".equals(parentStatus) || !"REVIEW".equals(unitStatus)) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(error("I18N_TERM_NOT_IN_REVIEW", "术语条目和翻译单元必须处于审核中状态"));
+        }
+        String languageCode = text(unit, "LANGUAGE_CODE", text(unit, "language_code", null));
+        int versionNo = ((Number) unit.getOrDefault("VERSION_NO", unit.getOrDefault("version_no", 1))).intValue();
+        jdbcTemplate.update("""
+                update ia_translation_unit
+                set status = 'DEPRECATED', superseded_by_id = ?, updated_at = ?
+                where term_entry_id = ? and language_code = ? and status = 'APPROVED' and version_no < ?
+                """, translationUnitId, Timestamp.from(Instant.now()), termEntryId, languageCode, versionNo);
+        jdbcTemplate.update("""
+                update ia_translation_unit
+                set status = 'APPROVED', reviewed_by = ?, reviewed_at = ?, updated_at = ?
+                where translation_unit_id = ?
+                """, text(request, "reviewed_by", "reviewer"), Timestamp.from(Instant.now()), Timestamp.from(Instant.now()), translationUnitId);
+        appendI18nAudit("HUMAN", text(request, "reviewed_by", "reviewer"), "TRANSLATION_UNIT_APPROVED", "TRANSLATION_UNIT", translationUnitId, null, null, text(request, "trace_id", null));
+        return ResponseEntity.ok(translationUnitBody(translationUnitId));
+    }
+
+    @Transactional
+    public ResponseEntity<Map<String, Object>> publishTermEntry(String termEntryId, Map<String, Object> request) {
+        String status = termStatus(termEntryId);
+        if (status == null) {
+            return ResponseEntity.badRequest().body(error("I18N_TERM_ENTRY_NOT_FOUND", "术语条目不存在"));
+        }
+        if (!"REVIEW".equals(status)) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(error("I18N_TERM_NOT_IN_REVIEW", "术语条目必须先提交审核"));
+        }
+        if (!hasApprovedRequiredTranslations(termEntryId)) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(error("I18N_TRANSLATION_REVIEW_INCOMPLETE", "正式语言翻译单元尚未全部审核通过"));
+        }
+        int nextTermVersion = jdbcTemplate.queryForObject("select coalesce(max(version_no), 0) + 1 from ia_term_entry where term_entry_id = ?", Integer.class, termEntryId);
+        jdbcTemplate.update("update ia_term_entry set status = 'PUBLISHED', version_no = ?, published_at = ?, updated_at = ? where term_entry_id = ?",
+                nextTermVersion, Timestamp.from(Instant.now()), Timestamp.from(Instant.now()), termEntryId);
+        String profileCode = text(request, "profile_code", "CONTRACT_BASELINE");
+        int profileVersion = publishTerminologyProfile(profileCode, text(request, "operator_id", "system"), text(request, "trace_id", null));
+        appendI18nAudit("HUMAN", text(request, "operator_id", "system"), "TERM_ENTRY_PUBLISHED", "TERM_ENTRY", termEntryId, profileCode, profileVersion, text(request, "trace_id", null));
+        Map<String, Object> body = termEntryBody(termEntryId);
+        body.put("terminology_profile", terminologyProfile(profileCode, profileVersion));
+        return ResponseEntity.ok(body);
+    }
+
+    @Transactional
+    public ResponseEntity<Map<String, Object>> deprecateTermEntry(String termEntryId, Map<String, Object> request) {
+        if (termStatus(termEntryId) == null) {
+            return ResponseEntity.badRequest().body(error("I18N_TERM_ENTRY_NOT_FOUND", "术语条目不存在"));
+        }
+        List<String> translationUnitIds = jdbcTemplate.queryForList("select translation_unit_id from ia_translation_unit where term_entry_id = ?", String.class, termEntryId);
+        jdbcTemplate.update("update ia_term_entry set status = 'DEPRECATED', updated_at = ? where term_entry_id = ?", Timestamp.from(Instant.now()), termEntryId);
+        jdbcTemplate.update("update ia_translation_unit set status = 'DEPRECATED', updated_at = ? where term_entry_id = ?", Timestamp.from(Instant.now()), termEntryId);
+        for (String translationUnitId : translationUnitIds) {
+            appendI18nAudit("HUMAN", text(request, "operator_id", "system"), "TRANSLATION_UNIT_DEPRECATED", "TRANSLATION_UNIT", translationUnitId, null, null, text(request, "trace_id", null));
+        }
+        appendI18nAudit("HUMAN", text(request, "operator_id", "system"), "TERM_ENTRY_DEPRECATED", "TERM_ENTRY", termEntryId, null, null, text(request, "trace_id", null));
+        String profileCode = text(request, "profile_code", "CONTRACT_BASELINE");
+        int newVersion = publishTerminologyProfile(profileCode, text(request, "operator_id", "system"), text(request, "trace_id", null));
+        Map<String, Object> body = termEntryBody(termEntryId);
+        body.put("new_profile_code", profileCode);
+        body.put("new_profile_version", newVersion);
+        return ResponseEntity.ok(body);
+    }
+
+    @Transactional
+    public ResponseEntity<Map<String, Object>> reviseTranslationUnit(String termEntryId, Map<String, Object> request) {
+        String status = termStatus(termEntryId);
+        if (status == null) {
+            return ResponseEntity.badRequest().body(error("I18N_TERM_ENTRY_NOT_FOUND", "术语条目不存在"));
+        }
+        if ("DEPRECATED".equals(status)) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(error("I18N_TERM_ENTRY_DEPRECATED", "已废弃术语条目不能修订"));
+        }
+        String languageCode = normalizeLanguage(text(request, "language_code", "en-US"));
+        int versionNo = jdbcTemplate.queryForObject("select coalesce(max(version_no), 0) + 1 from ia_translation_unit where term_entry_id = ? and language_code = ?", Integer.class, termEntryId, languageCode);
+        String unitId = insertTranslationUnit(termEntryId, languageCode, text(request, "surface_form", ""), "DRAFT", versionNo, null, text(request, "trace_id", null));
+        jdbcTemplate.update("update ia_term_entry set status = 'REVIEW', updated_at = ? where term_entry_id = ?", Timestamp.from(Instant.now()), termEntryId);
+        jdbcTemplate.update("update ia_translation_unit set status = 'REVIEW', updated_at = ? where translation_unit_id = ?", Timestamp.from(Instant.now()), unitId);
+        return ResponseEntity.status(HttpStatus.CREATED).body(translationUnitBody(unitId));
+    }
+
+    Map<String, Object> terminologyProfile(String profileCode, int profileVersion) {
+        String cacheKey = profileCode + "#" + profileVersion;
+        Map<String, Object> cached = terminologySnapshotCache.get(cacheKey);
+        if (cached != null) {
+            Map<String, Object> body = new LinkedHashMap<>(cached);
+            body.put("cache_source", "CACHE");
+            return body;
+        }
+        Map<String, Object> loaded = loadTerminologyProfileFromDatabase(profileCode, profileVersion);
+        loaded.put("cache_source", "DATABASE");
+        cacheTerminologySnapshotAfterCommit(cacheKey, loaded);
+        return loaded;
+    }
+
+    @Transactional
+    public Map<String, Object> evictTerminologyProfileCache(String profileCode, int profileVersion, Map<String, Object> request) {
+        String cacheKey = profileCode + "#" + profileVersion;
+        appendI18nAudit("SYSTEM", text(request, "operator_id", "ops-i18n"), "TERMINOLOGY_PROFILE_CACHE_EVICTED", "TERMINOLOGY_PROFILE", profileCode,
+                profileCode, profileVersion, text(request, "trace_id", null));
+        Map<String, Object> removed = terminologySnapshotCache.remove(cacheKey);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("profile_code", profileCode);
+        body.put("profile_version", profileVersion);
+        body.put("cache_evict_status", removed == null ? "MISS" : "EVICTED");
+        return body;
+    }
+
+    ResponseEntity<Map<String, Object>> createI18nContext(Map<String, Object> request) {
+        Map<String, Object> body = createI18nContextBody(request);
+        if (body.containsKey("error_code")) {
+            return ResponseEntity.unprocessableEntity().body(body);
+        }
+        return ResponseEntity.status(HttpStatus.CREATED).body(body);
+    }
+
+    private Map<String, Object> createI18nContextBody(Map<String, Object> request) {
+        String contextId = "i18n-context-" + UUID.randomUUID();
+        String profileCode = text(request, "terminology_profile_code", "CONTRACT_BASELINE");
+        Integer requestedVersion = request.get("profile_version") == null ? null : Integer.parseInt(request.get("profile_version").toString());
+        int profileVersion = requestedVersion == null ? latestPublishedProfileVersion(profileCode) : requestedVersion;
+        String inputLanguage = normalizeLanguage(text(request, "source_language", "zh-CN"));
+        String outputLanguage = normalizeLanguage(text(request, "response_language", inputLanguage));
+        String normalizedLanguage = supportedLanguage(outputLanguage) ? outputLanguage : "zh-CN";
+        String displayLanguage = normalizeLanguage(text(request, "display_label_language", outputLanguage));
+        List<Map<String, Object>> segments = listMaps(request.get("language_segments"));
+        boolean failed = "UNKNOWN".equals(inputLanguage) || segments.stream().anyMatch(segment -> "UNKNOWN".equals(normalizeLanguage(text(segment, "language_code", "UNKNOWN"))));
+        boolean explicitProfile = request.containsKey("terminology_profile_code") || request.containsKey("profile_version");
+        if ((explicitProfile || !failed) && !publishedTerminologyProfileExists(profileCode, profileVersion)) {
+            return error("I18N_TERMINOLOGY_PROFILE_NOT_PUBLISHED", "术语档案不存在或尚未发布");
+        }
+        Map<String, Object> snapshot = failed ? Map.of("terms", List.of()) : terminologyProfile(profileCode, profileVersion);
+        Map<String, Object> segmentPayload = Map.of("segments", segments.stream().map(segment -> {
+            Map<String, Object> item = new LinkedHashMap<>(segment);
+            item.put("language_code", normalizeLanguage(text(segment, "language_code", inputLanguage)));
+            return item;
+        }).toList());
+        Map<String, Object> degradation = failed ? Map.of("degradation_action", "BYPASS_TERMINOLOGY_NORMALIZATION", "reason", "LANGUAGE_DETECTION_FAILED") : Map.of("degradation_action", "NONE");
+        jdbcTemplate.update("""
+                insert into ia_i18n_context
+                (i18n_context_id, owner_type, owner_id, terminology_profile_code, profile_version, input_language, normalized_language,
+                 output_language, display_label_language, i18n_status, segment_language_payload_json, terminology_snapshot_json,
+                 downstream_degradation_json, created_at)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, contextId, text(request, "owner_type", "AI_JOB"), text(request, "owner_id", contextId), profileCode, profileVersion, inputLanguage,
+                normalizedLanguage, outputLanguage, displayLanguage, failed ? "FAILED" : "APPLIED", json(segmentPayload), json(snapshot), json(degradation), Timestamp.from(Instant.now()));
+        appendI18nAudit("SYSTEM", "language-governor", failed ? "I18N_CONTEXT_FAILED" : "I18N_CONTEXT_CREATED", "I18N_CONTEXT", contextId, profileCode, profileVersion, text(request, "trace_id", null));
+        Map<String, Object> body = i18nContextBody(contextId);
+        i18nContextCache.put(contextId, body);
+        return body;
+    }
+
+    Map<String, Object> i18nContext(String contextId) {
+        return i18nContextBody(contextId);
+    }
+
+    private Map<String, Object> createLinkedI18nContext(String ownerType, String ownerId, Map<String, Object> request) {
+        if (ownerId == null) {
+            return null;
+        }
+        Map<String, Object> contextRequest = new LinkedHashMap<>();
+        contextRequest.put("owner_type", ownerType);
+        contextRequest.put("owner_id", ownerId);
+        contextRequest.put("terminology_profile_code", text(request, "terminology_profile_code", "CONTRACT_BASELINE"));
+        if (request.get("profile_version") != null) {
+            contextRequest.put("profile_version", request.get("profile_version"));
+        }
+        contextRequest.put("source_language", text(request, "source_language", text(request, "input_language", "zh-CN")));
+        contextRequest.put("response_language", text(request, "response_language", "zh-CN"));
+        contextRequest.put("display_label_language", text(request, "display_label_language", text(request, "response_language", "zh-CN")));
+        List<Map<String, Object>> segments = listMaps(request.get("language_segments"));
+        if (segments.isEmpty()) {
+            segments = List.of(Map.of("segment_id", ownerId + "-seg-1", "language_code", text(contextRequest, "source_language", "zh-CN"), "text", text(request, "query_text", ownerId)));
+        }
+        contextRequest.put("language_segments", segments);
+        contextRequest.put("trace_id", text(request, "trace_id", null));
+        Map<String, Object> body = createI18nContextBody(contextRequest);
+        if (body.containsKey("error_code") && !(request.containsKey("terminology_profile_code") || request.containsKey("profile_version"))) {
+            return null;
+        }
+        return body;
+    }
+
+    private Map<String, Object> validateExplicitI18nProfile(Map<String, Object> request) {
+        if (!(request.containsKey("terminology_profile_code") || request.containsKey("profile_version"))) {
+            return null;
+        }
+        String profileCode = text(request, "terminology_profile_code", "CONTRACT_BASELINE");
+        Integer requestedVersion = request.get("profile_version") == null ? null : Integer.parseInt(request.get("profile_version").toString());
+        int profileVersion = requestedVersion == null ? latestPublishedProfileVersion(profileCode) : requestedVersion;
+        return publishedTerminologyProfileExists(profileCode, profileVersion)
+                ? null
+                : error("I18N_TERMINOLOGY_PROFILE_NOT_PUBLISHED", "术语档案不存在或尚未发布");
+    }
+
+    private boolean isI18nContextError(Map<String, Object> context) {
+        return context != null && context.containsKey("error_code");
+    }
+
+    private Map<String, Object> i18nContextByOwner(String ownerType, String ownerId) {
+        if (ownerId == null) {
+            return null;
+        }
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList("select i18n_context_id from ia_i18n_context where owner_type = ? and owner_id = ? order by created_at desc", ownerType, ownerId);
+        if (rows.isEmpty()) {
+            return null;
+        }
+        return i18nContextBody(text(rows.get(0), "I18N_CONTEXT_ID", text(rows.get(0), "i18n_context_id", null)));
+    }
+
+    private boolean publishedTerminologyProfileExists(String profileCode, int profileVersion) {
+        Integer count = jdbcTemplate.queryForObject("select count(*) from ia_terminology_profile where profile_code = ? and profile_version = ? and status = 'PUBLISHED'", Integer.class, profileCode, profileVersion);
+        return count != null && count > 0;
+    }
+
+    ResponseEntity<Map<String, Object>> validateI18nOutput(Map<String, Object> request) {
+        String contextId = text(request, "i18n_context_id", null);
+        Map<String, Object> context = i18nContextBody(contextId);
+        String outputLanguage = normalizeLanguage(text(request, "output_language", text(context, "output_language", "zh-CN")));
+        Map<String, Map<String, String>> terms = snapshotTermTranslations(map(context.get("terminology_snapshot")));
+        for (Map<String, Object> outputTerm : listMaps(request.get("output_terms"))) {
+            String termKey = text(outputTerm, "term_key", null);
+            Map<String, String> translations = terms.get(termKey);
+            if (translations == null) {
+                return blockedI18nGuardrail(contextId, "I18N_TERM_NOT_IN_SNAPSHOT", request);
+            }
+            String expected = translations.get(outputLanguage);
+            if (expected == null || !expected.equals(text(outputTerm, "surface_form", null))) {
+                return blockedI18nGuardrail(contextId, "I18N_TERM_TRANSLATION_MISMATCH", request);
+            }
+        }
+        return ResponseEntity.ok(Map.of("guardrail_decision", "PASS", "i18n_context_id", contextId));
+    }
+
+    private ResponseEntity<Map<String, Object>> blockedI18nGuardrail(String contextId, String failureCode, Map<String, Object> request) {
+        appendI18nAudit("SYSTEM", "i18n-guardrail", "I18N_OUTPUT_GUARDRAIL_BLOCKED", "I18N_CONTEXT", contextId, null, null, text(request, "trace_id", null));
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("guardrail_decision", "BLOCK");
+        body.put("failure_code", failureCode);
+        body.put("i18n_context_id", contextId);
+        return ResponseEntity.unprocessableEntity().body(body);
+    }
+
+    private String insertTranslationUnit(String termEntryId, String languageCode, String surfaceForm, String status, int versionNo, String supersededById, String traceId) {
+        String unitId = "tu-" + UUID.randomUUID();
+        jdbcTemplate.update("""
+                insert into ia_translation_unit
+                (translation_unit_id, term_entry_id, language_code, surface_form, alt_forms_json, status, reviewed_by, reviewed_at,
+                 version_no, superseded_by_id, created_at, updated_at)
+                values (?, ?, ?, ?, '[]', ?, null, null, ?, ?, ?, ?)
+                """, unitId, termEntryId, languageCode, surfaceForm, status, versionNo, supersededById, Timestamp.from(Instant.now()), Timestamp.from(Instant.now()));
+        appendI18nAudit("HUMAN", "editor-i18n", "TRANSLATION_UNIT_CREATED", "TRANSLATION_UNIT", unitId, null, null, traceId);
+        return unitId;
+    }
+
+    private int publishTerminologyProfile(String profileCode, String operatorId, String traceId) {
+        int previousVersion = latestPublishedProfileVersion(profileCode);
+        int version = previousVersion + 1;
+        List<Map<String, Object>> terms = publishedTermsSnapshot();
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("profile_code", profileCode);
+        snapshot.put("profile_version", version);
+        snapshot.put("status", "PUBLISHED");
+        snapshot.put("language_scope", List.of("zh-CN", "en-US", "es-ES"));
+        snapshot.put("terms", terms);
+        snapshot.put("published_at", Instant.now().toString());
+        jdbcTemplate.update("""
+                insert into ia_terminology_profile
+                (profile_code, profile_version, domain_filter, language_scope_json, included_term_keys_json, snapshot_payload_json, published_at, status)
+                values (?, ?, 'CONTRACT', ?, ?, ?, ?, 'PUBLISHED')
+                """, profileCode, version, json(List.of("zh-CN", "en-US", "es-ES")), json(terms.stream().map(term -> term.get("term_key")).toList()), json(snapshot), Timestamp.from(Instant.now()));
+        appendI18nAudit("HUMAN", operatorId, "TERMINOLOGY_PROFILE_CREATED", "TERMINOLOGY_PROFILE", profileCode, profileCode, version, traceId);
+        for (Map<String, Object> term : terms) {
+            jdbcTemplate.update("""
+                    insert into ia_terminology_profile_term_snapshot
+                    (profile_code, profile_version, term_key, term_entry_id, translations_json)
+                    values (?, ?, ?, ?, ?)
+                    """, profileCode, version, text(term, "term_key", null), text(term, "term_entry_id", null), json(term.get("translations")));
+        }
+        cacheTerminologySnapshotAfterCommit(profileCode + "#" + version, snapshot);
+        appendI18nAudit("HUMAN", operatorId, "TERMINOLOGY_PROFILE_PUBLISHED", "TERMINOLOGY_PROFILE", profileCode, profileCode, version, traceId);
+        if (previousVersion > 0) {
+            deprecateTerminologyProfile(profileCode, previousVersion, operatorId, traceId);
+        }
+        return version;
+    }
+
+    private void deprecateTerminologyProfile(String profileCode, int profileVersion, String operatorId, String traceId) {
+        Map<String, Object> previousSnapshot = loadTerminologyProfileFromDatabase(profileCode, profileVersion);
+        if (!previousSnapshot.isEmpty()) {
+            previousSnapshot.put("status", "DEPRECATED");
+            jdbcTemplate.update("""
+                    update ia_terminology_profile
+                    set status = 'DEPRECATED', snapshot_payload_json = ?
+                    where profile_code = ? and profile_version = ? and status = 'PUBLISHED'
+                    """, json(previousSnapshot), profileCode, profileVersion);
+            cacheTerminologySnapshotAfterCommit(profileCode + "#" + profileVersion, previousSnapshot);
+            appendI18nAudit("HUMAN", operatorId, "TERMINOLOGY_PROFILE_DEPRECATED", "TERMINOLOGY_PROFILE", profileCode, profileCode, profileVersion, traceId);
+        }
+    }
+
+    private void cacheTerminologySnapshotAfterCommit(String cacheKey, Map<String, Object> snapshot) {
+        Map<String, Object> cacheValue = new LinkedHashMap<>(snapshot);
+        if (!TransactionSynchronizationManager.isActualTransactionActive() || !TransactionSynchronizationManager.isSynchronizationActive()) {
+            terminologySnapshotCache.put(cacheKey, cacheValue);
+            return;
+        }
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                terminologySnapshotCache.put(cacheKey, cacheValue);
+            }
+        });
+    }
+
+    private List<Map<String, Object>> publishedTermsSnapshot() {
+        List<Map<String, Object>> termRows = jdbcTemplate.queryForList("select * from ia_term_entry where status = 'PUBLISHED' order by term_key");
+        List<Map<String, Object>> terms = new ArrayList<>();
+        for (Map<String, Object> termRow : termRows) {
+            String termEntryId = text(termRow, "TERM_ENTRY_ID", text(termRow, "term_entry_id", null));
+            Map<String, String> translations = approvedTranslations(termEntryId);
+            if (translations.isEmpty()) {
+                continue;
+            }
+            Map<String, Object> term = new LinkedHashMap<>();
+            term.put("term_entry_id", termEntryId);
+            term.put("term_key", text(termRow, "TERM_KEY", text(termRow, "term_key", null)));
+            term.put("domain", text(termRow, "DOMAIN", text(termRow, "domain", null)));
+            term.put("canonical_language", text(termRow, "CANONICAL_LANGUAGE", text(termRow, "canonical_language", "zh-CN")));
+            term.put("translations", translations);
+            terms.add(term);
+        }
+        return terms;
+    }
+
+    private Map<String, String> approvedTranslations(String termEntryId) {
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList("""
+                select language_code, surface_form, version_no from ia_translation_unit
+                where term_entry_id = ? and status = 'APPROVED'
+                order by language_code, version_no desc
+                """, termEntryId);
+        Map<String, String> translations = new LinkedHashMap<>();
+        for (Map<String, Object> row : rows) {
+            String language = text(row, "LANGUAGE_CODE", text(row, "language_code", null));
+            translations.putIfAbsent(language, text(row, "SURFACE_FORM", text(row, "surface_form", null)));
+        }
+        return translations;
+    }
+
+    private Map<String, Object> loadTerminologyProfileFromDatabase(String profileCode, int profileVersion) {
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList("select snapshot_payload_json from ia_terminology_profile where profile_code = ? and profile_version = ? and status in ('PUBLISHED', 'DEPRECATED')", profileCode, profileVersion);
+        if (rows.isEmpty()) {
+            Map<String, Object> empty = new LinkedHashMap<>();
+            empty.put("profile_code", profileCode);
+            empty.put("profile_version", profileVersion);
+            empty.put("status", "MISSING");
+            empty.put("terms", List.of());
+            return empty;
+        }
+        return mapFromJson(text(rows.get(0), "SNAPSHOT_PAYLOAD_JSON", text(rows.get(0), "snapshot_payload_json", "{}")));
+    }
+
+    private String termStatus(String termEntryId) {
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList("select status from ia_term_entry where term_entry_id = ?", termEntryId);
+        if (rows.isEmpty()) {
+            return null;
+        }
+        return text(rows.get(0), "STATUS", text(rows.get(0), "status", null));
+    }
+
+    private Map<String, Object> i18nContextBody(String contextId) {
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList("select * from ia_i18n_context where i18n_context_id = ?", contextId);
+        if (rows.isEmpty()) {
+            throw new IllegalArgumentException("i18n_context_id 不存在: " + contextId);
+        }
+        Map<String, Object> row = rows.get(0);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("i18n_context_id", contextId);
+        body.put("owner_type", text(row, "OWNER_TYPE", text(row, "owner_type", null)));
+        body.put("owner_id", text(row, "OWNER_ID", text(row, "owner_id", null)));
+        body.put("terminology_profile_code", text(row, "TERMINOLOGY_PROFILE_CODE", text(row, "terminology_profile_code", null)));
+        body.put("profile_version", ((Number) row.getOrDefault("PROFILE_VERSION", row.get("profile_version"))).intValue());
+        body.put("input_language", text(row, "INPUT_LANGUAGE", text(row, "input_language", null)));
+        body.put("normalized_language", text(row, "NORMALIZED_LANGUAGE", text(row, "normalized_language", null)));
+        body.put("output_language", text(row, "OUTPUT_LANGUAGE", text(row, "output_language", null)));
+        body.put("display_label_language", text(row, "DISPLAY_LABEL_LANGUAGE", text(row, "display_label_language", null)));
+        body.put("i18n_status", text(row, "I18N_STATUS", text(row, "i18n_status", null)));
+        body.put("segment_language_payload", mapFromJson(text(row, "SEGMENT_LANGUAGE_PAYLOAD_JSON", text(row, "segment_language_payload_json", "{}"))));
+        body.put("terminology_snapshot", mapFromJson(text(row, "TERMINOLOGY_SNAPSHOT_JSON", text(row, "terminology_snapshot_json", "{}"))));
+        body.put("downstream_degradation", mapFromJson(text(row, "DOWNSTREAM_DEGRADATION_JSON", text(row, "downstream_degradation_json", "{}"))));
+        return body;
+    }
+
+    private Map<String, Map<String, String>> snapshotTermTranslations(Map<String, Object> snapshot) {
+        Map<String, Map<String, String>> terms = new LinkedHashMap<>();
+        for (Map<String, Object> term : listMaps(snapshot.get("terms"))) {
+            Map<String, String> translations = new LinkedHashMap<>();
+            for (Map.Entry<String, Object> entry : map(term.get("translations")).entrySet()) {
+                translations.put(entry.getKey(), entry.getValue().toString());
+            }
+            terms.put(text(term, "term_key", null), translations);
+        }
+        return terms;
+    }
+
+    private boolean hasApprovedRequiredTranslations(String termEntryId) {
+        Map<String, String> translations = approvedTranslations(termEntryId);
+        return translations.keySet().containsAll(List.of("zh-CN", "en-US", "es-ES"));
+    }
+
+    private int latestPublishedProfileVersion(String profileCode) {
+        Integer version = jdbcTemplate.queryForObject("select coalesce(max(profile_version), 0) from ia_terminology_profile where profile_code = ? and status = 'PUBLISHED'", Integer.class, profileCode);
+        return version == null ? 0 : version;
+    }
+
+    private Map<String, Object> termEntryBody(String termEntryId) {
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList("select * from ia_term_entry where term_entry_id = ?", termEntryId);
+        if (rows.isEmpty()) {
+            throw new IllegalArgumentException("term_entry_id 不存在: " + termEntryId);
+        }
+        Map<String, Object> row = rows.get(0);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("term_entry_id", termEntryId);
+        body.put("term_key", text(row, "TERM_KEY", text(row, "term_key", null)));
+        body.put("domain", text(row, "DOMAIN", text(row, "domain", null)));
+        body.put("status", text(row, "STATUS", text(row, "status", null)));
+        body.put("canonical_language", text(row, "CANONICAL_LANGUAGE", text(row, "canonical_language", null)));
+        return body;
+    }
+
+    private Map<String, Object> translationUnitBody(String translationUnitId) {
+        Map<String, Object> row = requireTranslationUnitRow(translationUnitId);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("translation_unit_id", translationUnitId);
+        body.put("term_entry_id", text(row, "TERM_ENTRY_ID", text(row, "term_entry_id", null)));
+        body.put("language_code", text(row, "LANGUAGE_CODE", text(row, "language_code", null)));
+        body.put("surface_form", text(row, "SURFACE_FORM", text(row, "surface_form", null)));
+        body.put("status", text(row, "STATUS", text(row, "status", null)));
+        return body;
+    }
+
+    private Map<String, Object> requireTranslationUnitRow(String translationUnitId) {
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList("select * from ia_translation_unit where translation_unit_id = ?", translationUnitId);
+        if (rows.isEmpty()) {
+            throw new IllegalArgumentException("translation_unit_id 不存在: " + translationUnitId);
+        }
+        return rows.get(0);
+    }
+
+    private void appendI18nAudit(String operatorType, String operatorId, String action, String targetType, String targetId,
+                                 String profileCode, Integer profileVersion, String traceId) {
+        jdbcTemplate.update("""
+                insert into ia_i18n_audit_event
+                (audit_event_id, operator_type, operator_id, action, target_type, target_id, profile_code, profile_version, trace_id, occurred_at)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, "i18n-audit-" + UUID.randomUUID(), operatorType, operatorId, action, targetType, targetId, profileCode, profileVersion, traceId, Timestamp.from(Instant.now()));
+    }
+
+    private String normalizeLanguage(String language) {
+        if (language == null || language.isBlank()) {
+            return "zh-CN";
+        }
+        return switch (language) {
+            case "zh", "zh_CN", "zh-CN" -> "zh-CN";
+            case "en", "en_US", "en-US" -> "en-US";
+            case "es", "es_ES", "es-ES", "es-MX" -> "es-ES";
+            case "MIXED", "UNKNOWN" -> language;
+            default -> "UNKNOWN";
+        };
+    }
+
+    private boolean supportedLanguage(String language) {
+        return List.of("zh-CN", "en-US", "es-ES").contains(language);
     }
 
     private SearchSourceEnvelopeState buildSearchSourceEnvelope(String docType, Map<String, Object> request) {
@@ -2161,6 +2870,10 @@ class CoreChainService {
             body.put("body_snippet", document.bodyText());
         }
         body.put("locale_code", document.localeCode());
+        String i18nContextId = searchDocumentI18nContexts.get(document.searchDocId());
+        if (i18nContextId != null) {
+            body.put("i18n_context_id", i18nContextId);
+        }
         body.put("exposure_status", document.exposureStatus());
         body.put("rebuild_generation", document.rebuildGeneration());
         return body;
@@ -5053,6 +5766,10 @@ class CoreChainService {
         body.put("task_center_ref", Map.of("platform_job_id", job.platformJobId(), "job_type", "IA_OCR_RECOGNITION", "job_status", "PENDING"));
         if (job.resultAggregateId() != null) {
             body.put("result", ocrResultBody(requireOcrResult(job.resultAggregateId())));
+            Map<String, Object> context = i18nContextByOwner("OCR_RESULT", job.resultAggregateId());
+            if (context != null) {
+                body.put("i18n_context", context);
+            }
         }
         body.put("retry_facts", ocrRetryFacts.getOrDefault(job.ocrJobId(), List.of()));
         body.put("audit_events", ocrAuditEvents.getOrDefault(job.ocrJobId(), List.of()));
@@ -5077,6 +5794,10 @@ class CoreChainService {
         body.put("seal_regions", result.sealRegions());
         body.put("field_candidates", result.fieldCandidates());
         body.put("language_segments", result.languageSegments());
+        Map<String, Object> context = i18nContextByOwner("OCR_RESULT", result.ocrResultAggregateId());
+        if (context != null) {
+            body.put("i18n_context_id", text(context, "i18n_context_id", null));
+        }
         body.put("page_summary", result.pageSummary());
         body.put("quality_score", result.qualityScore());
         body.put("content_fingerprint", result.contentFingerprint());

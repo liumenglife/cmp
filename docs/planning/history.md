@@ -406,3 +406,41 @@
 
 - 第四批智能推荐、候选排序与质量评估不再作为未完成任务处理。
 - 第四批下一功能点为“多语言知识治理”，进入前需先按新业务分支规则汇报分支名称备选项并等待用户选择。
+
+## 2026-04-30 第四批候选排序质量评估合并与清理归档
+
+### 归档原因
+
+- 拉取请求十已完成检查、合并到 `main`，本地 `main` 已同步，候选排序质量评估分支和工作树已清理。
+- 后续开发切换到第四批下一功能点“多语言知识治理”，当前真相只维护下一功能点启动状态。
+
+### 已归档任务批次
+
+- [✓] 拉取请求十合并：合并提交为 `961fde5`，标题为“第四批候选排序质量评估”。
+- [✓] 本地 `main` 同步：`main` 已快进到 `origin/main` 的 `961fde5`。
+- [✓] 候选排序质量评估分支清理：`feature/candidate-ranking-quality-evaluation` 本地分支、远端分支和隔离工作树均已删除。
+- [✓] 第四批候选排序质量评估完成并合并：智能推荐、候选排序、质量分层、放行决策映射、正式载荷落点和规划真相归档均已进入 `main`。
+
+### 迁移说明
+
+- 候选排序质量评估不再作为当前未完成任务处理。
+- 第四批下一功能点为“多语言知识治理”，使用 `feature/multilingual-knowledge-governance` 与 `.worktrees/feature/multilingual-knowledge-governance` 推进。
+
+## 2026-04-30 第四批多语言知识治理阶段性归档
+
+### 归档原因
+
+- 第四批多语言知识治理已经完成测试驱动开发、规格复审、代码质量终审与完整验证。
+- `current.md` 继续维护第四批后续功能点推进状态，本节记录已经全绿的多语言知识治理完成事实。
+
+### 已归档任务批次
+
+- [✓] 多语言知识治理：已按测试驱动开发完成，覆盖 `TermEntry`、`TranslationUnit`、`TerminologyProfile` 的创建、提交审核、审核、发布、废弃、版本快照与生命周期审计；实现 `ia_i18n_context` 与 `terminology_profile_code + profile_version` 固化绑定，支持 `zh-CN`、`en-US`、`es-ES` 与其他语言降级，覆盖混语片段保留、术语缺失降级、`i18n_status=FAILED` 下游降级、AI 输出术语一致性护栏、术语快照缓存失效后数据库正式记录回退读取。
+- [✓] 规格审查与修复：首次规格审查发现主链未接入 `ia_i18n_context`、未发布 profile 仍可 `APPLIED`、术语废弃硬编码 profile、缓存失效测试依赖反射；后续复审继续发现缓存未真实回退、主链 profile 错误被吞、AI protected snapshot 前置副作用、`UNKNOWN` 显式 profile 绕过校验、生命周期审计不完整；均已按红灯测试修复，最终规格复审结论为通过，没问题。
+- [✓] 代码质量审查与修复：代码质量审查发现历史 `DEPRECATED` profile 缓存驱逐后不可回放、治理接口缺权限、状态机可绕过提审、错误路径残留审计、废弃 / 修订接口副作用、近似权限误放行、多步写入缺事务边界、事务回滚后缓存可能暴露未提交快照；均已按红灯测试修复，最终代码质量终审结论为通过，没问题。
+- [✓] 多语言知识治理完整验证：最终 `Batch4MultilingualKnowledgeGovernanceTests` 25 个测试通过，后端 `mvn test` 188 个测试通过，`./scripts/verify-all.sh` 通过，覆盖后端测试、前端依赖检查、lint、vitest、build、Docker Compose 配置、镜像构建、编排启动、healthcheck / smoke 与清理。
+
+### 迁移说明
+
+- 第四批多语言知识治理不再作为未完成任务处理。
+- 第四批下一功能点为“结果回写与冲突处理”，继续以 [`102-04-batch-4-intelligent-applications-implementation-plan.md`](../superpowers/plans/102-04-batch-4-intelligent-applications-implementation-plan.md) 为执行依据。
