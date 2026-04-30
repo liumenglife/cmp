@@ -4,12 +4,12 @@
 
 - 第四批目标是完成智能与增强能力的一期实现基准，围绕智能应用主线交付文字识别、全文检索、智能辅助、智能推荐、多语言知识治理、结果回写与运维验收闭环。
 - 本批必须以合同主档为业务真相源、文档中心为文件真相源、`Agent OS` 为智能运行时底座，智能应用只承接受控派生结果域。
-- 当前分支为 `feature/multilingual-knowledge-governance`，隔离工作区为 `.worktrees/feature/multilingual-knowledge-governance`。
+- 当前主工作区在 `main`，下一功能点尚未创建业务分支和隔离工作区。
 
 ## 成功定义
 
-- 已基于最新 `main` 创建多语言知识治理隔离工作区和业务分支。
-- 新工作树基线验证 `./scripts/verify-all.sh` 通过。
+- 已完成智能推荐、候选排序与质量评估、多语言知识治理的分支合并和清理。
+- 下一功能点将在选定业务分支名后基于最新 `main` 创建隔离工作区。
 - 文字识别可基于文档中心受控版本创建作业，完成权限校验、幂等、引擎适配、结果归一、失败重试、版本失效与搜索补索引事件。
 - 全文检索可消费合同、文档、条款与文字识别派生结果，支持权限裁剪、稳定快照、导出二次校验、索引重建与降级。
 - 智能辅助通过 `Agent OS` 和模型抽象层运行，输出具备来源引用、护栏决策、人工确认挂点与审计链路。
@@ -25,9 +25,9 @@
 
 ## 当前阶段
 
-- 阶段：多语言知识治理已完成分支与工作树创建，基线验证通过；下一步派发实现子代理按测试驱动开发推进。
-- 分支：`feature/multilingual-knowledge-governance`。
-- 隔离工作区：`.worktrees/feature/multilingual-knowledge-governance`。
+- 阶段：拉取请求十一已合并到 `main`，多语言知识治理分支和工作树已清理；下一步准备“结果回写与冲突处理”分支命名与工作树创建。
+- 分支：`main`。
+- 隔离工作区：下一功能点尚未创建。
 - 规格：[`102-cmp-implementation-execution-spec.md`](../superpowers/specs/102-cmp-implementation-execution-spec.md)。
 - 当前批次计划：[`102-04-batch-4-intelligent-applications-implementation-plan.md`](../superpowers/plans/102-04-batch-4-intelligent-applications-implementation-plan.md)。
 
@@ -42,11 +42,9 @@
 - [✓] 智能推荐、候选排序与质量评估：已通过独立质量审查复审，没问题；完整验证 `./scripts/verify-all.sh` 通过。
 - [✓] 拉取请求十合并与分支清理：已合并到 `main`，本地 `main` 已同步，候选排序质量评估本地分支、远端分支和工作树均已删除。
 - [✓] 多语言知识治理分支与工作树创建：基于 `origin/main` 创建 `feature/multilingual-knowledge-governance`，基线验证 `./scripts/verify-all.sh` 通过。
-- [✓] 多语言知识治理红灯测试：覆盖术语新增发布、翻译单元审核、术语废弃、混语文档处理、术语快照缓存失效、输出术语错误拦截、历史任务术语快照不漂移。
-- [✓] 多语言知识治理生产实现：已实现 `TermEntry`、`TranslationUnit`、`TerminologyProfile` 生命周期、`ia_i18n_context` 快照绑定、语言归一、混语降级、术语一致性护栏、审计与缓存回退。
-- [✓] 多语言知识治理定向验证与完整验证：最终 `Batch4MultilingualKnowledgeGovernanceTests` 25 个测试通过，后端 188 个测试通过，`./scripts/verify-all.sh` 通过。
-- [✓] 多语言知识治理独立质量审查：规格复审结论为通过，没问题；代码质量终审结论为通过，没问题。
-- [✓] 多语言知识治理修复与复审：已关闭规格缺口、权限状态机缺口、事务回滚与缓存一致性缺口。
+- [✓] 多语言知识治理：已完成测试驱动实现、规格复审、代码质量终审与完整验证。
+- [✓] 拉取请求十一合并与分支清理：已合并到 `main`，本地 `main` 已同步，多语言知识治理本地分支、远端分支和工作树均已删除。
+- [•] 结果回写与冲突处理分支命名准备。
 - [ ] 结果回写与冲突处理。
 - [ ] 运维监控、恢复与上线验收。
 - [ ] 第四批跨能力综合验证。
@@ -63,13 +61,14 @@
 ## 当前正在做
 
 - [✓] 拉取请求十已合并到 `main`，合并提交为 `961fde5`。
+- [✓] 拉取请求十一已合并到 `main`，合并提交为 `d5f3184`。
 - [✓] 本地 `main` 已同步到 `origin/main`。
 - [✓] 候选排序质量评估分支和工作树已清理。
+- [✓] 多语言知识治理分支和工作树已清理。
 - [✓] 智能推荐、候选排序与质量评估已完成实现、问题修复与独立质量审查复审，结论为通过，没问题。
 - [✓] 智能推荐、候选排序与质量评估完整验证已通过：`./scripts/verify-all.sh`，后端 163 个测试通过，前端检查、测试、构建通过，镜像构建、编排启动、冒烟验证和清理均通过。
-- [✓] 已按用户选择创建多语言知识治理分支与工作树：`feature/multilingual-knowledge-governance`。
-- [✓] 新工作树基线验证已通过：`./scripts/verify-all.sh`，后端 163 个测试通过，前端 lint、前端 vitest、前端 build、镜像构建、编排启动、冒烟验证和清理均通过。
-- [✓] 多语言知识治理已完成测试驱动实现、规格复审、代码质量终审与完整验证。
+- [✓] 多语言知识治理已完成测试驱动实现、规格复审、代码质量终审与完整验证；最终 `Batch4MultilingualKnowledgeGovernanceTests` 25 个测试通过，后端 188 个测试通过，`./scripts/verify-all.sh` 通过。
+- [•] 准备按新业务分支规则为结果回写与冲突处理汇报备选分支名称。
 
 ## 已完成里程碑
 
@@ -79,6 +78,7 @@
 - [✓] 第三批依赖业务能力全部功能点、跨模块综合验证、整体质量收口、PR 合并与清理已完成。
 - [✓] 第四批前半段阶段性交付已合并。
 - [✓] 第四批智能推荐、候选排序与质量评估已合并。
+- [✓] 第四批多语言知识治理已合并。
 
 ## 当前阻塞
 
@@ -87,15 +87,15 @@
 
 ## 活跃支线
 
-- [✓] 多语言知识治理测试驱动实现已完成。
+- [•] 结果回写与冲突处理分支命名准备。
 
 ## 下一步唯一动作
 
-- 提交 `feature/multilingual-knowledge-governance` 当前全绿变更，并准备后续 PR 收口。
+- 按新业务分支规则，基于第四批计划为结果回写与冲突处理汇报几个 `feature/<英文业务功能名>` 备选分支名称，暂不创建分支。
 
 ## 恢复提示
 
 - 恢复时先读本文件、[`history.md`](./history.md)、[`decisions.md`](./decisions.md)。
 - 已完成批次只读取 [`history.md`](./history.md)，不要把已完成批次长列表写回 `current.md`。
 - 第四批正式执行依据为 [`102-cmp-implementation-execution-spec.md`](../superpowers/specs/102-cmp-implementation-execution-spec.md) 与 [`102-04-batch-4-intelligent-applications-implementation-plan.md`](../superpowers/plans/102-04-batch-4-intelligent-applications-implementation-plan.md)。
-- 当前多语言知识治理工作树为 `.worktrees/feature/multilingual-knowledge-governance`；实现必须在该隔离工作区内推进。
+- 当前主工作区为 `main`；进入结果回写与冲突处理前需先按用户选择创建新的隔离工作树。
