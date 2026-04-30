@@ -68,6 +68,21 @@ class AgentOsController {
         return service.auditView(runId);
     }
 
+    @PostMapping("/api/agent-os/human-confirmations")
+    ResponseEntity<Map<String, Object>> createHumanConfirmation(@RequestBody Map<String, Object> request) {
+        return ResponseEntity.status(HttpStatus.CREATED).body(service.createHumanConfirmation(request));
+    }
+
+    @PostMapping("/api/agent-os/human-confirmations/{confirmationId}/decisions")
+    Map<String, Object> decideHumanConfirmation(@PathVariable String confirmationId, @RequestBody Map<String, Object> request) {
+        return service.decideHumanConfirmation(confirmationId, request);
+    }
+
+    @GetMapping("/api/agent-os/human-confirmations/{confirmationId}")
+    Map<String, Object> humanConfirmation(@PathVariable String confirmationId) {
+        return service.humanConfirmation(confirmationId);
+    }
+
     @PostMapping("/api/agent-os/environment-events")
     ResponseEntity<Map<String, Object>> createEnvironmentEvent(
             @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
@@ -275,6 +290,71 @@ class AgentOsService {
         return body;
     }
 
+    @Transactional
+    Map<String, Object> createHumanConfirmation(Map<String, Object> request) {
+        String confirmationId = "ao-confirm-" + UUID.randomUUID();
+        String traceId = trace(request);
+        Instant now = now();
+        jdbcTemplate.update("""
+                insert into ao_human_confirmation
+                (confirmation_id, source_task_id, source_result_id, confirmation_type, business_module, object_type, object_id,
+                 confirmation_status, requested_by, decision_result_json, trace_id, created_at, updated_at)
+                values (?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, ?, ?)
+                """, confirmationId, text(request, "source_task_id", null), text(request, "source_result_id", null),
+                text(request, "confirmation_type", "AI_OUTPUT_REVIEW"), text(request, "business_module", "AGENT_OS"),
+                text(request, "object_type", "OBJECT"), text(request, "object_id", null), text(request, "requested_by", "agent-os"),
+                json(Map.of()), traceId, ts(now), ts(now));
+        audit(confirmationId, text(request, "source_task_id", null), "HUMAN_CONFIRMATION_CREATED", "人工确认单已创建", "SUCCESS",
+                text(request, "requested_by", "agent-os"), traceId, "HIGH");
+        return humanConfirmation(confirmationId);
+    }
+
+    @Transactional
+    Map<String, Object> decideHumanConfirmation(String confirmationId, Map<String, Object> request) {
+        humanConfirmation(confirmationId);
+        String decision = text(request, "decision", "APPROVED");
+        String operator = text(request, "operator_user_id", "SYSTEM");
+        String traceId = trace(request);
+        Map<String, Object> decisionResult = new LinkedHashMap<>();
+        decisionResult.put("decision", decision);
+        decisionResult.put("operator_user_id", operator);
+        decisionResult.put("decision_comment", text(request, "decision_comment", null));
+        decisionResult.put("decided_at", now().toString());
+        jdbcTemplate.update("""
+                update ao_human_confirmation
+                set confirmation_status = ?, decision_result_json = ?, decided_by = ?, decided_at = ?, updated_at = ?
+                where confirmation_id = ?
+                """, decision, json(decisionResult), operator, ts(now()), ts(now()), confirmationId);
+        audit(confirmationId, null, "HUMAN_CONFIRMATION_DECIDED", "人工确认结果已处理", decision, operator, traceId, "HIGH");
+        return humanConfirmation(confirmationId);
+    }
+
+    Map<String, Object> humanConfirmation(String confirmationId) {
+        return queryOptional("""
+                select confirmation_id, source_task_id, source_result_id, confirmation_type, business_module, object_type, object_id,
+                       confirmation_status, requested_by, decision_result_json, trace_id, created_at, updated_at, decided_by, decided_at
+                from ao_human_confirmation where confirmation_id = ?
+                """, (rs, rowNum) -> {
+            Map<String, Object> body = new LinkedHashMap<>();
+            body.put("confirmation_id", rs.getString("confirmation_id"));
+            body.put("source_task_id", rs.getString("source_task_id"));
+            body.put("source_result_id", rs.getString("source_result_id"));
+            body.put("confirmation_type", rs.getString("confirmation_type"));
+            body.put("business_module", rs.getString("business_module"));
+            body.put("object_type", rs.getString("object_type"));
+            body.put("object_id", rs.getString("object_id"));
+            body.put("confirmation_status", rs.getString("confirmation_status"));
+            body.put("requested_by", rs.getString("requested_by"));
+            body.put("decision_result", parseMap(rs.getString("decision_result_json")));
+            body.put("trace_id", rs.getString("trace_id"));
+            body.put("decided_by", rs.getString("decided_by"));
+            body.put("decided_at", rs.getTimestamp("decided_at") == null ? null : rs.getTimestamp("decided_at").toInstant().toString());
+            body.put("created_at", rs.getTimestamp("created_at").toInstant().toString());
+            body.put("updated_at", rs.getTimestamp("updated_at").toInstant().toString());
+            return body;
+        }, confirmationId).orElseThrow(() -> new IllegalArgumentException("confirmation 不存在: " + confirmationId));
+    }
+
     Map<String, Object> environmentEvent(String eventId) {
         return eventBody(eventId);
     }
@@ -477,6 +557,10 @@ class AgentOsService {
 
         if ("BUDGET_REJECT".equals(scenario)) {
             return fail(taskId, runId, "PROVIDER_BUDGET_EXCEEDED", "Provider 预算门拒绝模型调用", "PROVIDER_BUDGET_REJECTED", traceId, null);
+        }
+
+        if ("TIMEOUT".equals(scenario)) {
+            return fail(taskId, runId, "AGENT_OS_TIMEOUT", "Agent OS 运行超时", "AGENT_OS_TIMEOUT", traceId, "Agent OS 超时，未形成可发布结果");
         }
 
         if (!"AUDIT_MISSING".equals(scenario)) {
