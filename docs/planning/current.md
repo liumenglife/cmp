@@ -25,7 +25,7 @@
 
 ## 当前阶段
 
-- 阶段：第四批全文检索与索引重建已完成，独立质量审查最终复审通过，准备进入智能辅助应用与输出护栏。
+- 阶段：第四批智能辅助应用与输出护栏已完成，独立质量审查复审通过；下一步按用户要求诊断并优化完整验证脚本性能。
 - 分支：`feature/batch4-intelligent-enhancement-capabilities`。
 - 隔离工作区：`.worktrees/feature/batch4-intelligent-enhancement-capabilities`。
 - 规格：[`102-cmp-implementation-execution-spec.md`](../superpowers/specs/102-cmp-implementation-execution-spec.md)。
@@ -37,7 +37,7 @@
 - [✓] 第四批启动门禁核验与基线验证：基线验证通过；六项上游可消费性缺口已按测试驱动开发修复，独立质量审查结论为通过，没问题。
 - [✓] 文字识别稳定输入闭环：已通过独立质量审查复审，没问题。
 - [✓] 全文检索与索引重建：已通过独立质量审查最终复审，没问题。
-- [ ] 智能辅助应用与输出护栏。
+- [✓] 智能辅助应用与输出护栏：已通过独立质量审查复审，没问题。
 - [ ] 智能推荐、候选排序与质量评估。
 - [ ] 多语言知识治理。
 - [ ] 结果回写与冲突处理。
@@ -68,6 +68,9 @@
 - [✓] 文字识别稳定输入闭环完整验证已通过：`./scripts/verify-all.sh`，后端 139 个测试通过，前端检查、测试、构建通过，容器健康检查通过并完成清理。
 - [✓] 全文检索与索引重建已完成实现、多轮问题修复与独立质量审查最终复审，结论为通过，没问题。
 - [✓] 全文检索与索引重建完整验证已通过：`./scripts/verify-all.sh`，后端 148 个测试通过，前端检查、测试、构建通过，容器健康检查通过并完成清理。
+- [✓] 智能辅助应用与输出护栏已完成实现、问题修复与独立质量审查复审，结论为通过，没问题。
+- [✓] 智能辅助应用与输出护栏完整验证已通过：`./scripts/verify-all.sh`，后端 158 个测试通过，前端检查、测试、构建通过，容器健康检查通过并完成清理。
+- [•] 用户新增专项要求：完成当前功能点闭环后，诊断并优化 `./scripts/verify-all.sh` 性能问题。
 
 ## 已完成里程碑
 
@@ -88,7 +91,7 @@
 
 ## 下一步唯一动作
 
-- 在 `.worktrees/feature/batch4-intelligent-enhancement-capabilities` 派发实现子代理，按测试驱动开发推进智能辅助应用与输出护栏。
+- 在 `.worktrees/feature/batch4-intelligent-enhancement-capabilities` 专门诊断并优化 `./scripts/verify-all.sh` 性能问题。
 
 ## 恢复提示
 

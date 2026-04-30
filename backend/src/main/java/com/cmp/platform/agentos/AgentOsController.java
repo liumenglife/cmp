@@ -559,6 +559,10 @@ class AgentOsService {
             return fail(taskId, runId, "PROVIDER_BUDGET_EXCEEDED", "Provider 预算门拒绝模型调用", "PROVIDER_BUDGET_REJECTED", traceId, null);
         }
 
+        if ("TIMEOUT".equals(scenario)) {
+            return fail(taskId, runId, "AGENT_OS_TIMEOUT", "Agent OS 运行超时", "AGENT_OS_TIMEOUT", traceId, "Agent OS 超时，未形成可发布结果");
+        }
+
         if (!"AUDIT_MISSING".equals(scenario)) {
             audit(promptId, runId, "PROMPT_SNAPSHOT_CREATED", "Prompt 快照已生成", "SUCCESS", "SYSTEM", traceId, "LOW");
         }

@@ -1,5 +1,6 @@
 package com.cmp.platform.corechain;
 
+import com.cmp.platform.agentos.AgentOsGateway;
 import java.sql.Timestamp;
 import java.time.Instant;
 import java.util.ArrayList;
@@ -166,8 +167,23 @@ class CoreChainController {
 
     @PostMapping("/api/intelligent-applications/search/permissions/changed")
     ResponseEntity<Map<String, Object>> expireSearchSnapshotsForPermissionChange(@RequestHeader(value = "X-CMP-Permissions", required = false) String permissions,
-                                                                                 @RequestBody Map<String, Object> request) {
+                                                                                  @RequestBody Map<String, Object> request) {
         return service.expireSearchSnapshotsForPermissionChange(permissions, request);
+    }
+
+    @PostMapping("/api/intelligent-applications/ai/jobs")
+    ResponseEntity<Map<String, Object>> createAiApplicationJob(@RequestHeader(value = "X-CMP-Permissions", required = false) String permissions,
+                                                               @RequestHeader(value = "X-CMP-Org-Scope", required = false) String orgScope,
+                                                               @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+                                                               @RequestBody Map<String, Object> request) {
+        return service.createAiApplicationJob(permissions, orgScope, idempotencyKey, request);
+    }
+
+    @PostMapping("/api/intelligent-applications/ai/protected-results/{snapshotId}/guardrail-replay")
+    ResponseEntity<Map<String, Object>> replayAiGuardrail(@PathVariable String snapshotId,
+                                                          @RequestHeader(value = "X-CMP-Permissions", required = false) String permissions,
+                                                          @RequestBody(required = false) Map<String, Object> request) {
+        return service.replayAiGuardrail(snapshotId, permissions, request == null ? Map.of() : request);
     }
 
     @GetMapping("/api/document-center/assets")
@@ -506,15 +522,21 @@ class CoreChainService {
     private final Map<String, SearchSourceEnvelopeState> searchSourceEnvelopes = new ConcurrentHashMap<>();
     private final Map<String, SearchDocumentState> searchDocuments = new ConcurrentHashMap<>();
     private final Map<String, SearchResultSetState> searchResultSets = new ConcurrentHashMap<>();
+    private final Map<String, AiApplicationJobState> aiApplicationJobs = new ConcurrentHashMap<>();
+    private final Map<String, Map<String, Object>> aiContextEnvelopes = new ConcurrentHashMap<>();
+    private final Map<String, AiApplicationResultState> aiApplicationResults = new ConcurrentHashMap<>();
+    private final Map<String, ProtectedResultSnapshotState> protectedResultSnapshots = new ConcurrentHashMap<>();
     private int activeSearchGeneration = 1;
     private final List<Map<String, Object>> lifecycleTimelineEvents = new ArrayList<>();
     private final List<Map<String, Object>> lifecycleAuditEvents = new ArrayList<>();
     private final JdbcTemplate jdbcTemplate;
     private final ObjectMapper objectMapper;
+    private final AgentOsGateway agentOsGateway;
 
-    CoreChainService(JdbcTemplate jdbcTemplate, ObjectMapper objectMapper) {
+    CoreChainService(JdbcTemplate jdbcTemplate, ObjectMapper objectMapper, AgentOsGateway agentOsGateway) {
         this.jdbcTemplate = jdbcTemplate;
         this.objectMapper = objectMapper;
+        this.agentOsGateway = agentOsGateway;
     }
 
     Map<String, Object> createContract(Map<String, Object> request) {
@@ -948,6 +970,488 @@ class CoreChainService {
         }
         appendSearchAudit("SEARCH_PERMISSION_SNAPSHOT_EXPIRED", actorId, null, null, "SUCCESS", text(request, "trace_id", null));
         return ResponseEntity.ok(Map.of("expired_snapshot_count", expired));
+    }
+
+    ResponseEntity<Map<String, Object>> createAiApplicationJob(String permissions, String orgScope, String idempotencyHeader, Map<String, Object> request) {
+        if (permissions == null || !permissions.contains("AI_APPLICATION_CREATE") || !permissions.contains("CONTRACT_VIEW") || !permissions.contains("SEARCH_QUERY")) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(error("AI_APPLICATION_PERMISSION_DENIED", "缺少智能应用创建、合同查看或搜索查询权限"));
+        }
+        String applicationType = text(request, "application_type", "SUMMARY");
+        if (!List.of("SUMMARY", "QA", "RISK_ANALYSIS", "DIFF_EXTRACTION").contains(applicationType)) {
+            return ResponseEntity.unprocessableEntity().body(error("AI_APPLICATION_TYPE_INVALID", "智能应用类型不在允许范围内"));
+        }
+        ContractState contract = requireContract(text(request, "contract_id", null));
+        if (orgScope != null && !orgScope.isBlank() && contract.ownerOrgUnitId() != null && !orgScope.equals(contract.ownerOrgUnitId())) {
+            Map<String, Object> protectedSnapshot = createStandaloneProtectedSnapshot(applicationType, contract.contractId(), "REJECT", "AI_APPLICATION_SCOPE_DENIED", request);
+            Map<String, Object> body = error("AI_APPLICATION_SCOPE_DENIED", "问题超出调用方可见范围");
+            body.put("protected_result_snapshot", protectedSnapshot);
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(body);
+        }
+
+        List<SearchDocumentState> evidenceDocs = aiEvidenceDocuments(contract.contractId(), text(request, "document_version_id", null), orgScope);
+        if (evidenceDocs.isEmpty()) {
+            Map<String, Object> protectedSnapshot = createStandaloneProtectedSnapshot(applicationType, contract.contractId(), "REJECT", "AI_CONTEXT_NO_EVIDENCE", request);
+            Map<String, Object> body = error("AI_CONTEXT_NO_EVIDENCE", "缺少可绑定来源证据，拒绝执行智能任务");
+            body.put("protected_result_snapshot", protectedSnapshot);
+            return ResponseEntity.unprocessableEntity().body(body);
+        }
+
+        String idempotencyKey = text(request, "idempotency_key", idempotencyHeader == null ? "ai-default-idem" : idempotencyHeader);
+        String scopeDigest = "sha256:" + Integer.toHexString((contract.contractId() + ":" + text(request, "document_version_id", "") + ":" + applicationType).hashCode());
+        AiApplicationJobState existingJob = findAiJobByIdempotency(applicationType, contract.contractId(), idempotencyKey);
+        if (existingJob != null) {
+            if (!scopeDigest.equals(existingJob.scopeDigest())) {
+                return ResponseEntity.status(HttpStatus.CONFLICT).body(error("AI_APPLICATION_IDEMPOTENCY_CONFLICT", "同一幂等键对应的智能应用范围不一致"));
+            }
+            Map<String, Object> body = aiJobResponse(existingJob, aiContextEnvelopes.get(existingJob.resultContextId()), requireAiResultByJob(existingJob.aiApplicationJobId()),
+                    protectedSnapshotByJob(existingJob.aiApplicationJobId()), null, new AgentOsBinding(existingJob.agentTaskId(), null, existingJob.agentResultId(), existingJob.failureCode()));
+            body.put("duplicate", true);
+            return ResponseEntity.ok(body);
+        }
+        String jobId = "ai-job-" + UUID.randomUUID();
+        String contextAssemblyJobId = "ai-ctx-job-" + UUID.randomUUID();
+        String resultContextId = "ai-ctx-" + UUID.randomUUID();
+        String traceId = text(request, "trace_id", "trace-" + UUID.randomUUID());
+        String actorId = text(request, "actor_id", "system");
+        List<Map<String, Object>> evidenceSegments = buildEvidenceSegments(evidenceDocs, request);
+        if (!canFitEvidenceBudget(evidenceSegments, request)) {
+            Map<String, Object> protectedSnapshot = createStandaloneProtectedSnapshot(applicationType, contract.contractId(), "REJECT", "AI_CONTEXT_BUDGET_INSUFFICIENT", request);
+            Map<String, Object> body = error("AI_CONTEXT_BUDGET_INSUFFICIENT", "证据预算不足，无法保留必要事实和引用，拒绝执行智能任务");
+            body.put("protected_result_snapshot", protectedSnapshot);
+            body.put("budget_decision", Map.of("degradation_result", "REJECTED_BEFORE_AGENT_OS", "available_scope", "请缩小合同或文档范围后重试"));
+            return ResponseEntity.unprocessableEntity().body(body);
+        }
+        Map<String, Object> envelope = buildAiContextEnvelope(resultContextId, jobId, contextAssemblyJobId, applicationType, contract, evidenceDocs, evidenceSegments, request);
+        persistAiContextEnvelope(resultContextId, jobId, contextAssemblyJobId, applicationType, contract.contractId(), envelope);
+
+        AgentOsBinding agent = createAgentOsAiTask(jobId, applicationType, contract.contractId(), resultContextId, actorId, idempotencyKey, traceId, bool(request, "simulate_agent_timeout", false));
+        if (bool(request, "simulate_agent_timeout", false)) {
+            AiApplicationResultState failed = createAiResult(jobId, applicationType, agent.taskId(), agent.resultId(), "FAILED", "BLOCK", "AGENT_OS_TIMEOUT", false, false,
+                    Map.of("failure_code", "AGENT_OS_TIMEOUT"), List.of(), List.of("AGENT_OS_TIMEOUT"));
+            ProtectedResultSnapshotState snapshot = createProtectedSnapshot(jobId, failed.resultId(), agent.taskId(), agent.resultId(), "BLOCK", "AGENT_OS_TIMEOUT", false, Map.of("result_status", "FAILED"));
+            AiApplicationJobState job = persistAiJob(jobId, applicationType, contract.contractId(), text(request, "document_version_id", null), "FAILED", contextAssemblyJobId,
+                    resultContextId, agent.taskId(), agent.resultId(), idempotencyKey, scopeDigest, "AGENT_OS_TIMEOUT", "Agent OS 超时", traceId);
+            appendAiAudit(jobId, "AI_AGENT_OS_TIMEOUT", actorId, "FAILED", traceId);
+            return ResponseEntity.status(HttpStatus.ACCEPTED).body(aiJobResponse(job, envelope, failed, snapshot, null, agent));
+        }
+
+        GuardrailOutcome guardrail = evaluateAiGuardrail(applicationType, evidenceSegments, request);
+        boolean needsHuman = "REVIEW_REQUIRED".equals(guardrail.decision());
+        String resultStatus = switch (guardrail.decision()) {
+            case "PASS" -> "READY";
+            case "PASS_PARTIAL" -> "PARTIAL";
+            case "REJECT" -> "REJECTED";
+            case "REVIEW_REQUIRED" -> "PARTIAL";
+            default -> "FAILED";
+        };
+        AiApplicationResultState result = createAiResult(jobId, applicationType, agent.taskId(), agent.resultId(), resultStatus, guardrail.decision(), guardrail.failureCode(),
+                needsHuman, "PASS".equals(guardrail.decision()), guardrail.payload(), guardrail.citations(), guardrail.riskFlags());
+        ProtectedResultSnapshotState snapshot = null;
+        Map<String, Object> confirmation = null;
+        String jobStatus = resultStatus;
+        if (!"PASS".equals(guardrail.decision())) {
+            snapshot = createProtectedSnapshot(jobId, result.resultId(), agent.taskId(), agent.resultId(), guardrail.decision(), guardrail.failureCode(), needsHuman, guardrail.payload());
+            jobStatus = needsHuman ? "WAITING_HUMAN_CONFIRMATION" : ("REJECT".equals(guardrail.decision()) ? "REJECTED" : "GUARDRAIL_BLOCKED");
+        }
+        if (needsHuman) {
+            confirmation = createAiHumanConfirmation(agent.taskId(), agent.resultId(), contract.contractId(), applicationType, guardrail.payload(), evidenceSegments, actorId, traceId);
+        }
+        AiApplicationJobState job = persistAiJob(jobId, applicationType, contract.contractId(), text(request, "document_version_id", null), jobStatus, contextAssemblyJobId,
+                resultContextId, agent.taskId(), agent.resultId(), idempotencyKey, scopeDigest, guardrail.failureCode(), null, traceId);
+        appendAiAudit(jobId, "AI_GUARDRAIL_" + guardrail.decision(), actorId, jobStatus, traceId);
+        return ResponseEntity.status(HttpStatus.ACCEPTED).body(aiJobResponse(job, envelope, result, snapshot, confirmation, agent));
+    }
+
+    ResponseEntity<Map<String, Object>> replayAiGuardrail(String snapshotId, String permissions, Map<String, Object> request) {
+        if (permissions == null || !permissions.contains("AI_GUARDRAIL_REPLAY")) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(error("AI_GUARDRAIL_REPLAY_PERMISSION_DENIED", "缺少护栏重放权限"));
+        }
+        ProtectedResultSnapshotState snapshot = protectedResultSnapshots.get(snapshotId);
+        if (snapshot == null) {
+            throw new IllegalArgumentException("protected_result_snapshot_id 不存在: " + snapshotId);
+        }
+        appendAiAudit(snapshot.aiApplicationJobId(), "AI_GUARDRAIL_REPLAYED", text(request, "actor_id", "system"), snapshot.guardrailDecision(), text(request, "trace_id", null));
+        return ResponseEntity.ok(Map.of(
+                "replay_result", snapshot.guardrailDecision(),
+                "protected_result_snapshot", protectedSnapshotBody(snapshot)));
+    }
+
+    private AiApplicationJobState findAiJobByIdempotency(String applicationType, String contractId, String idempotencyKey) {
+        return aiApplicationJobs.values().stream()
+                .filter(job -> applicationType.equals(job.applicationType()))
+                .filter(job -> contractId.equals(job.contractId()))
+                .filter(job -> idempotencyKey.equals(job.idempotencyKey()))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private AiApplicationResultState requireAiResultByJob(String jobId) {
+        return aiApplicationResults.values().stream()
+                .filter(result -> jobId.equals(result.aiApplicationJobId()))
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("ai result 不存在: " + jobId));
+    }
+
+    private ProtectedResultSnapshotState protectedSnapshotByJob(String jobId) {
+        return protectedResultSnapshots.values().stream()
+                .filter(snapshot -> jobId.equals(snapshot.aiApplicationJobId()))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private List<SearchDocumentState> aiEvidenceDocuments(String contractId, String documentVersionId, String orgScope) {
+        return defaultSearchDocuments().stream()
+                .filter(document -> contractId.equals(document.contractId()))
+                .filter(document -> documentVersionId == null || document.documentVersionId() == null || documentVersionId.equals(document.documentVersionId()))
+                .filter(document -> orgScope == null || orgScope.isBlank() || orgScope.equals(ownerOrg(document)))
+                .limit(12)
+                .toList();
+    }
+
+    private List<Map<String, Object>> buildEvidenceSegments(List<SearchDocumentState> documents, Map<String, Object> request) {
+        int maxCount = intValue(request, "max_evidence_segment_count", 8);
+        int singleCap = intValue(request, "single_segment_token_cap", 120);
+        List<Map<String, Object>> segments = new ArrayList<>();
+        int index = 1;
+        for (SearchDocumentState document : documents.stream().limit(maxCount).toList()) {
+            String text = document.bodyText();
+            boolean trimmed = text.length() > singleCap;
+            Map<String, Object> segment = new LinkedHashMap<>();
+            segment.put("evidence_segment_id", "ev-" + UUID.randomUUID());
+            segment.put("source_type", switch (document.docType()) {
+                case "DOCUMENT" -> "DOCUMENT_SNIPPET";
+                case "OCR" -> "OCR_BLOCK";
+                case "CLAUSE" -> "CLAUSE_REF";
+                default -> "CONTRACT_SUMMARY";
+            });
+            segment.put("source_object_id", document.sourceObjectId());
+            segment.put("contract_id", document.contractId());
+            segment.put("document_version_id", document.documentVersionId());
+            segment.put("page_no", 1);
+            segment.put("citation_ref", "cite-" + index);
+            segment.put("segment_text", trimmed ? text.substring(0, singleCap) : text);
+            segment.put("token_cost", Math.max(1, text.length() / 2));
+            segment.put("trimmed", trimmed);
+            segment.put("source_anchor", mapFromJson(document.sourceAnchorJson()));
+            segments.add(segment);
+            index++;
+        }
+        return segments;
+    }
+
+    private boolean canFitEvidenceBudget(List<Map<String, Object>> evidenceSegments, Map<String, Object> request) {
+        int maxInputTokens = intValue(request, "max_input_tokens", 4096);
+        int reservedGuardrailTokens = intValue(request, "reserved_guardrail_tokens", 512);
+        int reservedCitationTokens = intValue(request, "reserved_citation_tokens", 128);
+        int requiredEvidenceTokens = evidenceSegments.stream()
+                .map(segment -> segment.get("token_cost"))
+                .filter(Number.class::isInstance)
+                .map(Number.class::cast)
+                .mapToInt(Number::intValue)
+                .sum();
+        return !evidenceSegments.isEmpty() && maxInputTokens - reservedGuardrailTokens - reservedCitationTokens >= requiredEvidenceTokens;
+    }
+
+    private Map<String, Object> buildAiContextEnvelope(String resultContextId, String jobId, String contextAssemblyJobId, String applicationType,
+                                                       ContractState contract, List<SearchDocumentState> evidenceDocs,
+                                                       List<Map<String, Object>> evidenceSegments, Map<String, Object> request) {
+        Map<String, Object> envelope = new LinkedHashMap<>();
+        envelope.put("result_context_id", resultContextId);
+        envelope.put("ai_application_job_id", jobId);
+        envelope.put("context_assembly_job_id", contextAssemblyJobId);
+        envelope.put("application_type", applicationType);
+        envelope.put("task_intent_layer", Map.of(
+                "application_type", applicationType,
+                "target_language", text(request, "target_language", "zh-CN"),
+                "output_mode", text(request, "output_mode", "STRUCTURED"),
+                "question", text(request, "question", "")));
+        envelope.put("contract_anchor_layer", Map.of(
+                "contract_id", contract.contractId(),
+                "contract_no", contract.contractNo(),
+                "contract_name", contract.contractName(),
+                "contract_status", contract.contractStatus(),
+                "owner_org_unit_id", contract.ownerOrgUnitId()));
+        envelope.put("document_evidence_layer", Map.of(
+                "document_version_id", text(request, "document_version_id", null),
+                "evidence_segment_list", evidenceSegments));
+        envelope.put("retrieval_layer", Map.of(
+                "result_set_id", "ai-search-snapshot-" + UUID.randomUUID(),
+                "search_doc_ids", evidenceDocs.stream().map(SearchDocumentState::searchDocId).toList(),
+                "stable_source_count", evidenceDocs.size()));
+        envelope.put("semantic_reference_layer", Map.of(
+                "semantic_reference_list", List.of(Map.of(
+                        "semantic_ref_id", "sem-" + contract.contractId(),
+                        "clause_version_id", "clause-ver-ai",
+                        "risk_tag", "STANDARD_CONTRACT_RISK"))));
+        envelope.put("guardrail_layer", Map.of(
+                "guardrail_profile_code", "AI_GUARDRAIL_BASELINE",
+                "schema_profile_code", "AI_SCHEMA_" + applicationType,
+                "citation_required", true,
+                "sensitive_masking_profile_code", "CMP_DEFAULT_MASKING",
+                "human_confirmation_threshold", "HIGH_RISK_OR_CONFLICT"));
+        envelope.put("token_budget_snapshot", Map.of(
+                "max_input_tokens", 4096,
+                "max_output_tokens", 1024,
+                "max_evidence_segment_count", intValue(request, "max_evidence_segment_count", 8),
+                "reserved_guardrail_tokens", 512));
+        envelope.put("degradation_actions", evidenceSegments.stream().filter(segment -> Boolean.TRUE.equals(segment.get("trimmed"))).findAny().isPresent()
+                ? List.of("TRIM_LONG_EVIDENCE_SEGMENT") : List.of());
+        envelope.put("source_digest", "sha256:" + Integer.toHexString(evidenceSegments.toString().hashCode()));
+        envelope.put("assembled_at", Instant.now().toString());
+        return envelope;
+    }
+
+    private GuardrailOutcome evaluateAiGuardrail(String applicationType, List<Map<String, Object>> evidenceSegments, Map<String, Object> request) {
+        Map<String, Object> agentOutput = map(request.get("agent_output"));
+        if (bool(request, "simulate_schema_invalid_output", false)) {
+            return new GuardrailOutcome("BLOCK", "AI_OUTPUT_SCHEMA_INVALID", Map.of("summary", "输出结构不符合任务 schema"), List.of(), List.of("SCHEMA_INVALID"));
+        }
+        if (bool(request, "simulate_no_citation_output", false)) {
+            return new GuardrailOutcome("BLOCK", "AI_CITATION_MISSING", Map.of("summary", "输出缺少引用"), List.of(), List.of("NO_SOURCE_CONCLUSION"));
+        }
+        if (bool(request, "simulate_sensitive_output", false)) {
+            return new GuardrailOutcome("BLOCK", "AI_SENSITIVE_INFORMATION_BLOCKED", Map.of("summary", "输出包含未脱敏高敏信息"), List.of(), List.of("SENSITIVE_INFORMATION"));
+        }
+        if (!agentOutput.isEmpty() && !hasRequiredSchema(applicationType, agentOutput)) {
+            return new GuardrailOutcome("BLOCK", "AI_OUTPUT_SCHEMA_INVALID", agentOutput, List.of(), List.of("SCHEMA_INVALID"));
+        }
+        if (!agentOutput.isEmpty() && containsSensitiveInformation(agentOutput)) {
+            return new GuardrailOutcome("BLOCK", "AI_SENSITIVE_INFORMATION_BLOCKED", Map.of("summary", "输出包含未脱敏高敏信息"), List.of(), List.of("SENSITIVE_INFORMATION"));
+        }
+        List<Map<String, Object>> citations = resolveOutputCitations(agentOutput, evidenceSegments, applicationType);
+        if (!agentOutput.isEmpty() && citations.isEmpty()) {
+            return new GuardrailOutcome("BLOCK", "AI_CITATION_MISSING", agentOutput, List.of(), List.of("NO_SOURCE_CONCLUSION"));
+        }
+        if (!agentOutput.isEmpty() && bool(agentOutput, "conflict_detected", false)) {
+            return new GuardrailOutcome("PASS_PARTIAL", "AI_CONFLICT_DOWNGRADED", agentOutput, citations, List.of("CONFLICT_DOWNGRADED"));
+        }
+        if (!agentOutput.isEmpty() && "HIGH".equals(text(agentOutput, "risk_level", null))) {
+            return new GuardrailOutcome("REVIEW_REQUIRED", "AI_HIGH_RISK_REQUIRES_HUMAN", agentOutput, citations, List.of("HIGH_RISK"));
+        }
+        if (agentOutput.isEmpty()) {
+            citations = evidenceSegments.stream()
+                .limit("RISK_ANALYSIS".equals(applicationType) || "DIFF_EXTRACTION".equals(applicationType) ? 2 : 1)
+                .map(segment -> Map.of("evidence_segment_id", segment.get("evidence_segment_id"), "citation_ref", segment.get("citation_ref")))
+                .toList();
+        }
+        if (bool(request, "simulate_high_risk", false)) {
+            return new GuardrailOutcome("REVIEW_REQUIRED", "AI_HIGH_RISK_REQUIRES_HUMAN", Map.of("risk_level", "HIGH", "summary", "发现高风险条款，需人工确认"), citations, List.of("HIGH_RISK"));
+        }
+        if (bool(request, "simulate_conflict", false)) {
+            return new GuardrailOutcome("PASS_PARTIAL", "AI_CONFLICT_DOWNGRADED", Map.of("summary", "冲突内容已降级为部分结果"), citations, List.of("CONFLICT_DOWNGRADED"));
+        }
+        return new GuardrailOutcome("PASS", null, agentOutput.isEmpty() ? Map.of("summary", "已基于受控证据生成") : agentOutput, citations, List.of());
+    }
+
+    private boolean hasRequiredSchema(String applicationType, Map<String, Object> agentOutput) {
+        return switch (applicationType) {
+            case "QA" -> agentOutput.containsKey("answer");
+            case "RISK_ANALYSIS" -> agentOutput.containsKey("risk_level") && agentOutput.containsKey("summary");
+            case "DIFF_EXTRACTION" -> agentOutput.containsKey("summary") || agentOutput.containsKey("difference_type");
+            default -> agentOutput.containsKey("summary") || agentOutput.containsKey("answer");
+        };
+    }
+
+    private boolean containsSensitiveInformation(Object value) {
+        if (value instanceof Map<?, ?> mapValue) {
+            return mapValue.values().stream().anyMatch(this::containsSensitiveInformation);
+        }
+        if (value instanceof List<?> listValue) {
+            return listValue.stream().anyMatch(this::containsSensitiveInformation);
+        }
+        String text = value == null ? "" : value.toString();
+        return text.matches(".*\\b\\d{17}[0-9Xx]\\b.*") || text.matches(".*\\b\\d{16,19}\\b.*");
+    }
+
+    private List<Map<String, Object>> resolveOutputCitations(Map<String, Object> agentOutput, List<Map<String, Object>> evidenceSegments, String applicationType) {
+        List<Object> requested = listObjects(agentOutput.get("citation_list"));
+        if (requested.isEmpty()) {
+            return List.of();
+        }
+        int limit = "RISK_ANALYSIS".equals(applicationType) || "DIFF_EXTRACTION".equals(applicationType) ? 2 : 1;
+        if (requested.stream().anyMatch(value -> "AUTO".equals(value.toString()))) {
+            return evidenceSegments.stream()
+                    .limit(limit)
+                    .map(segment -> Map.of("evidence_segment_id", segment.get("evidence_segment_id"), "citation_ref", segment.get("citation_ref")))
+                    .toList();
+        }
+        Set<String> known = evidenceSegments.stream().map(segment -> segment.get("evidence_segment_id").toString()).collect(java.util.stream.Collectors.toSet());
+        return requested.stream()
+                .map(Object::toString)
+                .filter(known::contains)
+                .map(id -> evidenceSegments.stream().filter(segment -> id.equals(segment.get("evidence_segment_id"))).findFirst().orElseThrow())
+                .map(segment -> Map.of("evidence_segment_id", segment.get("evidence_segment_id"), "citation_ref", segment.get("citation_ref")))
+                .toList();
+    }
+
+    private AgentOsBinding createAgentOsAiTask(String jobId, String applicationType, String contractId, String resultContextId, String actorId,
+                                                String idempotencyKey, String traceId, boolean timeout) {
+        Map<String, Object> task = agentOsGateway.createTask(idempotencyKey, Map.of(
+                "task_type", applicationType,
+                "task_source", "INTELLIGENT_APPLICATIONS",
+                "requester_type", "USER",
+                "requester_id", actorId,
+                "specialized_agent_code", "CONTRACT_REVIEW_AGENT",
+                "input_context", Map.of("business_module", "intelligent-applications", "object_type", "CONTRACT", "object_id", contractId),
+                "input_payload", Map.of("question", "执行智能辅助应用任务", "result_context_id", resultContextId, "scenario", timeout ? "TIMEOUT" : "NORMAL"),
+                "max_loop_count", 1,
+                "trace_id", traceId));
+        return new AgentOsBinding(text(task, "task_id", null), text(task, "run_id", null), text(task, "result_id", null), timeout ? "AGENT_OS_TIMEOUT" : null);
+    }
+
+    private Map<String, Object> createAiHumanConfirmation(String agentTaskId, String agentResultId, String contractId, String applicationType, Map<String, Object> payload,
+                                                          List<Map<String, Object>> evidenceSegments, String actorId, String traceId) {
+        Map<String, Object> decisionInput = new LinkedHashMap<>();
+        decisionInput.put("application_type", applicationType);
+        decisionInput.put("result_summary", payload);
+        decisionInput.put("evidence_bundle_ref", "ai-evidence://" + agentTaskId);
+        decisionInput.put("recommended_actions", List.of("APPROVE", "REJECT", "REQUEST_CHANGES"));
+        decisionInput.put("evidence_count", evidenceSegments.size());
+        Map<String, Object> confirmation = agentOsGateway.createHumanConfirmation(Map.of(
+                "source_task_id", agentTaskId,
+                "source_result_id", agentResultId,
+                "confirmation_type", "AI_OUTPUT_REVIEW",
+                "business_module", "intelligent-applications",
+                "object_type", "CONTRACT",
+                "object_id", contractId,
+                "requested_by", actorId,
+                "decision_input", decisionInput,
+                "trace_id", traceId));
+        Map<String, Object> body = new LinkedHashMap<>(confirmation);
+        body.put("decision_input", decisionInput);
+        return body;
+    }
+
+    private AiApplicationJobState persistAiJob(String jobId, String applicationType, String contractId, String documentVersionId, String jobStatus,
+                                               String contextAssemblyJobId, String resultContextId, String agentTaskId, String agentResultId,
+                                               String idempotencyKey, String scopeDigest, String failureCode, String failureReason, String traceId) {
+        AiApplicationJobState job = new AiApplicationJobState(jobId, applicationType, contractId, documentVersionId, jobStatus, contextAssemblyJobId,
+                resultContextId, agentTaskId, agentResultId, idempotencyKey, scopeDigest, failureCode, failureReason, traceId, Instant.now().toString(), Instant.now().toString());
+        aiApplicationJobs.put(jobId, job);
+        jdbcTemplate.update("""
+                insert into ia_ai_application_job
+                (ai_application_job_id, application_type, contract_id, document_version_id, job_status, context_assembly_job_id, result_context_id,
+                 agent_task_id, agent_result_id, idempotency_key, scope_digest, failure_code, failure_reason, trace_id, created_at, updated_at)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, jobId, applicationType, contractId, documentVersionId, jobStatus, contextAssemblyJobId, resultContextId, agentTaskId, agentResultId,
+                idempotencyKey, scopeDigest, failureCode, failureReason, traceId, Timestamp.from(Instant.now()), Timestamp.from(Instant.now()));
+        return job;
+    }
+
+    private void persistAiContextEnvelope(String resultContextId, String jobId, String contextAssemblyJobId, String applicationType, String contractId, Map<String, Object> envelope) {
+        aiContextEnvelopes.put(resultContextId, envelope);
+        jdbcTemplate.update("""
+                insert into ia_ai_context_envelope
+                (result_context_id, ai_application_job_id, context_assembly_job_id, application_type, contract_id, envelope_json, source_digest,
+                 budget_snapshot_json, degradation_action_json, guardrail_profile_code, assembled_at)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, 'AI_GUARDRAIL_BASELINE', ?)
+                """, resultContextId, jobId, contextAssemblyJobId, applicationType, contractId, json(envelope), text(envelope, "source_digest", "sha256:empty"),
+                json(envelope.get("token_budget_snapshot")), json(envelope.get("degradation_actions")), Timestamp.from(Instant.now()));
+    }
+
+    private AiApplicationResultState createAiResult(String jobId, String applicationType, String agentTaskId, String agentResultId, String resultStatus,
+                                                    String decision, String failureCode, boolean confirmationRequired, boolean writebackAllowed,
+                                                    Map<String, Object> payload, List<Map<String, Object>> citations, List<String> riskFlags) {
+        String resultId = "ai-result-" + UUID.randomUUID();
+        double coverage = citations.isEmpty() ? 0.0 : 1.0;
+        AiApplicationResultState result = new AiApplicationResultState(resultId, jobId, agentTaskId, agentResultId, applicationType, resultStatus,
+                payload, citations, coverage, decision, failureCode, confirmationRequired, writebackAllowed, riskFlags, Instant.now().toString());
+        aiApplicationResults.put(resultId, result);
+        jdbcTemplate.update("""
+                insert into ia_ai_application_result
+                (result_id, ai_application_job_id, agent_task_id, agent_result_id, application_type, result_status, structured_payload_json,
+                 citation_list_json, evidence_coverage_ratio, guardrail_decision, guardrail_failure_code, confirmation_required_flag,
+                 writeback_allowed_flag, risk_flag_list_json, created_at)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, resultId, jobId, agentTaskId, agentResultId, applicationType, resultStatus, json(payload), json(citations), coverage, decision, failureCode,
+                confirmationRequired, writebackAllowed, json(riskFlags), Timestamp.from(Instant.now()));
+        return result;
+    }
+
+    private ProtectedResultSnapshotState createProtectedSnapshot(String jobId, String resultId, String agentTaskId, String agentResultId, String decision,
+                                                                 String failureCode, boolean confirmationRequired, Map<String, Object> payload) {
+        String snapshotId = "ai-protected-" + UUID.randomUUID();
+        ProtectedResultSnapshotState snapshot = new ProtectedResultSnapshotState(snapshotId, jobId, resultId, agentTaskId, agentResultId, decision, failureCode,
+                confirmationRequired, "protected://ai-result/" + snapshotId, payload, Instant.now().plusSeconds(86400).toString(), Instant.now().toString());
+        protectedResultSnapshots.put(snapshotId, snapshot);
+        jdbcTemplate.update("""
+                insert into ia_protected_result_snapshot
+                (protected_result_snapshot_id, ai_application_job_id, result_id, agent_task_id, agent_result_id, guardrail_decision,
+                 guardrail_failure_code, confirmation_required_flag, protected_payload_ref, protected_payload_json, expires_at, created_at)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, snapshotId, jobId, resultId, agentTaskId, agentResultId, decision, failureCode, confirmationRequired,
+                snapshot.protectedPayloadRef(), json(payload), Timestamp.from(Instant.parse(snapshot.expiresAt())), Timestamp.from(Instant.now()));
+        return snapshot;
+    }
+
+    private Map<String, Object> createStandaloneProtectedSnapshot(String applicationType, String contractId, String decision, String failureCode, Map<String, Object> request) {
+        String jobId = "ai-rejected-" + UUID.randomUUID();
+        ProtectedResultSnapshotState snapshot = createProtectedSnapshot(jobId, null, null, null, decision, failureCode, false,
+                Map.of("application_type", applicationType, "contract_id", contractId, "reason", failureCode));
+        appendAiAudit(jobId, "AI_PRE_EXECUTION_REJECTED", text(request, "actor_id", "system"), decision, text(request, "trace_id", null));
+        return protectedSnapshotBody(snapshot);
+    }
+
+    private Map<String, Object> aiJobResponse(AiApplicationJobState job, Map<String, Object> envelope, AiApplicationResultState result,
+                                              ProtectedResultSnapshotState snapshot, Map<String, Object> confirmation, AgentOsBinding agent) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("ai_application_job_id", job.aiApplicationJobId());
+        body.put("application_type", job.applicationType());
+        body.put("contract_id", job.contractId());
+        body.put("job_status", job.jobStatus());
+        Map<String, Object> agentOs = new LinkedHashMap<>();
+        agentOs.put("agent_task_id", agent.taskId());
+        agentOs.put("agent_result_id", agent.resultId());
+        agentOs.put("failure_code", agent.failureCode());
+        body.put("agent_os", agentOs);
+        body.put("context_envelope", envelope);
+        body.put("guarded_result", aiResultBody(result));
+        if (snapshot != null) {
+            body.put("protected_result_snapshot_id", snapshot.protectedResultSnapshotId());
+            body.put("protected_result_snapshot", protectedSnapshotBody(snapshot));
+        }
+        if (confirmation != null) {
+            body.put("human_confirmation", confirmation);
+        }
+        return body;
+    }
+
+    private Map<String, Object> aiResultBody(AiApplicationResultState result) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("result_id", result.resultId());
+        body.put("result_status", result.resultStatus());
+        body.put("structured_payload", result.structuredPayload());
+        body.put("citation_list", result.citationList());
+        body.put("evidence_coverage_ratio", result.evidenceCoverageRatio());
+        body.put("guardrail_decision", result.guardrailDecision());
+        body.put("guardrail_failure_code", result.guardrailFailureCode());
+        body.put("confirmation_required_flag", result.confirmationRequiredFlag());
+        body.put("writeback_allowed_flag", result.writebackAllowedFlag());
+        body.put("risk_flag_list", result.riskFlagList());
+        return body;
+    }
+
+    private Map<String, Object> protectedSnapshotBody(ProtectedResultSnapshotState snapshot) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("protected_result_snapshot_id", snapshot.protectedResultSnapshotId());
+        body.put("ai_application_job_id", snapshot.aiApplicationJobId());
+        body.put("result_id", snapshot.resultId());
+        body.put("agent_task_id", snapshot.agentTaskId());
+        body.put("agent_result_id", snapshot.agentResultId());
+        body.put("guardrail_decision", snapshot.guardrailDecision());
+        body.put("guardrail_failure_code", snapshot.guardrailFailureCode());
+        body.put("confirmation_required_flag", snapshot.confirmationRequiredFlag());
+        body.put("protected_payload_ref", snapshot.protectedPayloadRef());
+        body.put("expires_at", snapshot.expiresAt());
+        return body;
+    }
+
+    private void appendAiAudit(String jobId, String actionType, String actorId, String status, String traceId) {
+        jdbcTemplate.update("""
+                insert into ia_ai_audit_event
+                (audit_event_id, ai_application_job_id, action_type, actor_id, result_status, trace_id, occurred_at)
+                values (?, ?, ?, ?, ?, ?, ?)
+                """, "ai-audit-" + UUID.randomUUID(), jobId, actionType, actorId, status, traceId, Timestamp.from(Instant.now()));
     }
 
     private SearchSourceEnvelopeState buildSearchSourceEnvelope(String docType, Map<String, Object> request) {
@@ -4790,6 +5294,10 @@ class CoreChainService {
         return value instanceof List<?> source ? source.stream().map(Object::toString).toList() : List.of();
     }
 
+    private List<Object> listObjects(Object value) {
+        return value instanceof List<?> source ? new ArrayList<>(source) : List.of();
+    }
+
     private List<Map<String, Object>> copyAssignmentList(List<Map<String, Object>> assignments) {
         return assignments.stream().map(LinkedHashMap::new).map(item -> (Map<String, Object>) item).toList();
     }
@@ -4987,6 +5495,33 @@ class CoreChainService {
                                         String facetPayloadJson, int total, String rankingProfileCode, String expiresAt,
                                         boolean cacheHitFlag, String permissionScopeDigest, String actorId, int rebuildGeneration,
                                         String stableOrderDigest, String createdAt) {
+    }
+
+    private record AiApplicationJobState(String aiApplicationJobId, String applicationType, String contractId, String documentVersionId,
+                                         String jobStatus, String contextAssemblyJobId, String resultContextId, String agentTaskId,
+                                         String agentResultId, String idempotencyKey, String scopeDigest, String failureCode,
+                                         String failureReason, String traceId, String createdAt, String updatedAt) {
+    }
+
+    private record AiApplicationResultState(String resultId, String aiApplicationJobId, String agentTaskId, String agentResultId,
+                                            String applicationType, String resultStatus, Map<String, Object> structuredPayload,
+                                            List<Map<String, Object>> citationList, double evidenceCoverageRatio, String guardrailDecision,
+                                            String guardrailFailureCode, boolean confirmationRequiredFlag, boolean writebackAllowedFlag,
+                                            List<String> riskFlagList, String createdAt) {
+    }
+
+    private record ProtectedResultSnapshotState(String protectedResultSnapshotId, String aiApplicationJobId, String resultId,
+                                                String agentTaskId, String agentResultId, String guardrailDecision,
+                                                String guardrailFailureCode, boolean confirmationRequiredFlag,
+                                                String protectedPayloadRef, Map<String, Object> protectedPayload,
+                                                String expiresAt, String createdAt) {
+    }
+
+    private record GuardrailOutcome(String decision, String failureCode, Map<String, Object> payload,
+                                    List<Map<String, Object>> citations, List<String> riskFlags) {
+    }
+
+    private record AgentOsBinding(String taskId, String runId, String resultId, String failureCode) {
     }
 
     private record OcrInput(DocumentAssetState asset, DocumentVersionState documentVersion) {
