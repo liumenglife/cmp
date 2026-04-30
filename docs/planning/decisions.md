@@ -215,3 +215,9 @@
 - 决策：第四批“智能与增强能力”编码使用 `feature/batch4-intelligent-enhancement-capabilities` 分支和 `.worktrees/feature/batch4-intelligent-enhancement-capabilities` 隔离工作区推进。
 - 原因：第三批已经通过 PR 合并到 `main` 并完成分支与工作树清理；第四批必须基于最新 `main` 启动，聚焦智能应用主线，避免继续沿用已完成第三批分支。
 - 影响：第四批所有编码、验证、独立质量审查与提交均在该工作树内完成；主工作区保持 `main` 同步入口，不直接承载第四批生产代码修改。
+
+### 决策 35：第四批智能推荐与候选质量评估使用独立工作树分支推进
+
+- 决策：第四批“智能推荐、候选排序与质量评估”编码使用 `feature/candidate-ranking-quality-evaluation` 分支和 `.worktrees/feature/candidate-ranking-quality-evaluation` 隔离工作区推进。
+- 原因：第四批前半段阶段性交付已经通过 `PR #9` 合并到 `main` 并完成旧分支与工作树清理；下一功能点需要基于最新 `main` 启动，聚焦候选排序与质量评估，避免继续沿用已完成阶段性交付分支。
+- 影响：智能推荐、候选排序与质量评估的编码、验证、独立质量审查与提交均在该工作树内完成；主工作区保持 `main` 同步入口，不直接承载生产代码修改。

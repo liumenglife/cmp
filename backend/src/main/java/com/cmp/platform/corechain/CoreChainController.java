@@ -181,14 +181,42 @@ class CoreChainController {
 
     @PostMapping("/api/intelligent-applications/ai/protected-results/{snapshotId}/guardrail-replay")
     ResponseEntity<Map<String, Object>> replayAiGuardrail(@PathVariable String snapshotId,
-                                                          @RequestHeader(value = "X-CMP-Permissions", required = false) String permissions,
-                                                          @RequestBody(required = false) Map<String, Object> request) {
+                                                           @RequestHeader(value = "X-CMP-Permissions", required = false) String permissions,
+                                                           @RequestBody(required = false) Map<String, Object> request) {
         return service.replayAiGuardrail(snapshotId, permissions, request == null ? Map.of() : request);
+    }
+
+    @PostMapping("/api/intelligent-applications/candidates/ranking-jobs")
+    ResponseEntity<Map<String, Object>> createCandidateRankingJob(@RequestHeader(value = "X-CMP-Permissions", required = false) String permissions,
+                                                                  @RequestHeader(value = "X-CMP-Org-Scope", required = false) String orgScope,
+                                                                  @RequestHeader(value = "Idempotency-Key", required = false) String idempotencyKey,
+                                                                  @RequestBody Map<String, Object> request) {
+        return service.createCandidateRankingJob(permissions, orgScope, idempotencyKey, request);
+    }
+
+    @PostMapping("/api/intelligent-applications/candidates/profiles/switch")
+    ResponseEntity<Map<String, Object>> switchCandidateProfiles(@RequestHeader(value = "X-CMP-Permissions", required = false) String permissions,
+                                                                @RequestBody Map<String, Object> request) {
+        return service.switchCandidateProfiles(permissions, request);
+    }
+
+    @PostMapping("/api/intelligent-applications/candidates/ranking-snapshots/{snapshotId}/replay")
+    ResponseEntity<Map<String, Object>> replayCandidateRankingSnapshot(@PathVariable String snapshotId,
+                                                                       @RequestHeader(value = "X-CMP-Permissions", required = false) String permissions,
+                                                                       @RequestHeader(value = "X-CMP-Org-Scope", required = false) String orgScope,
+                                                                       @RequestBody(required = false) Map<String, Object> request) {
+        return service.replayCandidateRankingSnapshot(snapshotId, permissions, orgScope, request == null ? Map.of() : request);
+    }
+
+    @PostMapping("/api/intelligent-applications/candidates/writeback-candidates")
+    ResponseEntity<Map<String, Object>> createCandidateWriteback(@RequestHeader(value = "X-CMP-Permissions", required = false) String permissions,
+                                                                 @RequestBody Map<String, Object> request) {
+        return service.createCandidateWriteback(permissions, request);
     }
 
     @GetMapping("/api/document-center/assets")
     Map<String, Object> documentAssets(@RequestParam(required = false) String owner_type,
-                                       @RequestParam(required = false) String owner_id) {
+                                        @RequestParam(required = false) String owner_id) {
         return service.documentAssets(owner_type, owner_id);
     }
 
@@ -526,6 +554,10 @@ class CoreChainService {
     private final Map<String, Map<String, Object>> aiContextEnvelopes = new ConcurrentHashMap<>();
     private final Map<String, AiApplicationResultState> aiApplicationResults = new ConcurrentHashMap<>();
     private final Map<String, ProtectedResultSnapshotState> protectedResultSnapshots = new ConcurrentHashMap<>();
+    private final Map<String, CandidateRankingSnapshotState> candidateRankingSnapshots = new ConcurrentHashMap<>();
+    private final Map<String, QualityEvaluationReportState> qualityEvaluationReports = new ConcurrentHashMap<>();
+    private final Map<String, CandidateWritebackGateState> candidateWritebackGates = new ConcurrentHashMap<>();
+    private String activeCandidateProfileVersion = "v1";
     private int activeSearchGeneration = 1;
     private final List<Map<String, Object>> lifecycleTimelineEvents = new ArrayList<>();
     private final List<Map<String, Object>> lifecycleAuditEvents = new ArrayList<>();
@@ -619,6 +651,7 @@ class CoreChainService {
                 asset.documentStatus(), "PENDING", asset.previewStatus(), versionNo, copyEvents(asset.auditRecords()));
         updated.auditRecords().add(event("DOCUMENT_VERSION_APPENDED", versionId, text(request, "trace_id", null)));
         supersedeOcrResultsForVersionSwitch(asset, versionId, text(request, "trace_id", null));
+        supersedeCandidateSnapshotsForDocumentVersion(asset.currentVersionId(), text(request, "trace_id", null));
         documentAssets.put(documentAssetId, updated);
         refreshContractDocumentRef(updated, text(request, "trace_id", null));
         acceptEncryptionCheckIn(documentAssetId, versionId, "NEW_VERSION", request, false);
@@ -666,6 +699,7 @@ class CoreChainService {
         DocumentAssetState asset = requireDocumentAsset(version.documentAssetId());
         if (!documentVersionId.equals(asset.currentVersionId())) {
             supersedeOcrResultsForVersionSwitch(asset, documentVersionId, text(request, "trace_id", null));
+            supersedeCandidateSnapshotsForDocumentVersion(asset.currentVersionId(), text(request, "trace_id", null));
         }
         DocumentAssetState updated = new DocumentAssetState(asset.documentAssetId(), documentVersionId, asset.ownerType(), asset.ownerId(), asset.documentRole(), asset.documentTitle(),
                 asset.documentStatus(), asset.encryptionStatus(), asset.previewStatus(), asset.latestVersionNo(), copyEvents(asset.auditRecords()));
@@ -1074,6 +1108,535 @@ class CoreChainService {
         return ResponseEntity.ok(Map.of(
                 "replay_result", snapshot.guardrailDecision(),
                 "protected_result_snapshot", protectedSnapshotBody(snapshot)));
+    }
+
+    ResponseEntity<Map<String, Object>> createCandidateRankingJob(String permissions, String orgScope, String idempotencyHeader, Map<String, Object> request) {
+        if (permissions == null || !permissions.contains("AI_APPLICATION_CREATE") || !permissions.contains("CONTRACT_VIEW") || !permissions.contains("SEARCH_QUERY")) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(error("CANDIDATE_RANKING_PERMISSION_DENIED", "缺少候选排序、合同查看或搜索查询权限"));
+        }
+        String applicationType = text(request, "application_type", "SUMMARY");
+        if (!List.of("SUMMARY", "QA", "RISK_ANALYSIS", "DIFF_EXTRACTION").contains(applicationType)) {
+            return ResponseEntity.unprocessableEntity().body(error("CANDIDATE_APPLICATION_TYPE_INVALID", "候选排序任务类型不在允许范围内"));
+        }
+        ContractState contract = requireContract(text(request, "contract_id", null));
+        if (orgScope != null && !orgScope.isBlank() && contract.ownerOrgUnitId() != null && !orgScope.equals(contract.ownerOrgUnitId())) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(error("CANDIDATE_SCOPE_DENIED", "候选来源超出调用方可见范围"));
+        }
+        String documentVersionId = text(request, "document_version_id", null);
+        List<SearchDocumentState> evidenceDocs = aiEvidenceDocuments(contract.contractId(), documentVersionId, orgScope);
+        if (evidenceDocs.isEmpty()) {
+            return ResponseEntity.unprocessableEntity().body(error("CANDIDATE_SOURCE_EMPTY", "缺少可归一候选来源"));
+        }
+
+        String jobId = "ai-rank-job-" + UUID.randomUUID();
+        String traceId = text(request, "trace_id", "trace-" + UUID.randomUUID());
+        String actorId = text(request, "actor_id", "system");
+        String rankingProfileCode = text(request, "ranking_profile_code", "CANDIDATE_RANKING_BASELINE");
+        String qualityProfileCode = text(request, "quality_profile_code", "CANDIDATE_QUALITY_BASELINE");
+        String profileVersion = activeCandidateProfileVersion;
+        String sourceDigest = candidateSourceDigest(evidenceDocs, documentVersionId, applicationType);
+        List<Map<String, Object>> evidenceSegments = buildEvidenceSegments(evidenceDocs, request);
+        List<Map<String, Object>> semanticCandidates = buildSemanticCandidates(applicationType, contract, documentVersionId, evidenceDocs, evidenceSegments, sourceDigest, request);
+        List<Map<String, Object>> activeCandidates = semanticCandidates.stream()
+                .filter(candidate -> "ACTIVE".equals(candidate.get("elimination_status")) || "CONFLICTED".equals(candidate.get("elimination_status")))
+                .toList();
+
+        String rankingSnapshotId = "rank-snapshot-" + UUID.randomUUID();
+        CandidateRankingSnapshotState rankingSnapshot = new CandidateRankingSnapshotState(rankingSnapshotId, jobId, applicationType, contract.contractId(), documentVersionId,
+                sourceDigest, rankingProfileCode, profileVersion, qualityProfileCode, profileVersion, "READY", json(activeCandidates), json(semanticCandidates), Instant.now().plusSeconds(900).toString(), traceId, Instant.now().toString());
+        candidateRankingSnapshots.put(rankingSnapshotId, rankingSnapshot);
+
+        QualityDecision decision = evaluateCandidateQuality(applicationType, semanticCandidates, request);
+        String qualityEvaluationId = "quality-eval-" + UUID.randomUUID();
+        QualityEvaluationReportState quality = new QualityEvaluationReportState(qualityEvaluationId, rankingSnapshotId, applicationType, qualityProfileCode, profileVersion,
+                decision.qualityTier(), decision.releaseDecision(), decision.reasonCodes(), decision.coverage(), decision.citation(), decision.consistency(), decision.completeness(), decision.publishability(), Instant.now().toString());
+        qualityEvaluationReports.put(qualityEvaluationId, quality);
+
+        Map<String, Object> guardrailMapping = guardrailMapping(decision.releaseDecision());
+        boolean writebackAllowed = List.of("PUBLISH", "PARTIAL_PUBLISH").contains(decision.releaseDecision());
+        String resultStatus = text(guardrailMapping, "result_status", "READY");
+        AgentOsBinding agent = createAgentOsAiTask(jobId, applicationType, contract.contractId(), rankingSnapshotId, actorId,
+                text(request, "idempotency_key", idempotencyHeader == null ? "rank-default-idem" : idempotencyHeader), traceId, false);
+        Map<String, Object> rankingBody = candidateRankingSnapshotBody(rankingSnapshot, semanticCandidates);
+        Map<String, Object> qualityBody = qualityEvaluationBody(quality);
+        Map<String, Object> gatePayload = candidateWritebackGateBody(new CandidateWritebackGateState("PENDING_RESULT", rankingSnapshotId, qualityEvaluationId, decision.releaseDecision(),
+                writebackAllowed ? "READY" : "BLOCKED", writebackAllowed, traceId, Instant.now().toString()));
+        Map<String, Object> structuredPayload = new LinkedHashMap<>();
+        structuredPayload.put("ranking_snapshot_id", rankingSnapshotId);
+        structuredPayload.put("quality_evaluation_id", qualityEvaluationId);
+        structuredPayload.put("release_decision", decision.releaseDecision());
+        structuredPayload.put("ranking_snapshot", rankingBody);
+        structuredPayload.put("semantic_candidates", semanticCandidates);
+        structuredPayload.put("quality_evaluation", qualityBody);
+        structuredPayload.put("writeback_gate", gatePayload);
+        AiApplicationResultState result = createAiResult(jobId, applicationType, agent.taskId(), agent.resultId(), resultStatus,
+                text(guardrailMapping, "guardrail_decision", "PASS"), text(guardrailMapping, "guardrail_failure_code", null), !writebackAllowed, writebackAllowed,
+                structuredPayload,
+                activeCandidates.stream().limit(2).map(candidate -> Map.of("candidate_id", candidate.get("candidate_id"), "citation_ref", text(candidate, "source_anchor_summary", "candidate"))).toList(),
+                decision.reasonCodes());
+        gatePayload.put("result_id", result.resultId());
+        updateAiResultStructuredPayload(result.resultId(), structuredPayload);
+        ProtectedResultSnapshotState protectedSnapshot = null;
+        Map<String, Object> confirmation = null;
+        if (!writebackAllowed) {
+            protectedSnapshot = createProtectedSnapshot(jobId, result.resultId(), agent.taskId(), agent.resultId(), text(guardrailMapping, "guardrail_decision", "REJECT"),
+                    text(guardrailMapping, "guardrail_failure_code", decision.releaseDecision()), "ESCALATE_TO_HUMAN".equals(decision.releaseDecision()),
+                    Map.of("ranking_snapshot_id", rankingSnapshotId, "quality_evaluation_id", qualityEvaluationId, "decision_reason_code_list", decision.reasonCodes()));
+        }
+        if ("ESCALATE_TO_HUMAN".equals(decision.releaseDecision())) {
+            confirmation = createAiHumanConfirmation(agent.taskId(), agent.resultId(), contract.contractId(), applicationType,
+                    Map.of("release_decision", decision.releaseDecision(), "quality_tier", decision.qualityTier()), activeCandidates, actorId, traceId);
+        }
+        String jobStatus = text(guardrailMapping, "job_status", "SUCCEEDED");
+        persistAiJob(jobId, applicationType, contract.contractId(), documentVersionId, jobStatus, "candidate-ranking", rankingSnapshotId, agent.taskId(), agent.resultId(),
+                text(request, "idempotency_key", idempotencyHeader == null ? "rank-default-idem" : idempotencyHeader), sourceDigest, text(guardrailMapping, "guardrail_failure_code", null), null, traceId);
+
+        CandidateWritebackGateState gate = new CandidateWritebackGateState(result.resultId(), rankingSnapshotId, qualityEvaluationId, decision.releaseDecision(),
+                writebackAllowed ? "READY" : "BLOCKED", writebackAllowed, traceId, Instant.now().toString());
+        candidateWritebackGates.put(result.resultId(), gate);
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("ai_application_job_id", jobId);
+        body.put("result_id", result.resultId());
+        body.put("application_type", applicationType);
+        body.put("job_status", jobStatus);
+        body.put("ranking_snapshot", rankingBody);
+        body.put("quality_evaluation", qualityBody);
+        body.put("guardrail_mapping", guardrailMapping);
+        body.put("guarded_result", aiResultBody(result));
+        body.put("writeback_gate", candidateWritebackGateBody(gate));
+        body.put("agent_os", Map.of("agent_task_id", agent.taskId(), "agent_result_id", agent.resultId()));
+        if (protectedSnapshot != null) {
+            body.put("protected_result_snapshot", protectedSnapshotBody(protectedSnapshot));
+        }
+        if (confirmation != null) {
+            body.put("human_confirmation", confirmation);
+        }
+        appendCandidateAudit("CANDIDATE_RANKING_COMPLETED", jobId, rankingSnapshotId, qualityEvaluationId, decision.releaseDecision(), actorId, traceId);
+        return ResponseEntity.status(HttpStatus.ACCEPTED).body(body);
+    }
+
+    ResponseEntity<Map<String, Object>> switchCandidateProfiles(String permissions, Map<String, Object> request) {
+        if (permissions == null || !permissions.contains("AI_APPLICATION_CREATE")) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(error("CANDIDATE_PROFILE_PERMISSION_DENIED", "缺少候选档位切换权限"));
+        }
+        String newVersion = text(request, "new_profile_version", "v2");
+        activeCandidateProfileVersion = newVersion;
+        for (CandidateRankingSnapshotState snapshot : new ArrayList<>(candidateRankingSnapshots.values())) {
+            if ("READY".equals(snapshot.snapshotStatus())) {
+                CandidateRankingSnapshotState superseded = snapshot.withStatus("SUPERSEDED");
+                candidateRankingSnapshots.put(snapshot.rankingSnapshotId(), superseded);
+                updateCandidateSnapshotStatusInResult(snapshot.rankingSnapshotId(), "SUPERSEDED");
+            }
+        }
+        return ResponseEntity.ok(Map.of("profile_switch_status", "SWITCHED", "new_profile_version", newVersion));
+    }
+
+    ResponseEntity<Map<String, Object>> replayCandidateRankingSnapshot(String snapshotId, String permissions, String orgScope, Map<String, Object> request) {
+        if (permissions == null || !permissions.contains("AI_APPLICATION_CREATE") || !permissions.contains("CONTRACT_VIEW") || !permissions.contains("SEARCH_QUERY")) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(error("CANDIDATE_REPLAY_PERMISSION_DENIED", "缺少候选快照重放权限"));
+        }
+        CandidateRankingSnapshotState snapshot = loadCandidateSnapshot(snapshotId);
+        if (snapshot == null) {
+            throw new IllegalArgumentException("ranking_snapshot_id 不存在: " + snapshotId);
+        }
+        if (!"READY".equals(snapshot.snapshotStatus()) || !snapshot.rankingProfileVersion().equals(activeCandidateProfileVersion) || candidateDocumentVersionChanged(snapshot)) {
+            CandidateRankingSnapshotState superseded = snapshot.withStatus("SUPERSEDED");
+            candidateRankingSnapshots.put(snapshotId, superseded);
+            updateCandidateSnapshotStatusInResult(snapshotId, "SUPERSEDED");
+            return ResponseEntity.status(HttpStatus.GONE).body(error("CANDIDATE_SNAPSHOT_SUPERSEDED", "候选快照已因版本切换失效"));
+        }
+        return ResponseEntity.ok(candidateRankingSnapshotBody(snapshot, listMapsFromJson(snapshot.candidateListJson())));
+    }
+
+    ResponseEntity<Map<String, Object>> createCandidateWriteback(String permissions, Map<String, Object> request) {
+        if (permissions == null || !permissions.contains("AI_APPLICATION_CREATE") || !permissions.contains("CONTRACT_VIEW")) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(error("CANDIDATE_WRITEBACK_PERMISSION_DENIED", "缺少候选回写候选创建权限"));
+        }
+        String resultId = text(request, "result_id", null);
+        CandidateWritebackGateState gate = loadCandidateWritebackGate(resultId);
+        if (gate == null) {
+            return ResponseEntity.unprocessableEntity().body(error("CANDIDATE_QUALITY_ANCHOR_REQUIRED", "回写候选缺少 ranking_snapshot_id 或 quality_evaluation_id"));
+        }
+        if (!gate.writebackAllowed()) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(error("CANDIDATE_RELEASE_DECISION_BLOCKS_WRITEBACK", "放行决策未允许进入回写候选队列"));
+        }
+        return ResponseEntity.status(HttpStatus.CREATED).body(candidateWritebackGateBody(gate));
+    }
+
+    private List<Map<String, Object>> buildSemanticCandidates(String applicationType, ContractState contract, String documentVersionId,
+                                                              List<SearchDocumentState> evidenceDocs, List<Map<String, Object>> evidenceSegments,
+                                                              String sourceDigest, Map<String, Object> request) {
+        List<Map<String, Object>> candidates = new ArrayList<>();
+        int order = 1;
+        for (SearchDocumentState document : evidenceDocs) {
+            String slot = switch (document.docType()) {
+                case "CLAUSE" -> "RISK_BASELINE";
+                case "OCR" -> "SUMMARY_FACT";
+                case "DOCUMENT" -> "DIFF_BASELINE";
+                default -> primarySlot(applicationType);
+            };
+            candidates.add(semanticCandidate("cand-" + UUID.randomUUID(), "SEARCH_HIT", applicationType, contract.contractId(), document.documentVersionId(),
+                    document.sourceObjectId(), document.sourceAnchorJson(), slot, document.titleText(), 0.88 - order * 0.01, "ACTIVE", sourceDigest, order++));
+        }
+        OcrResultState ocr = currentOcrResultByDocumentVersion.containsKey(documentVersionId) ? ocrResults.get(currentOcrResultByDocumentVersion.get(documentVersionId)) : null;
+        if (ocr != null && !ocr.fieldCandidates().isEmpty()) {
+            Map<String, Object> field = ocr.fieldCandidates().get(0);
+            candidates.add(semanticCandidate("cand-" + UUID.randomUUID(), "OCR_FIELD", applicationType, contract.contractId(), documentVersionId,
+                    text(field, "field_candidate_id", null), json(Map.of("document_version_id", documentVersionId, "page_no", field.get("page_no"))), "FIELD_VALUE",
+                    text(field, "candidate_value", ""), 0.91, "ACTIVE", sourceDigest, order++));
+            candidates.add(semanticCandidate("cand-" + UUID.randomUUID(), "OCR_FIELD", applicationType, contract.contractId(), documentVersionId,
+                    text(field, "field_candidate_id", null), json(Map.of("document_version_id", documentVersionId, "page_no", field.get("page_no"))), "FIELD_VALUE",
+                    text(field, "candidate_value", ""), 0.72, "RESERVED", sourceDigest, order++));
+        }
+        Map<String, Object> refs = contractSemanticReferences(contract.contractId());
+        String clauseVersion = text(listMaps(map(refs.get("clause_library")).get("items")).get(0), "stable_clause_version_id", "clause-ver-default");
+        String templateVersion = text(listMaps(map(refs.get("template_library")).get("items")).get(0), "stable_template_version_id", "tpl-ver-default");
+        candidates.add(semanticCandidate("cand-" + UUID.randomUUID(), "CLAUSE_REF", applicationType, contract.contractId(), null,
+                clauseVersion, json(Map.of("clause_version_id", clauseVersion)), "RISK_BASELINE", "标准条款基线", 0.94, "ACTIVE", sourceDigest, order++));
+        candidates.add(semanticCandidate("cand-" + UUID.randomUUID(), "TEMPLATE_REF", applicationType, contract.contractId(), null,
+                templateVersion, json(Map.of("template_version_id", templateVersion)), "DIFF_BASELINE", "标准模板基线", 0.9, "ACTIVE", sourceDigest, order++));
+        Map<String, Object> primaryEvidence = evidenceSegments.isEmpty() ? Map.of("evidence_segment_id", "evidence-" + contract.contractId(), "citation_ref", "candidate-evidence") : evidenceSegments.get(0);
+        candidates.add(semanticCandidate("cand-" + UUID.randomUUID(), "EVIDENCE_SEGMENT", applicationType, contract.contractId(), documentVersionId,
+                text(primaryEvidence, "evidence_segment_id", "evidence-" + contract.contractId()), json(primaryEvidence), evidenceSlot(applicationType),
+                text(primaryEvidence, "segment_text", contract.contractName() + " 智能证据片段"), 0.89, "ACTIVE", sourceDigest, order++));
+        Set<String> coveredSlots = new HashSet<>();
+        for (Map<String, Object> candidate : candidates) {
+            coveredSlots.add(text(candidate, "semantic_slot", "SUMMARY_FACT"));
+        }
+        for (String slot : List.of("ANSWER_SUPPORT", "RISK_EVIDENCE", "DIFF_DELTA")) {
+            if (!coveredSlots.contains(slot)) {
+                candidates.add(semanticCandidate("cand-" + UUID.randomUUID(), "EVIDENCE_SEGMENT", applicationType, contract.contractId(), documentVersionId,
+                        text(primaryEvidence, "evidence_segment_id", "evidence-" + contract.contractId()), json(primaryEvidence), slot,
+                        text(primaryEvidence, "segment_text", contract.contractName() + " 槽位补充证据"), 0.80 - order * 0.005, "ACTIVE", sourceDigest, order++));
+            }
+        }
+        List<Map<String, Object>> ruleHits = listMaps(request.get("rule_hit_list"));
+        if (ruleHits.isEmpty()) {
+            ruleHits = List.of(Map.of("rule_version", "rule-version-" + applicationType + "-baseline", "rule_code", "BASELINE", "hit_status", "ACTIVE", "severity", "LOW", "strong_veto", false));
+        }
+        for (Map<String, Object> ruleHit : ruleHits) {
+            String ruleVersion = text(ruleHit, "rule_version", "rule-version-" + applicationType + "-baseline");
+            String status = bool(ruleHit, "strong_veto", false) ? "CONFLICTED" : "ACTIVE";
+            candidates.add(semanticCandidate("cand-" + UUID.randomUUID(), "RULE_HIT", applicationType, contract.contractId(), documentVersionId,
+                    ruleVersion, json(ruleHit), "RULE_OVERRIDE",
+                    "规则命中 " + text(ruleHit, "rule_code", "BASELINE"), 0.97, status, sourceDigest, order++));
+        }
+        return candidates.stream()
+                .sorted(Comparator.comparing(candidate -> -doubleValue(candidate, "ranking_score", 0.0)))
+                .toList();
+    }
+
+    private Map<String, Object> semanticCandidate(String id, String type, String applicationType, String contractId, String documentVersionId,
+                                                  String sourceObjectId, String anchorJson, String slot, String payloadText, double score,
+                                                  String status, String sourceDigest, int order) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("candidate_id", id);
+        body.put("candidate_type", type);
+        body.put("application_type", applicationType);
+        body.put("contract_id", contractId);
+        body.put("document_version_id", documentVersionId);
+        body.put("source_language", "zh-CN");
+        body.put("normalized_language", "zh-CN");
+        body.put("response_language", "zh-CN");
+        body.put("source_object_id", sourceObjectId);
+        body.put("source_anchor", mapFromJson(anchorJson));
+        body.put("semantic_slot", slot);
+        body.put("candidate_payload", Map.of("summary", payloadText));
+        body.put("source_score", score);
+        body.put("normalized_score", Map.of("source_reliability_score", score, "evidence_integrity_score", Math.min(1.0, score + 0.02), "risk_penalty_score", "RULE_HIT".equals(type) ? 0.0 : 0.03));
+        body.put("ranking_score", score - ("RESERVED".equals(status) ? 0.2 : 0.0));
+        body.put("elimination_status", status);
+        body.put("explanation_digest", "来源=" + type + ", 槽位=" + slot + ", 排序=" + order);
+        body.put("source_anchor_summary", type + ":" + sourceObjectId);
+        body.put("candidate_digest", "sha256:" + Integer.toHexString((sourceDigest + type + sourceObjectId + slot + payloadText).hashCode()));
+        return body;
+    }
+
+    private QualityDecision evaluateCandidateQuality(String applicationType, List<Map<String, Object>> candidates, Map<String, Object> request) {
+        Map<String, Object> qualityInputs = map(request.get("quality_inputs"));
+        boolean lowQuality = !qualityInputs.isEmpty() && (!bool(qualityInputs, "anchor_complete", true)
+                || doubleValue(qualityInputs, "evidence_coverage_ratio", 1.0) < 0.50
+                || doubleValue(qualityInputs, "citation_validity_score", 1.0) < 0.50);
+        boolean unresolvedConflict = candidates.stream().anyMatch(candidate -> "CONFLICTED".equals(candidate.get("elimination_status")));
+        if (lowQuality) {
+            return new QualityDecision("TIER_D", "REJECT", List.of("LOW_QUALITY_REJECTED", "ANCHOR_OR_CITATION_INSUFFICIENT"), 0.20, 0.20, 0.15, 0.20, 0.10);
+        }
+        if (unresolvedConflict || "RISK_ANALYSIS".equals(applicationType)) {
+            return new QualityDecision("TIER_C", "ESCALATE_TO_HUMAN", List.of("UNRESOLVED_CONFLICT", "HUMAN_REVIEW_REQUIRED"), 0.72, 0.82, 0.45, 0.70, 0.50);
+        }
+        if ("QA".equals(applicationType) || "DIFF_EXTRACTION".equals(applicationType)) {
+            return new QualityDecision("TIER_B", "PARTIAL_PUBLISH", List.of("LOCAL_GAP_EXPLAINED", "PARTIAL_RELEASE_ALLOWED"), 0.78, 0.85, 0.76, 0.70, 0.74);
+        }
+        return new QualityDecision("TIER_A", "PUBLISH", List.of("EVIDENCE_SUFFICIENT", "CONFLICT_RESOLVED"), 0.95, 0.96, 0.93, 0.94, 0.95);
+    }
+
+    private Map<String, Object> guardrailMapping(String releaseDecision) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("release_decision", releaseDecision);
+        switch (releaseDecision) {
+            case "PUBLISH" -> {
+                body.put("guardrail_decision", "PASS");
+                body.put("result_status", "READY");
+                body.put("job_status", "SUCCEEDED");
+            }
+            case "PARTIAL_PUBLISH" -> {
+                body.put("guardrail_decision", "PASS_PARTIAL");
+                body.put("result_status", "PARTIAL");
+                body.put("job_status", "SUCCEEDED");
+                body.put("gap_statement_required", true);
+            }
+            case "ESCALATE_TO_HUMAN" -> {
+                body.put("guardrail_decision", "REVIEW_REQUIRED");
+                body.put("guardrail_failure_code", "CANDIDATE_HUMAN_REVIEW_REQUIRED");
+                body.put("result_status", "BLOCKED");
+                body.put("job_status", "WAITING_HUMAN_CONFIRMATION");
+            }
+            default -> {
+                body.put("guardrail_decision", "REJECT");
+                body.put("guardrail_failure_code", "CANDIDATE_LOW_QUALITY_REJECTED");
+                body.put("result_status", "REJECTED");
+                body.put("job_status", "FAILED");
+            }
+        }
+        body.put("guardrail_required", true);
+        body.put("direct_publish_blocked", !List.of("PASS", "PASS_PARTIAL").contains(body.get("guardrail_decision")));
+        return body;
+    }
+
+    private String primarySlot(String applicationType) {
+        return switch (applicationType) {
+            case "QA" -> "ANSWER_SUPPORT";
+            case "RISK_ANALYSIS" -> "RISK_EVIDENCE";
+            case "DIFF_EXTRACTION" -> "DIFF_DELTA";
+            default -> "SUMMARY_FACT";
+        };
+    }
+
+    private String evidenceSlot(String applicationType) {
+        return switch (applicationType) {
+            case "QA" -> "ANSWER_SUPPORT";
+            case "RISK_ANALYSIS" -> "RISK_EVIDENCE";
+            case "DIFF_EXTRACTION" -> "DIFF_DELTA";
+            default -> "SUMMARY_FACT";
+        };
+    }
+
+    private String candidateSourceDigest(List<SearchDocumentState> evidenceDocs, String documentVersionId, String applicationType) {
+        return "sha256:" + Integer.toHexString((applicationType + ":" + documentVersionId + ":" + evidenceDocs.stream().map(SearchDocumentState::sourceVersionDigest).toList()).hashCode());
+    }
+
+    private Map<String, Object> candidateRankingSnapshotBody(CandidateRankingSnapshotState snapshot, List<Map<String, Object>> candidates) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("ranking_snapshot_id", snapshot.rankingSnapshotId());
+        body.put("ai_application_job_id", snapshot.aiApplicationJobId());
+        body.put("application_type", snapshot.applicationType());
+        body.put("contract_id", snapshot.contractId());
+        body.put("document_version_id", snapshot.documentVersionId());
+        body.put("source_digest", snapshot.sourceDigest());
+        body.put("ranking_profile", Map.of("profile_code", snapshot.rankingProfileCode(), "profile_version", snapshot.rankingProfileVersion()));
+        body.put("quality_profile", Map.of("profile_code", snapshot.qualityProfileCode(), "profile_version", snapshot.qualityProfileVersion()));
+        body.put("snapshot_status", snapshot.snapshotStatus());
+        body.put("semantic_candidates", candidates);
+        body.put("slot_rankings", slotRankings(candidates));
+        body.put("slot_governance", slotGovernance(candidates));
+        body.put("selected_candidate_ref", listMapsFromJson(snapshot.selectedCandidateJson()));
+        body.put("expires_at", snapshot.expiresAt());
+        return body;
+    }
+
+    private Map<String, Object> slotRankings(List<Map<String, Object>> candidates) {
+        Map<String, Object> quota = slotQuota();
+        Map<String, Object> bySlot = new LinkedHashMap<>();
+        for (String slot : List.of("SUMMARY_FACT", "ANSWER_SUPPORT", "RISK_EVIDENCE", "RISK_BASELINE", "DIFF_BASELINE", "DIFF_DELTA", "FIELD_VALUE", "RULE_OVERRIDE")) {
+            int limit = ((Number) quota.get(slot)).intValue();
+            List<Map<String, Object>> ranked = candidates.stream()
+                    .filter(candidate -> slot.equals(text(candidate, "semantic_slot", "SUMMARY_FACT")))
+                    .sorted(Comparator.comparing(candidate -> -doubleValue(candidate, "ranking_score", 0.0)))
+                    .limit(limit)
+                    .toList();
+            bySlot.put(slot, ranked);
+        }
+        return bySlot;
+    }
+
+    private Map<String, Object> slotGovernance(List<Map<String, Object>> candidates) {
+        long reserved = candidates.stream().filter(candidate -> "RESERVED".equals(candidate.get("elimination_status"))).count();
+        long conflicted = candidates.stream().filter(candidate -> "CONFLICTED".equals(candidate.get("elimination_status"))).count();
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("slot_quota", slotQuota());
+        body.put("dedupe_summary", Map.of("reserved_count", reserved, "same_source_compression", reserved > 0));
+        body.put("conflict_resolution_summary", Map.of("conflicted_count", conflicted, "resolution", conflicted > 0 ? "ESCALATE_TO_HUMAN" : "NO_CONFLICT"));
+        body.put("strong_veto_rule_applied", conflicted > 0);
+        body.put("explanation_summary", candidates.stream().limit(3).map(candidate -> text(candidate, "explanation_digest", "")).toList());
+        return body;
+    }
+
+    private Map<String, Object> slotQuota() {
+        Map<String, Object> quota = new LinkedHashMap<>();
+        quota.put("SUMMARY_FACT", 2);
+        quota.put("ANSWER_SUPPORT", 2);
+        quota.put("RISK_EVIDENCE", 2);
+        quota.put("RISK_BASELINE", 2);
+        quota.put("DIFF_BASELINE", 2);
+        quota.put("DIFF_DELTA", 2);
+        quota.put("FIELD_VALUE", 2);
+        quota.put("RULE_OVERRIDE", 2);
+        return quota;
+    }
+
+    private Map<String, Object> qualityEvaluationBody(QualityEvaluationReportState quality) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("quality_evaluation_id", quality.qualityEvaluationId());
+        body.put("ranking_snapshot_id", quality.rankingSnapshotId());
+        body.put("application_type", quality.applicationType());
+        body.put("quality_profile_code", quality.qualityProfileCode());
+        body.put("quality_profile_version", quality.qualityProfileVersion());
+        body.put("coverage_score", quality.coverageScore());
+        body.put("citation_validity_score", quality.citationValidityScore());
+        body.put("consistency_score", quality.consistencyScore());
+        body.put("completeness_score", quality.completenessScore());
+        body.put("publishability_score", quality.publishabilityScore());
+        body.put("quality_tier", quality.qualityTier());
+        body.put("release_decision", quality.releaseDecision());
+        body.put("decision_reason_code_list", quality.decisionReasonCodes());
+        return body;
+    }
+
+    private Map<String, Object> candidateWritebackGateBody(CandidateWritebackGateState gate) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("result_id", gate.resultId());
+        body.put("ranking_snapshot_id", gate.rankingSnapshotId());
+        body.put("quality_evaluation_id", gate.qualityEvaluationId());
+        body.put("release_decision", gate.releaseDecision());
+        body.put("writeback_gate_status", gate.writebackGateStatus());
+        body.put("writeback_allowed_flag", gate.writebackAllowed());
+        return body;
+    }
+
+    private boolean candidateDocumentVersionChanged(CandidateRankingSnapshotState snapshot) {
+        if (snapshot.documentVersionId() == null) {
+            return false;
+        }
+        DocumentVersionState version = requireDocumentVersion(snapshot.documentVersionId());
+        DocumentAssetState asset = requireDocumentAsset(version.documentAssetId());
+        return !snapshot.documentVersionId().equals(asset.currentVersionId());
+    }
+
+    private void supersedeCandidateSnapshotsForDocumentVersion(String documentVersionId, String traceId) {
+        for (CandidateRankingSnapshotState snapshot : new ArrayList<>(candidateRankingSnapshots.values())) {
+            if (documentVersionId != null && documentVersionId.equals(snapshot.documentVersionId()) && "READY".equals(snapshot.snapshotStatus())) {
+                CandidateRankingSnapshotState superseded = snapshot.withStatus("SUPERSEDED");
+                candidateRankingSnapshots.put(snapshot.rankingSnapshotId(), superseded);
+                updateCandidateSnapshotStatusInResult(snapshot.rankingSnapshotId(), "SUPERSEDED");
+                appendCandidateAudit("CANDIDATE_SNAPSHOT_SUPERSEDED", snapshot.aiApplicationJobId(), snapshot.rankingSnapshotId(), null, "SUPERSEDED", "document-center", traceId);
+            }
+        }
+    }
+
+    private void appendCandidateAudit(String actionType, String jobId, String rankingSnapshotId, String qualityEvaluationId, String resultStatus, String actorId, String traceId) {
+        appendAiAudit(jobId, actionType, actorId, resultStatus, traceId);
+    }
+
+    private void updateAiResultStructuredPayload(String resultId, Map<String, Object> payload) {
+        AiApplicationResultState result = aiApplicationResults.get(resultId);
+        if (result != null) {
+            Map<String, Object> copy = new LinkedHashMap<>(payload);
+            result.structuredPayload().clear();
+            result.structuredPayload().putAll(copy);
+        }
+        jdbcTemplate.update("update ia_ai_application_result set structured_payload_json = ? where result_id = ?", json(payload), resultId);
+    }
+
+    private CandidateRankingSnapshotState loadCandidateSnapshot(String snapshotId) {
+        CandidateRankingSnapshotState cached = candidateRankingSnapshots.get(snapshotId);
+        if (cached != null) {
+            return cached;
+        }
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList("""
+                select j.ai_application_job_id, j.application_type, j.contract_id, j.document_version_id, j.trace_id, r.structured_payload_json
+                from ia_ai_application_job j
+                join ia_ai_application_result r on r.ai_application_job_id = j.ai_application_job_id
+                where j.result_context_id = ?
+                """, snapshotId);
+        if (rows.isEmpty()) {
+            rows = jdbcTemplate.queryForList("""
+                    select j.ai_application_job_id, j.application_type, j.contract_id, j.document_version_id, j.trace_id, r.structured_payload_json
+                    from ia_ai_application_result r
+                    left join ia_ai_application_job j on r.ai_application_job_id = j.ai_application_job_id
+                    where r.structured_payload_json like ?
+                    """, "%" + snapshotId + "%");
+        }
+        if (rows.isEmpty()) {
+            return null;
+        }
+        Map<String, Object> row = rows.get(0);
+        Map<String, Object> payload = mapFromJson(text(row, "STRUCTURED_PAYLOAD_JSON", text(row, "structured_payload_json", "{}")));
+        Map<String, Object> ranking = map(payload.get("ranking_snapshot"));
+        if (ranking.isEmpty()) {
+            return null;
+        }
+        List<Map<String, Object>> candidates = listMaps(ranking.get("semantic_candidates"));
+        List<Map<String, Object>> selected = listMaps(ranking.get("selected_candidate_ref"));
+        Map<String, Object> rankingProfile = map(ranking.get("ranking_profile"));
+        Map<String, Object> qualityProfile = map(ranking.get("quality_profile"));
+        CandidateRankingSnapshotState snapshot = new CandidateRankingSnapshotState(snapshotId,
+                text(row, "AI_APPLICATION_JOB_ID", text(row, "ai_application_job_id", null)),
+                text(ranking, "application_type", text(row, "APPLICATION_TYPE", text(row, "application_type", null))),
+                text(ranking, "contract_id", text(row, "CONTRACT_ID", text(row, "contract_id", null))),
+                text(ranking, "document_version_id", text(row, "DOCUMENT_VERSION_ID", text(row, "document_version_id", null))),
+                text(ranking, "source_digest", "sha256:recovered"),
+                text(rankingProfile, "profile_code", "CANDIDATE_RANKING_BASELINE"),
+                text(rankingProfile, "profile_version", activeCandidateProfileVersion),
+                text(qualityProfile, "profile_code", "CANDIDATE_QUALITY_BASELINE"),
+                text(qualityProfile, "profile_version", activeCandidateProfileVersion),
+                text(ranking, "snapshot_status", "READY"),
+                json(selected), json(candidates), text(ranking, "expires_at", Instant.now().plusSeconds(900).toString()),
+                text(row, "TRACE_ID", text(row, "trace_id", null)), Instant.now().toString());
+        candidateRankingSnapshots.put(snapshotId, snapshot);
+        return snapshot;
+    }
+
+    private CandidateWritebackGateState loadCandidateWritebackGate(String resultId) {
+        CandidateWritebackGateState cached = candidateWritebackGates.get(resultId);
+        if (cached != null) {
+            return cached;
+        }
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList("select structured_payload_json from ia_ai_application_result where result_id = ?", resultId);
+        if (rows.isEmpty()) {
+            return null;
+        }
+        Map<String, Object> payload = mapFromJson(text(rows.get(0), "STRUCTURED_PAYLOAD_JSON", text(rows.get(0), "structured_payload_json", "{}")));
+        Map<String, Object> gatePayload = map(payload.get("writeback_gate"));
+        if (gatePayload.isEmpty()) {
+            return null;
+        }
+        CandidateWritebackGateState gate = new CandidateWritebackGateState(resultId,
+                text(gatePayload, "ranking_snapshot_id", text(payload, "ranking_snapshot_id", null)),
+                text(gatePayload, "quality_evaluation_id", text(payload, "quality_evaluation_id", null)),
+                text(gatePayload, "release_decision", text(payload, "release_decision", null)),
+                text(gatePayload, "writeback_gate_status", "BLOCKED"),
+                bool(gatePayload, "writeback_allowed_flag", false),
+                null, Instant.now().toString());
+        candidateWritebackGates.put(resultId, gate);
+        return gate;
+    }
+
+    private void updateCandidateSnapshotStatusInResult(String snapshotId, String status) {
+        CandidateRankingSnapshotState cached = candidateRankingSnapshots.get(snapshotId);
+        if (cached != null) {
+            candidateRankingSnapshots.put(snapshotId, cached.withStatus(status));
+        }
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList("select result_id, structured_payload_json from ia_ai_application_result where structured_payload_json like ?", "%" + snapshotId + "%");
+        for (Map<String, Object> row : rows) {
+            String resultId = text(row, "RESULT_ID", text(row, "result_id", null));
+            Map<String, Object> payload = mapFromJson(text(row, "STRUCTURED_PAYLOAD_JSON", text(row, "structured_payload_json", "{}")));
+            Map<String, Object> ranking = new LinkedHashMap<>(map(payload.get("ranking_snapshot")));
+            if (!ranking.isEmpty()) {
+                ranking.put("snapshot_status", status);
+                payload.put("ranking_snapshot", ranking);
+            }
+            jdbcTemplate.update("update ia_ai_application_result set structured_payload_json = ? where result_id = ?", json(payload), resultId);
+        }
     }
 
     private AiApplicationJobState findAiJobByIdempotency(String applicationType, String contractId, String idempotencyKey) {
@@ -5492,13 +6055,42 @@ class CoreChainService {
     }
 
     private record SearchResultSetState(String resultSetId, String resultStatus, String searchQueryJson, String itemPayloadJson,
-                                        String facetPayloadJson, int total, String rankingProfileCode, String expiresAt,
-                                        boolean cacheHitFlag, String permissionScopeDigest, String actorId, int rebuildGeneration,
-                                        String stableOrderDigest, String createdAt) {
+                                         String facetPayloadJson, int total, String rankingProfileCode, String expiresAt,
+                                         boolean cacheHitFlag, String permissionScopeDigest, String actorId, int rebuildGeneration,
+                                         String stableOrderDigest, String createdAt) {
+    }
+
+    private record CandidateRankingSnapshotState(String rankingSnapshotId, String aiApplicationJobId, String applicationType,
+                                                 String contractId, String documentVersionId, String sourceDigest,
+                                                 String rankingProfileCode, String rankingProfileVersion,
+                                                 String qualityProfileCode, String qualityProfileVersion,
+                                                 String snapshotStatus, String selectedCandidateJson, String candidateListJson,
+                                                 String expiresAt, String traceId, String createdAt) {
+        CandidateRankingSnapshotState withStatus(String status) {
+            return new CandidateRankingSnapshotState(rankingSnapshotId, aiApplicationJobId, applicationType, contractId, documentVersionId,
+                    sourceDigest, rankingProfileCode, rankingProfileVersion, qualityProfileCode, qualityProfileVersion, status,
+                    selectedCandidateJson, candidateListJson, expiresAt, traceId, createdAt);
+        }
+    }
+
+    private record QualityEvaluationReportState(String qualityEvaluationId, String rankingSnapshotId, String applicationType,
+                                                String qualityProfileCode, String qualityProfileVersion, String qualityTier,
+                                                String releaseDecision, List<String> decisionReasonCodes, double coverageScore,
+                                                double citationValidityScore, double consistencyScore, double completenessScore,
+                                                double publishabilityScore, String createdAt) {
+    }
+
+    private record CandidateWritebackGateState(String resultId, String rankingSnapshotId, String qualityEvaluationId,
+                                               String releaseDecision, String writebackGateStatus, boolean writebackAllowed,
+                                               String traceId, String createdAt) {
+    }
+
+    private record QualityDecision(String qualityTier, String releaseDecision, List<String> reasonCodes, double coverage,
+                                   double citation, double consistency, double completeness, double publishability) {
     }
 
     private record AiApplicationJobState(String aiApplicationJobId, String applicationType, String contractId, String documentVersionId,
-                                         String jobStatus, String contextAssemblyJobId, String resultContextId, String agentTaskId,
+                                          String jobStatus, String contextAssemblyJobId, String resultContextId, String agentTaskId,
                                          String agentResultId, String idempotencyKey, String scopeDigest, String failureCode,
                                          String failureReason, String traceId, String createdAt, String updatedAt) {
     }

@@ -4,11 +4,11 @@
 
 - 第四批目标是完成智能与增强能力的一期实现基准，围绕智能应用主线交付文字识别、全文检索、智能辅助、智能推荐、多语言知识治理、结果回写与运维验收闭环。
 - 本批必须以合同主档为业务真相源、文档中心为文件真相源、`Agent OS` 为智能运行时底座，智能应用只承接受控派生结果域。
-- 当前分支为 `feature/batch4-intelligent-enhancement-capabilities`，隔离工作区为 `.worktrees/feature/batch4-intelligent-enhancement-capabilities`。
+- 当前分支为 `feature/candidate-ranking-quality-evaluation`，隔离工作区为 `.worktrees/feature/candidate-ranking-quality-evaluation`。
 
 ## 成功定义
 
-- 已基于最新 `main` 创建第四批隔离工作区和业务分支。
+- 已基于最新 `main` 创建智能推荐、候选排序与质量评估隔离工作区和业务分支。
 - 新工作树基线验证 `./scripts/verify-all.sh` 通过。
 - 文字识别可基于文档中心受控版本创建作业，完成权限校验、幂等、引擎适配、结果归一、失败重试、版本失效与搜索补索引事件。
 - 全文检索可消费合同、文档、条款与文字识别派生结果，支持权限裁剪、稳定快照、导出二次校验、索引重建与降级。
@@ -25,9 +25,9 @@
 
 ## 当前阶段
 
-- 阶段：第四批智能辅助应用与输出护栏已完成，完整验证脚本性能诊断与优化专项已完成，独立质量审查复审通过，准备进入智能推荐、候选排序与质量评估。
-- 分支：`feature/batch4-intelligent-enhancement-capabilities`。
-- 隔离工作区：`.worktrees/feature/batch4-intelligent-enhancement-capabilities`。
+- 阶段：智能推荐、候选排序与质量评估已完成实现、修复、独立质量审查复审与完整验证；下一步准备多语言知识治理分支命名与工作树创建。
+- 分支：`feature/candidate-ranking-quality-evaluation`。
+- 隔离工作区：`.worktrees/feature/candidate-ranking-quality-evaluation`。
 - 规格：[`102-cmp-implementation-execution-spec.md`](../superpowers/specs/102-cmp-implementation-execution-spec.md)。
 - 当前批次计划：[`102-04-batch-4-intelligent-applications-implementation-plan.md`](../superpowers/plans/102-04-batch-4-intelligent-applications-implementation-plan.md)。
 
@@ -38,7 +38,8 @@
 - [✓] 文字识别稳定输入闭环：已通过独立质量审查复审，没问题。
 - [✓] 全文检索与索引重建：已通过独立质量审查最终复审，没问题。
 - [✓] 智能辅助应用与输出护栏：已通过独立质量审查复审，没问题。
-- [ ] 智能推荐、候选排序与质量评估。
+- [✓] 智能推荐、候选排序与质量评估分支与工作树创建：基于 `origin/main` 创建 `feature/candidate-ranking-quality-evaluation`，基线验证 `./scripts/verify-all.sh` 通过。
+- [✓] 智能推荐、候选排序与质量评估：已通过独立质量审查复审，没问题；完整验证 `./scripts/verify-all.sh` 通过。
 - [ ] 多语言知识治理。
 - [ ] 结果回写与冲突处理。
 - [ ] 运维监控、恢复与上线验收。
@@ -55,23 +56,14 @@
 
 ## 当前正在做
 
-- [✓] `PR #8` 已合并到 `main`，合并提交为 `7b57b29`。
+- [✓] `PR #9` 已合并到 `main`，合并提交为 `037d327`。
 - [✓] 本地 `main` 已同步到 `origin/main`。
-- [✓] 第三批分支和工作树已清理。
-- [✓] 已创建第四批分支与工作树：`feature/batch4-intelligent-enhancement-capabilities`。
-- [✓] 第四批 planning 真相已对齐，旧批次内容已迁入历史真相。
-- [✓] 第四批基线验证已通过：`./scripts/verify-all.sh`，后端 133 个测试通过，前端检查、测试、构建通过，容器健康检查通过并完成清理。
-- [✓] 第四批启动门禁初次核验不通过，报告为 [`102-19-batch4-startup-gate-baseline-verification.md`](../reports/verification/102-19-batch4-startup-gate-baseline-verification.md)。
-- [✓] 第四批启动门禁六项上游可消费性缺口已完成修复，独立质量审查结论为通过，没问题。
-- [✓] 修复后完整验证已通过：`./scripts/verify-all.sh`，后端 134 个测试通过，前端检查、测试、构建通过，容器健康检查通过并完成清理。
-- [✓] 文字识别稳定输入闭环已完成实现、问题修复与独立质量审查复审，结论为通过，没问题。
-- [✓] 文字识别稳定输入闭环完整验证已通过：`./scripts/verify-all.sh`，后端 139 个测试通过，前端检查、测试、构建通过，容器健康检查通过并完成清理。
-- [✓] 全文检索与索引重建已完成实现、多轮问题修复与独立质量审查最终复审，结论为通过，没问题。
-- [✓] 全文检索与索引重建完整验证已通过：`./scripts/verify-all.sh`，后端 148 个测试通过，前端检查、测试、构建通过，容器健康检查通过并完成清理。
-- [✓] 智能辅助应用与输出护栏已完成实现、问题修复与独立质量审查复审，结论为通过，没问题。
-- [✓] 智能辅助应用与输出护栏完整验证已通过：`./scripts/verify-all.sh`，后端 158 个测试通过，前端检查、测试、构建通过，容器健康检查通过并完成清理。
-- [✓] 完整验证脚本性能诊断与优化专项已完成，独立质量审查复审结论为通过，没问题。
-- [✓] 优化后 `./scripts/verify-all.sh` 已通过，阶段耗时显示主要瓶颈为后端测试与 `docker compose up`。
+- [✓] 第四批前半段阶段性交付分支和工作树已清理。
+- [✓] 已创建智能推荐、候选排序与质量评估分支与工作树：`feature/candidate-ranking-quality-evaluation`。
+- [✓] 新工作树基线验证已通过：`./scripts/verify-all.sh`，后端 158 个测试通过，前端检查、测试、构建通过，镜像构建、编排启动、冒烟验证和清理均通过。
+- [✓] 智能推荐、候选排序与质量评估已完成实现、问题修复与独立质量审查复审，结论为通过，没问题。
+- [✓] 智能推荐、候选排序与质量评估完整验证已通过：`./scripts/verify-all.sh`，后端 163 个测试通过，前端检查、测试、构建通过，镜像构建、编排启动、冒烟验证和清理均通过。
+- [•] 准备按新业务分支规则为多语言知识治理汇报备选分支名称。
 
 ## 已完成里程碑
 
@@ -79,7 +71,7 @@
 - [✓] 第一批底座主线全部功能点、跨主线联调、独立质量审查、发布前门禁与 PR 合并已完成。
 - [✓] 第二批合同核心主链路全部功能点、独立质量审查、整体质量收口与 PR 合并已完成。
 - [✓] 第三批依赖业务能力全部功能点、跨模块综合验证、整体质量收口、PR 合并与清理已完成。
-- [✓] 第四批隔离工作树已创建。
+- [✓] 第四批前半段阶段性交付已合并。
 
 ## 当前阻塞
 
@@ -88,15 +80,15 @@
 
 ## 活跃支线
 
-- [•] `feature/batch4-intelligent-enhancement-capabilities` 第四批智能与增强能力编码准备。
+- [•] 多语言知识治理分支命名准备。
 
 ## 下一步唯一动作
 
-- 在 `.worktrees/feature/batch4-intelligent-enhancement-capabilities` 派发实现子代理，按测试驱动开发推进智能推荐、候选排序与质量评估。
+- 按新业务分支规则，基于第四批计划为多语言知识治理汇报几个 `feature/<英文业务功能名>` 备选分支名称，暂不创建分支。
 
 ## 恢复提示
 
 - 恢复时先读本文件、[`history.md`](./history.md)、[`decisions.md`](./decisions.md)。
 - 已完成批次只读取 [`history.md`](./history.md)，不要把已完成批次长列表写回 `current.md`。
 - 第四批正式执行依据为 [`102-cmp-implementation-execution-spec.md`](../superpowers/specs/102-cmp-implementation-execution-spec.md) 与 [`102-04-batch-4-intelligent-applications-implementation-plan.md`](../superpowers/plans/102-04-batch-4-intelligent-applications-implementation-plan.md)。
-- 第四批当前工作树为 `.worktrees/feature/batch4-intelligent-enhancement-capabilities`，不要在主工作区直接编码。
+- 当前候选排序工作树为 `.worktrees/feature/candidate-ranking-quality-evaluation`；进入多语言知识治理前需先按用户选择创建新的隔离工作树。
