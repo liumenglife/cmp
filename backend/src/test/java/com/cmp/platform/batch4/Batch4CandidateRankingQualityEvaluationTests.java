@@ -14,6 +14,7 @@ import org.springframework.context.ApplicationContext;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.annotation.DirtiesContext;
+import org.springframework.test.util.AopTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.lang.reflect.Field;
@@ -345,7 +346,7 @@ class Batch4CandidateRankingQualityEvaluationTests {
     }
 
     private void clearRuntimeCandidateCaches() throws Exception {
-        Object service = applicationContext.getBean("coreChainService");
+        Object service = AopTestUtils.getTargetObject(applicationContext.getBean("coreChainService"));
         for (String fieldName : java.util.List.of("candidateRankingSnapshots", "qualityEvaluationReports", "candidateWritebackGates")) {
             Field field = service.getClass().getDeclaredField(fieldName);
             field.setAccessible(true);
