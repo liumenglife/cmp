@@ -4,12 +4,12 @@
 
 - 第四批目标是完成智能与增强能力的一期实现基准，围绕智能应用主线交付文字识别、全文检索、智能辅助、智能推荐、多语言知识治理、结果回写与运维验收闭环。
 - 本批必须以合同主档为业务真相源、文档中心为文件真相源、`Agent OS` 为智能运行时底座，智能应用只承接受控派生结果域。
-- 当前主工作区在 `main`，下一功能点尚未创建业务分支和隔离工作区。
+- 当前分支为 `feature/batch-4-result-writeback-conflict-resolution`，隔离工作区为 `.worktrees/feature/batch-4-result-writeback-conflict-resolution`。
 
 ## 成功定义
 
 - 已完成智能推荐、候选排序与质量评估、多语言知识治理的分支合并和清理。
-- 下一功能点将在选定业务分支名后基于最新 `main` 创建隔离工作区。
+- 已基于最新 `main` 创建结果回写与冲突处理隔离工作区，基线验证 `./scripts/verify-all.sh` 通过。
 - 文字识别可基于文档中心受控版本创建作业，完成权限校验、幂等、引擎适配、结果归一、失败重试、版本失效与搜索补索引事件。
 - 全文检索可消费合同、文档、条款与文字识别派生结果，支持权限裁剪、稳定快照、导出二次校验、索引重建与降级。
 - 智能辅助通过 `Agent OS` 和模型抽象层运行，输出具备来源引用、护栏决策、人工确认挂点与审计链路。
@@ -25,9 +25,9 @@
 
 ## 当前阶段
 
-- 阶段：拉取请求十一已合并到 `main`，多语言知识治理分支和工作树已清理；下一步准备“结果回写与冲突处理”分支命名与工作树创建。
-- 分支：`main`。
-- 隔离工作区：下一功能点尚未创建。
+- 阶段：结果回写与冲突处理已完成测试驱动实现、规格终审、代码质量复审与完整验证；下一步提交、推送并创建面向 `main` 的拉取请求，不合并。
+- 分支：`feature/batch-4-result-writeback-conflict-resolution`。
+- 隔离工作区：`.worktrees/feature/batch-4-result-writeback-conflict-resolution`。
 - 规格：[`102-cmp-implementation-execution-spec.md`](../superpowers/specs/102-cmp-implementation-execution-spec.md)。
 - 当前批次计划：[`102-04-batch-4-intelligent-applications-implementation-plan.md`](../superpowers/plans/102-04-batch-4-intelligent-applications-implementation-plan.md)。
 
@@ -44,8 +44,9 @@
 - [✓] 多语言知识治理分支与工作树创建：基于 `origin/main` 创建 `feature/multilingual-knowledge-governance`，基线验证 `./scripts/verify-all.sh` 通过。
 - [✓] 多语言知识治理：已完成测试驱动实现、规格复审、代码质量终审与完整验证。
 - [✓] 拉取请求十一合并与分支清理：已合并到 `main`，本地 `main` 已同步，多语言知识治理本地分支、远端分支和工作树均已删除。
-- [•] 结果回写与冲突处理分支命名准备。
-- [ ] 结果回写与冲突处理。
+- [✓] 结果回写与冲突处理分支与工作树创建：基于最新 `main` 创建 `feature/batch-4-result-writeback-conflict-resolution`，基线验证 `./scripts/verify-all.sh` 通过。
+- [✓] 结果回写与冲突处理：已完成测试驱动实现、规格终审、代码质量复审与完整验证。
+- [•] 结果回写与冲突处理提交、推送与拉取请求创建。
 - [ ] 运维监控、恢复与上线验收。
 - [ ] 第四批跨能力综合验证。
 - [ ] 第四批整体质量收口。
@@ -68,7 +69,14 @@
 - [✓] 智能推荐、候选排序与质量评估已完成实现、问题修复与独立质量审查复审，结论为通过，没问题。
 - [✓] 智能推荐、候选排序与质量评估完整验证已通过：`./scripts/verify-all.sh`，后端 163 个测试通过，前端检查、测试、构建通过，镜像构建、编排启动、冒烟验证和清理均通过。
 - [✓] 多语言知识治理已完成测试驱动实现、规格复审、代码质量终审与完整验证；最终 `Batch4MultilingualKnowledgeGovernanceTests` 25 个测试通过，后端 188 个测试通过，`./scripts/verify-all.sh` 通过。
-- [•] 准备按新业务分支规则为结果回写与冲突处理汇报备选分支名称。
+- [✓] 已按用户选择创建结果回写与冲突处理分支与工作树：`feature/batch-4-result-writeback-conflict-resolution`。
+- [✓] 新工作树基线验证已通过：`./scripts/verify-all.sh`，覆盖后端测试、前端依赖检查、lint、vitest、build、Docker Compose 配置、镜像构建、编排启动、healthcheck / smoke 与清理。
+- [✓] 结果回写与冲突处理已完成测试驱动实现，覆盖正式回写准入、三目标视图映射、禁止写入清单、回写生命周期、冲突裁决、幂等锁、死信恢复与审计追溯。
+- [✓] 结果回写与冲突处理规格终审通过，没问题。
+- [✓] 首轮代码质量审查问题已修复，定向测试和第四批相关回归通过。
+- [✓] 结果回写与冲突处理代码质量复审通过，没问题。
+- [✓] 结果回写与冲突处理完整验证已通过：`./scripts/verify-all.sh`，后端 `202` 个测试通过，前端依赖检查、lint、vitest、build、Docker Compose 配置、镜像构建、编排启动、healthcheck / smoke 与清理均通过。
+- [•] 准备提交当前全绿变更、推送分支到 `origin`，并创建面向 `main` 的拉取请求；本轮不合并。
 
 ## 已完成里程碑
 
@@ -87,15 +95,15 @@
 
 ## 活跃支线
 
-- [•] 结果回写与冲突处理分支命名准备。
+- [•] 结果回写与冲突处理提交、推送与拉取请求创建。
 
 ## 下一步唯一动作
 
-- 按新业务分支规则，基于第四批计划为结果回写与冲突处理汇报几个 `feature/<英文业务功能名>` 备选分支名称，暂不创建分支。
+- 提交当前全绿变更，推送 `feature/batch-4-result-writeback-conflict-resolution` 到 `origin`，并创建面向 `main` 的拉取请求；创建后返回链接，不合并。
 
 ## 恢复提示
 
 - 恢复时先读本文件、[`history.md`](./history.md)、[`decisions.md`](./decisions.md)。
 - 已完成批次只读取 [`history.md`](./history.md)，不要把已完成批次长列表写回 `current.md`。
 - 第四批正式执行依据为 [`102-cmp-implementation-execution-spec.md`](../superpowers/specs/102-cmp-implementation-execution-spec.md) 与 [`102-04-batch-4-intelligent-applications-implementation-plan.md`](../superpowers/plans/102-04-batch-4-intelligent-applications-implementation-plan.md)。
-- 当前主工作区为 `main`；进入结果回写与冲突处理前需先按用户选择创建新的隔离工作树。
+- 当前结果回写与冲突处理工作树为 `.worktrees/feature/batch-4-result-writeback-conflict-resolution`；实现必须在该隔离工作区内推进。
