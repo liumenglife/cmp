@@ -14,6 +14,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -229,8 +230,21 @@ class CoreChainController {
 
     @PostMapping("/api/intelligent-applications/candidates/writeback-candidates")
     ResponseEntity<Map<String, Object>> createCandidateWriteback(@RequestHeader(value = "X-CMP-Permissions", required = false) String permissions,
-                                                                  @RequestBody Map<String, Object> request) {
+                                                                   @RequestBody Map<String, Object> request) {
         return service.createCandidateWriteback(permissions, request);
+    }
+
+    @PostMapping("/api/intelligent-applications/result-writebacks")
+    ResponseEntity<Map<String, Object>> createResultWriteback(@RequestHeader(value = "X-CMP-Permissions", required = false) String permissions,
+                                                              @RequestBody Map<String, Object> request) {
+        return service.createResultWriteback(permissions, request);
+    }
+
+    @PostMapping("/api/intelligent-applications/result-writebacks/dead-letters/{deadLetterId}/recover")
+    ResponseEntity<Map<String, Object>> recoverResultWritebackDeadLetter(@PathVariable String deadLetterId,
+                                                                         @RequestHeader(value = "X-CMP-Permissions", required = false) String permissions,
+                                                                         @RequestBody(required = false) Map<String, Object> request) {
+        return service.recoverResultWritebackDeadLetter(deadLetterId, permissions, request == null ? Map.of() : request);
     }
 
     @PostMapping("/api/intelligent-applications/i18n/terms")
@@ -665,6 +679,8 @@ class CoreChainService {
     private final Map<String, CandidateRankingSnapshotState> candidateRankingSnapshots = new ConcurrentHashMap<>();
     private final Map<String, QualityEvaluationReportState> qualityEvaluationReports = new ConcurrentHashMap<>();
     private final Map<String, CandidateWritebackGateState> candidateWritebackGates = new ConcurrentHashMap<>();
+    private final Map<String, ResultWritebackRecordState> resultWritebackRecords = new ConcurrentHashMap<>();
+    private final Set<String> resultWritebackLocks = ConcurrentHashMap.newKeySet();
     private final Map<String, Map<String, Object>> terminologySnapshotCache = new ConcurrentHashMap<>();
     private final Map<String, Map<String, Object>> i18nContextCache = new ConcurrentHashMap<>();
     private final Map<String, String> searchDocumentI18nContexts = new ConcurrentHashMap<>();
@@ -1337,6 +1353,9 @@ class CoreChainService {
         structuredPayload.put("semantic_candidates", semanticCandidates);
         structuredPayload.put("quality_evaluation", qualityBody);
         structuredPayload.put("writeback_gate", gatePayload);
+        if (writebackAllowed && targetTypeForApplication(applicationType) != null) {
+            structuredPayload.put("writeback_payload", buildFormalWritebackPayload(applicationType, contract, activeCandidates, decision, request));
+        }
         AiApplicationResultState result = createAiResult(jobId, applicationType, agent.taskId(), agent.resultId(), resultStatus,
                 text(guardrailMapping, "guardrail_decision", "PASS"), text(guardrailMapping, "guardrail_failure_code", null), !writebackAllowed, writebackAllowed,
                 structuredPayload,
@@ -1437,6 +1456,849 @@ class CoreChainService {
         return ResponseEntity.status(HttpStatus.CREATED).body(candidateWritebackGateBody(gate));
     }
 
+    @Transactional
+    public ResponseEntity<Map<String, Object>> createResultWriteback(String permissions, Map<String, Object> request) {
+        if (permissions == null || !permissions.contains("AI_APPLICATION_CREATE") || !permissions.contains("CONTRACT_VIEW")) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(error("RESULT_WRITEBACK_PERMISSION_DENIED", "缺少结果回写权限"));
+        }
+        String resultId = text(request, "result_id", null);
+        String targetType = text(request, "target_type", null);
+        String targetId = text(request, "target_id", null);
+        if (!List.of("CONTRACT_SUMMARY", "CONTRACT_RISK_VIEW", "CONTRACT_EXTRACTION_VIEW").contains(targetType) || resultId == null || targetId == null) {
+            return ResponseEntity.unprocessableEntity().body(error("RESULT_WRITEBACK_TARGET_INVALID", "回写目标或结果标识无效"));
+        }
+        AiApplicationResultState result = loadAiApplicationResult(resultId);
+        if (result == null) {
+            return ResponseEntity.unprocessableEntity().body(error("RESULT_WRITEBACK_RESULT_NOT_FOUND", "AI 结果不存在"));
+        }
+        if (!targetType.equals(targetTypeForApplication(result.applicationType()))) {
+            return ResponseEntity.unprocessableEntity().body(error("RESULT_WRITEBACK_TARGET_TYPE_MISMATCH", "AI 应用类型与目标视图不匹配"));
+        }
+        String formalContractId = formalResultContractId(result);
+        if (formalContractId == null || !targetContractMatches(targetType, targetId, formalContractId)) {
+            return ResponseEntity.unprocessableEntity().body(error("RESULT_WRITEBACK_TARGET_CONTRACT_MISMATCH", "回写目标合同与正式 AI 结果合同不一致"));
+        }
+        Map<String, Object> formalPayload = map(result.structuredPayload().get("writeback_payload"));
+        CandidateWritebackGateState gate = formalWritebackGate(resultId, result.structuredPayload());
+        if (gate == null || !gate.writebackAllowed() || !result.writebackAllowedFlag() || !List.of("PASS", "PASS_PARTIAL").contains(result.guardrailDecision())) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(error("RESULT_WRITEBACK_GATE_DENIED", "护栏或质量评估未放行，禁止进入正式回写"));
+        }
+        if (formalPayload.isEmpty()) {
+            return ResponseEntity.unprocessableEntity().body(error("RESULT_WRITEBACK_PAYLOAD_REQUIRED", "正式回写载荷缺失，禁止回写"));
+        }
+        String forbiddenField = firstForbiddenWritebackField(formalPayload);
+        if (forbiddenField != null) {
+            Map<String, Object> body = error("RESULT_WRITEBACK_FORBIDDEN_FIELD", "回写载荷包含禁止写入字段");
+            body.put("forbidden_field", forbiddenField);
+            return ResponseEntity.unprocessableEntity().body(body);
+        }
+        String whitelistError = validateTargetPayloadWhitelist(targetType, formalPayload);
+        if (whitelistError != null) {
+            Map<String, Object> body = error("RESULT_WRITEBACK_FIELD_NOT_ALLOWED", "回写载荷包含目标视图不允许字段");
+            body.put("field", whitelistError);
+            return ResponseEntity.unprocessableEntity().body(body);
+        }
+        if ("CONTRACT_EXTRACTION_VIEW".equals(targetType) && !partialExtractionGapsExplicit(result, formalPayload)) {
+            return ResponseEntity.unprocessableEntity().body(error("RESULT_WRITEBACK_EXTRACTION_GAP_NOT_EXPLICIT", "部分发布的提取缺失字段必须标注失败或范围外"));
+        }
+        if ("CONTRACT_SUMMARY".equals(targetType) && !partialSummaryGapReasonExplicit(result, formalPayload)) {
+            return ResponseEntity.unprocessableEntity().body(error("RESULT_WRITEBACK_SUMMARY_GAP_REASON_REQUIRED", "部分发布摘要必须由正式载荷提供缺口说明"));
+        }
+        if ("CONTRACT_SUMMARY".equals(targetType) && !partialSummaryStructureValid(result, formalPayload)) {
+            return ResponseEntity.unprocessableEntity().body(error("RESULT_WRITEBACK_SUMMARY_PARTIAL_STRUCTURE_REQUIRED", "部分发布摘要必须提供摘要正文、分段和引用"));
+        }
+        if ("CONTRACT_RISK_VIEW".equals(targetType) && !partialRiskPublishStatusesValid(result, formalPayload)) {
+            return ResponseEntity.unprocessableEntity().body(error("RESULT_WRITEBACK_RISK_PUBLISH_STATUS_INVALID", "部分发布风险项必须声明有效发布状态"));
+        }
+        if ("CONTRACT_RISK_VIEW".equals(targetType) && !partialRiskHasVisibleItems(result, formalPayload)) {
+            return ResponseEntity.unprocessableEntity().body(error("RESULT_WRITEBACK_RISK_VISIBLE_ITEM_REQUIRED", "部分发布风险项过滤后必须至少保留一个可发布项"));
+        }
+        if (!request.containsKey("target_snapshot_version") || request.get("target_snapshot_version") == null) {
+            return ResponseEntity.unprocessableEntity().body(error("RESULT_WRITEBACK_TARGET_SNAPSHOT_VERSION_REQUIRED", "正式回写必须显式提供目标快照版本"));
+        }
+
+        ResultWritebackRecordState existing = loadResultWritebackRecord(resultId, targetType, targetId);
+        if (existing != null && terminalWritebackStatus(existing.writebackStatus())) {
+            Map<String, Object> body = resultWritebackBody(existing);
+            body.put("duplicate", true);
+            return ResponseEntity.ok(body);
+        }
+
+        String lockKey = targetType + ":" + targetId;
+        String lockOwner = existing == null ? resultId : existing.writebackRecordId();
+        if (!acquireWritebackLock(lockKey, lockOwner)) {
+            ResultWritebackRecordState pending = existing == null
+                    ? persistResultWriteback(resultId, targetType, targetId, request, formalPayload, gate, "PENDING", "NO_CONFLICT", "目标槽位锁被占用，等待重试", 1)
+                    : existing.withStatus("PENDING", existing.conflictCode(), "目标槽位锁被占用，等待重试", existing.retryCount() + 1);
+            if (existing != null) {
+                updateResultWritebackRecord(pending);
+            }
+            appendAiAudit(result.aiApplicationJobId(), "RESULT_WRITEBACK_RETRY_SCHEDULED", text(request, "operator_id", "system"), "PENDING", text(request, "trace_id", null));
+            if (pending.retryCount() >= 5) {
+                ResultWritebackRecordState failed = pending.withTerminal("FAILED", "WRITE_GATE_DENIED", "目标槽位锁竞争重试耗尽", pending.retryCount());
+                updateResultWritebackRecord(failed);
+                insertWritebackDeadLetter(failed, text(request, "trace_id", null));
+                updateAiResultWritebackAnchor(resultId, failed);
+                appendAiAudit(result.aiApplicationJobId(), "RESULT_WRITEBACK_DEAD_LETTERED", text(request, "operator_id", "system"), "FAILED", text(request, "trace_id", null));
+                Map<String, Object> body = resultWritebackBody(failed);
+                body.put("dead_letter", Map.of("dead_letter_status", "OPEN", "writeback_record_id", failed.writebackRecordId()));
+                return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE).body(body);
+            }
+            return ResponseEntity.status(HttpStatus.ACCEPTED).body(resultWritebackBody(pending));
+        }
+        try {
+            ResultWritebackRecordState pending = existing == null
+                    ? persistResultWriteback(resultId, targetType, targetId, request, formalPayload, gate, "PENDING", "NO_CONFLICT", null, 0)
+                    : existing;
+            ResultWritebackRecordState writing = pending.withStatus("WRITING", pending.conflictCode(), pending.failureReason(), pending.retryCount());
+            updateResultWritebackRecord(writing);
+
+            String confirmationStatus = formalHumanConfirmationStatus(result, formalPayload);
+            if ("REJECTED".equals(confirmationStatus) || "REQUEST_CHANGES".equals(confirmationStatus)) {
+                ResultWritebackRecordState rejected = writing.withTerminal("FAILED", "HUMAN_REJECTED", "正式人工确认已否决或要求修改", writing.retryCount());
+                updateResultWritebackRecord(rejected);
+                updateAiResultWritebackAnchor(resultId, rejected);
+                appendAiAudit(result.aiApplicationJobId(), "RESULT_WRITEBACK_FAILED", text(request, "operator_id", "system"), "FAILED", text(request, "trace_id", null));
+                return ResponseEntity.status(HttpStatus.CONFLICT).body(resultWritebackBody(rejected));
+            }
+            if (requiresFormalHumanConfirmation(result, formalPayload) && !"APPROVED".equals(confirmationStatus)) {
+                ResultWritebackRecordState waiting = writing.withStatus("PENDING", "NO_CONFLICT", "必要人工确认未完成", writing.retryCount());
+                updateResultWritebackRecord(waiting);
+                appendAiAudit(result.aiApplicationJobId(), "RESULT_WRITEBACK_WAITING_HUMAN_CONFIRMATION", text(request, "operator_id", "system"), "PENDING", text(request, "trace_id", null));
+                return ResponseEntity.status(HttpStatus.CONFLICT).body(resultWritebackBody(waiting));
+            }
+
+            int expectedVersion = intValue(request, "target_snapshot_version", currentTargetVersion(targetType, targetId));
+            int currentVersion = currentTargetVersion(targetType, targetId);
+            if (expectedVersion != currentVersion) {
+                ResultWritebackRecordState conflict = writing.withTerminal("FAILED", "VERSION_CONFLICT", "目标视图版本已变化", writing.retryCount());
+                updateResultWritebackRecord(conflict);
+                updateAiResultWritebackAnchor(resultId, conflict);
+                appendAiAudit(result.aiApplicationJobId(), "RESULT_WRITEBACK_FAILED", text(request, "operator_id", "system"), "FAILED", text(request, "trace_id", null));
+                return ResponseEntity.status(HttpStatus.CONFLICT).body(resultWritebackBody(conflict));
+            }
+            if (hasCurrentTarget(targetType, targetId) && lowerPriorityConflict(targetType, targetId, formalPayload)) {
+                ResultWritebackRecordState skipped = writing.withTerminal("SKIPPED", "SLOT_OCCUPIED", "同槽位已有更高来源覆盖度回写", writing.retryCount());
+                updateResultWritebackRecord(skipped);
+                updateAiResultWritebackAnchor(resultId, skipped);
+                appendAiAudit(result.aiApplicationJobId(), "RESULT_WRITEBACK_SKIPPED", text(request, "operator_id", "system"), "SKIPPED", text(request, "trace_id", null));
+                return ResponseEntity.ok(resultWritebackBody(skipped));
+            }
+            if (hasCurrentTarget(targetType, targetId) && payloadConfidence(formalPayload) < currentTargetConfidence(targetType, targetId)) {
+                ResultWritebackRecordState skipped = writing.withTerminal("SKIPPED", "CONFIDENCE_LOWER", "新结果置信度低于当前展示值", writing.retryCount());
+                updateResultWritebackRecord(skipped);
+                updateAiResultWritebackAnchor(resultId, skipped);
+                appendAiAudit(result.aiApplicationJobId(), "RESULT_WRITEBACK_SKIPPED", text(request, "operator_id", "system"), "SKIPPED", text(request, "trace_id", null));
+                return ResponseEntity.ok(resultWritebackBody(skipped));
+            }
+            if (hasCurrentTarget(targetType, targetId) && unresolvedEqualConflict(targetType, targetId, formalPayload)) {
+                ResultWritebackRecordState equal = writing.withTerminal("FAILED", "UNRESOLVED_EQUAL", "同槽位候选无法自动裁决", writing.retryCount());
+                updateResultWritebackRecord(equal);
+                updateAiResultWritebackAnchor(resultId, equal);
+                Map<String, Object> confirmation = createWritebackConflictConfirmation(result, equal, request);
+                appendAiAudit(result.aiApplicationJobId(), "RESULT_WRITEBACK_ESCALATED", text(request, "operator_id", "system"), "FAILED", text(request, "trace_id", null));
+                Map<String, Object> body = resultWritebackBody(equal);
+                body.put("human_escalation_anchor", Map.of("confirmation_type", "RESULT_WRITEBACK_CONFLICT", "writeback_record_id", equal.writebackRecordId(), "confirmation_id", text(confirmation, "confirmation_id", null)));
+                return ResponseEntity.status(HttpStatus.ACCEPTED).body(body);
+            }
+            ResultWritebackRecordState written = writeTargetView(writing, result, formalPayload);
+            updateResultWritebackRecord(written);
+            updateAiResultWritebackAnchor(resultId, written);
+            appendAiAudit(result.aiApplicationJobId(), "RESULT_WRITEBACK_WRITTEN", text(request, "operator_id", "system"), "WRITTEN", text(request, "trace_id", null));
+            return ResponseEntity.status(HttpStatus.CREATED).body(resultWritebackBody(written));
+        } finally {
+            releaseWritebackLock(lockKey, lockOwner);
+        }
+    }
+
+    @Transactional
+    public ResponseEntity<Map<String, Object>> recoverResultWritebackDeadLetter(String deadLetterId, String permissions, Map<String, Object> request) {
+        if (permissions == null || !permissions.contains("AI_APPLICATION_CREATE") || !permissions.contains("CONTRACT_VIEW")) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(error("RESULT_WRITEBACK_PERMISSION_DENIED", "缺少结果回写权限"));
+        }
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList("select * from ia_writeback_dead_letter where dead_letter_id = ?", deadLetterId);
+        if (rows.isEmpty()) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(error("RESULT_WRITEBACK_DEAD_LETTER_NOT_FOUND", "回写死信不存在"));
+        }
+        Map<String, Object> deadLetter = rows.get(0);
+        if (!"OPEN".equals(text(deadLetter, "DEAD_LETTER_STATUS", text(deadLetter, "dead_letter_status", null)))) {
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(error("RESULT_WRITEBACK_DEAD_LETTER_CLOSED", "回写死信已关闭"));
+        }
+        String resultId = text(deadLetter, "RESULT_ID", text(deadLetter, "result_id", null));
+        String targetType = text(deadLetter, "TARGET_TYPE", text(deadLetter, "target_type", null));
+        String targetId = text(deadLetter, "TARGET_ID", text(deadLetter, "target_id", null));
+        ResultWritebackRecordState failed = loadResultWritebackRecord(resultId, targetType, targetId);
+        if (failed == null) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(error("RESULT_WRITEBACK_RECORD_NOT_FOUND", "死信关联回写记录不存在"));
+        }
+        ResultWritebackRecordState pending = failed.withStatus("PENDING", "NO_CONFLICT", null, 0);
+        updateResultWritebackRecord(pending);
+        String lockKey = targetType + ":" + targetId;
+        releaseWritebackLock(lockKey, failed.writebackRecordId());
+        Map<String, Object> retryRequest = new LinkedHashMap<>();
+        retryRequest.put("result_id", resultId);
+        retryRequest.put("target_type", targetType);
+        retryRequest.put("target_id", targetId);
+        retryRequest.put("target_snapshot_version", currentTargetVersion(targetType, targetId));
+        retryRequest.put("operator_id", text(request, "operator_id", "system"));
+        retryRequest.put("trace_id", text(request, "trace_id", text(deadLetter, "TRACE_ID", text(deadLetter, "trace_id", null))));
+        ResponseEntity<Map<String, Object>> response = createResultWriteback(permissions, retryRequest);
+        Map<String, Object> body = new LinkedHashMap<>(response.getBody() == null ? Map.of() : response.getBody());
+        if ("WRITTEN".equals(text(body, "writeback_status", null))) {
+            jdbcTemplate.update("update ia_writeback_dead_letter set dead_letter_status = 'RECOVERED' where dead_letter_id = ?", deadLetterId);
+            body.put("dead_letter_status", "RECOVERED");
+        } else {
+            body.put("dead_letter_status", "OPEN");
+        }
+        return ResponseEntity.status(response.getStatusCode()).body(body);
+    }
+
+    private ResultWritebackRecordState loadResultWritebackRecord(String resultId, String targetType, String targetId) {
+        ResultWritebackRecordState cached = resultWritebackRecords.get(resultId + ":" + targetType + ":" + targetId);
+        if (cached != null) {
+            return cached;
+        }
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList("select * from ia_writeback_record where result_id = ? and target_type = ? and target_id = ?", resultId, targetType, targetId);
+        if (rows.isEmpty()) {
+            return null;
+        }
+        ResultWritebackRecordState record = resultWritebackRecordFromRow(rows.get(0));
+        resultWritebackRecords.put(resultId + ":" + targetType + ":" + targetId, record);
+        return record;
+    }
+
+    private AiApplicationResultState loadAiApplicationResult(String resultId) {
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList("select * from ia_ai_application_result where result_id = ?", resultId);
+        if (rows.isEmpty()) {
+            return null;
+        }
+        Map<String, Object> row = rows.get(0);
+        AiApplicationResultState result = new AiApplicationResultState(resultId,
+                text(row, "AI_APPLICATION_JOB_ID", text(row, "ai_application_job_id", null)),
+                text(row, "AGENT_TASK_ID", text(row, "agent_task_id", null)),
+                text(row, "AGENT_RESULT_ID", text(row, "agent_result_id", null)),
+                text(row, "APPLICATION_TYPE", text(row, "application_type", null)),
+                text(row, "RESULT_STATUS", text(row, "result_status", null)),
+                mapFromJson(text(row, "STRUCTURED_PAYLOAD_JSON", text(row, "structured_payload_json", "{}"))),
+                listMapsFromJson(text(row, "CITATION_LIST_JSON", text(row, "citation_list_json", "[]"))),
+                doubleValue(row, "EVIDENCE_COVERAGE_RATIO", doubleValue(row, "evidence_coverage_ratio", 0.0)),
+                text(row, "GUARDRAIL_DECISION", text(row, "guardrail_decision", null)),
+                text(row, "GUARDRAIL_FAILURE_CODE", text(row, "guardrail_failure_code", null)),
+                bool(row, "CONFIRMATION_REQUIRED_FLAG", bool(row, "confirmation_required_flag", false)),
+                bool(row, "WRITEBACK_ALLOWED_FLAG", bool(row, "writeback_allowed_flag", false)),
+                listStringsFromJson(text(row, "RISK_FLAG_LIST_JSON", text(row, "risk_flag_list_json", "[]"))),
+                text(row, "CREATED_AT", text(row, "created_at", Instant.now().toString())));
+        aiApplicationResults.put(resultId, result);
+        return result;
+    }
+
+    private CandidateWritebackGateState formalWritebackGate(String resultId, Map<String, Object> structuredPayload) {
+        Map<String, Object> gatePayload = map(structuredPayload.get("writeback_gate"));
+        if (gatePayload.isEmpty()) {
+            return null;
+        }
+        return new CandidateWritebackGateState(resultId,
+                text(gatePayload, "ranking_snapshot_id", text(structuredPayload, "ranking_snapshot_id", null)),
+                text(gatePayload, "quality_evaluation_id", text(structuredPayload, "quality_evaluation_id", null)),
+                text(gatePayload, "release_decision", text(structuredPayload, "release_decision", null)),
+                text(gatePayload, "writeback_gate_status", "BLOCKED"),
+                bool(gatePayload, "writeback_allowed_flag", false),
+                null, Instant.now().toString());
+    }
+
+    private Map<String, Object> buildFormalWritebackPayload(String applicationType, ContractState contract, List<Map<String, Object>> candidates,
+                                                            QualityDecision decision, Map<String, Object> request) {
+        Map<String, Object> supplied = map(request.get("writeback_payload"));
+        boolean generatedDefault = supplied.isEmpty();
+        Map<String, Object> payload = generatedDefault ? defaultWritebackPayload(applicationType, contract, candidates, decision) : supplied;
+        payload.putIfAbsent("confidence", decision.publishability());
+        payload.putIfAbsent("source_count", Math.max(1, candidates.size()));
+        payload.putIfAbsent("assembled_at", Instant.now().toString());
+        if (generatedDefault && "PARTIAL_PUBLISH".equals(decision.releaseDecision())) {
+            enrichPartialPublishPayload(applicationType, payload, decision);
+        }
+        return payload;
+    }
+
+    private Map<String, Object> defaultWritebackPayload(String applicationType, ContractState contract, List<Map<String, Object>> candidates, QualityDecision decision) {
+        String primaryText = candidates.isEmpty() ? contract.contractName() : text(map(candidates.get(0).get("candidate_payload")), "summary", contract.contractName());
+        Map<String, Object> payload = new LinkedHashMap<>();
+        switch (applicationType) {
+            case "SUMMARY" -> {
+                payload.put("summary_text", "合同摘要：" + primaryText);
+                payload.put("summary_scope", "PARTIAL_PUBLISH".equals(decision.releaseDecision()) ? "PARTIAL" : "FULL");
+                payload.put("section_list", List.of(Map.of("section", "自动摘要", "text", primaryText)));
+                payload.put("citation_reference", List.of(Map.of("citation_ref", "candidate:auto")));
+                payload.put("display_language", "zh-CN");
+                payload.put("summary_digest", "sha256:" + Integer.toHexString(primaryText.hashCode()));
+            }
+            case "RISK_ANALYSIS" -> {
+                payload.put("risk_level", "MEDIUM");
+                payload.put("risk_item_list", List.of(Map.of("risk_item_id", "risk-auto", "risk_level", "MEDIUM", "publish_status", "PARTIAL_PUBLISH".equals(decision.releaseDecision()) ? "PARTIAL" : "FULL", "confidence", decision.publishability())));
+                payload.put("clause_gap_summary", Map.of("missing", List.of("自动识别待复核条款")));
+                payload.put("recommendation_summary", Map.of("action", "建议法务复核风险条款"));
+                payload.put("evidence_reference", List.of(Map.of("citation_ref", "risk:auto")));
+            }
+            case "DIFF_EXTRACTION" -> {
+                payload.put("comparison_mode", "TEMPLATE_TO_CONTRACT");
+                payload.put("extracted_field_list", List.of(Map.of("field_path", "amount", "field_value", "待复核", "confidence", decision.publishability())));
+                payload.put("confidence_summary", Map.of("amount", decision.publishability()));
+                payload.put("clause_match_summary", Map.of());
+                payload.put("diff_summary", Map.of());
+            }
+            default -> {
+            }
+        }
+        return payload;
+    }
+
+    private void enrichPartialPublishPayload(String applicationType, Map<String, Object> payload, QualityDecision decision) {
+        if ("SUMMARY".equals(applicationType)) {
+            payload.putIfAbsent("partial_publish_reason", String.join(",", decision.reasonCodes()));
+        }
+        if ("RISK_ANALYSIS".equals(applicationType)) {
+            List<Map<String, Object>> riskItems = new ArrayList<>();
+            for (Map<String, Object> item : listMaps(payload.get("risk_item_list"))) {
+                Map<String, Object> copy = new LinkedHashMap<>(item);
+                copy.putIfAbsent("publish_status", "PARTIAL");
+                riskItems.add(copy);
+            }
+            payload.put("risk_item_list", riskItems);
+        }
+        if ("DIFF_EXTRACTION".equals(applicationType)) {
+            List<Map<String, Object>> fields = new ArrayList<>();
+            for (Map<String, Object> field : listMaps(payload.get("extracted_field_list"))) {
+                Map<String, Object> copy = new LinkedHashMap<>(field);
+                if (text(copy, "field_value", "").isBlank()) {
+                    copy.putIfAbsent("missing_status", "EXTRACTION_FAILED");
+                }
+                fields.add(copy);
+            }
+            payload.put("extracted_field_list", fields);
+        }
+    }
+
+    private String targetTypeForApplication(String applicationType) {
+        return switch (applicationType) {
+            case "SUMMARY" -> "CONTRACT_SUMMARY";
+            case "RISK_ANALYSIS" -> "CONTRACT_RISK_VIEW";
+            case "DIFF_EXTRACTION" -> "CONTRACT_EXTRACTION_VIEW";
+            default -> null;
+        };
+    }
+
+    private boolean acquireWritebackLock(String lockKey, String writebackRecordId) {
+        jdbcTemplate.update("delete from ia_writeback_lock where lock_key = ? and expires_at <= current_timestamp", lockKey);
+        Instant now = Instant.now();
+        try {
+            jdbcTemplate.update("insert into ia_writeback_lock (lock_key, writeback_record_id, lock_status, expires_at, created_at, updated_at) values (?, ?, 'HELD', ?, ?, ?)",
+                    lockKey, writebackRecordId, Timestamp.from(now.plusSeconds(30)), Timestamp.from(now), Timestamp.from(now));
+            return true;
+        } catch (DuplicateKeyException ignored) {
+            return false;
+        }
+    }
+
+    private void releaseWritebackLock(String lockKey, String writebackRecordId) {
+        jdbcTemplate.update("delete from ia_writeback_lock where lock_key = ? and (writeback_record_id = ? or expires_at <= current_timestamp)", lockKey, writebackRecordId);
+    }
+
+    private String formalHumanConfirmationStatus(AiApplicationResultState result, Map<String, Object> payload) {
+        List<String> statuses = jdbcTemplate.queryForList("""
+                select confirmation_status from ao_human_confirmation
+                where source_task_id = ? or source_result_id = ?
+                order by updated_at desc
+                """, String.class, result.agentTaskId(), result.agentResultId());
+        return statuses.isEmpty() ? null : statuses.get(0);
+    }
+
+    private boolean requiresFormalHumanConfirmation(AiApplicationResultState result, Map<String, Object> payload) {
+        return result.confirmationRequiredFlag()
+                || bool(payload, "human_confirmation_required", false)
+                || "HIGH".equals(text(payload, "risk_level", null))
+                || listMaps(payload.get("risk_item_list")).stream().anyMatch(item -> "HIGH".equals(text(item, "risk_level", null)));
+    }
+
+    private String formalResultContractId(AiApplicationResultState result) {
+        AiApplicationJobState cached = aiApplicationJobs.get(result.aiApplicationJobId());
+        if (cached != null) {
+            return cached.contractId();
+        }
+        List<String> rows = jdbcTemplate.queryForList("select contract_id from ia_ai_application_job where ai_application_job_id = ?", String.class, result.aiApplicationJobId());
+        return rows.isEmpty() ? null : rows.get(0);
+    }
+
+    private boolean targetContractMatches(String targetType, String targetId, String formalContractId) {
+        if ("CONTRACT_SUMMARY".equals(targetType)) {
+            return formalContractId.equals(targetId);
+        }
+        if ("CONTRACT_RISK_VIEW".equals(targetType) || "CONTRACT_EXTRACTION_VIEW".equals(targetType)) {
+            return formalContractId.equals(targetContractId(targetId));
+        }
+        return false;
+    }
+
+    private boolean unresolvedEqualConflict(String targetType, String targetId, Map<String, Object> payload) {
+        return Math.abs(payloadConfidence(payload) - currentTargetConfidence(targetType, targetId)) < 0.0001
+                && intValue(payload, "source_count", 0) == currentTargetSourceCount(targetType, targetId)
+                && payloadAssembledAt(payload, Instant.EPOCH).equals(currentTargetAssembledAt(targetType, targetId));
+    }
+
+    private boolean lowerPriorityConflict(String targetType, String targetId, Map<String, Object> payload) {
+        return payload.containsKey("source_count") && intValue(payload, "source_count", 0) < currentTargetSourceCount(targetType, targetId);
+    }
+
+    private int currentTargetSourceCount(String targetType, String targetId) {
+        String table = targetViewTable(targetType);
+        if (table == null || !hasCurrentTarget(targetType, targetId)) {
+            return 0;
+        }
+        if ("CONTRACT_EXTRACTION_VIEW".equals(targetType)) {
+            Integer sourceCount = jdbcTemplate.queryForObject("select max(source_count) from contract_ai_extraction_view where contract_id = ? and field_path = ? and view_status = 'CURRENT'", Integer.class,
+                    targetContractId(targetId), extractionFieldPath(targetId));
+            return sourceCount == null ? 0 : sourceCount;
+        }
+        Integer sourceCount = jdbcTemplate.queryForObject("select max(source_count) from " + table + " where " + targetKeyColumn(targetType) + " = ? and view_status = 'CURRENT'", Integer.class, targetId);
+        return sourceCount == null ? 0 : sourceCount;
+    }
+
+    private Instant currentTargetAssembledAt(String targetType, String targetId) {
+        String table = targetViewTable(targetType);
+        if (table == null || !hasCurrentTarget(targetType, targetId)) {
+            return Instant.EPOCH;
+        }
+        if ("CONTRACT_EXTRACTION_VIEW".equals(targetType)) {
+            List<Map<String, Object>> rows = jdbcTemplate.queryForList("select assembled_at from contract_ai_extraction_view where contract_id = ? and field_path = ? and view_status = 'CURRENT' order by target_version desc limit 1",
+                    targetContractId(targetId), extractionFieldPath(targetId));
+            return rows.isEmpty() ? Instant.EPOCH : instantValue(rows.get(0).get("ASSEMBLED_AT"), rows.get(0).get("assembled_at"), Instant.EPOCH);
+        }
+        List<Map<String, Object>> rows = jdbcTemplate.queryForList("select assembled_at from " + table + " where " + targetKeyColumn(targetType) + " = ? and view_status = 'CURRENT' order by target_version desc limit 1", targetId);
+        return rows.isEmpty() ? Instant.EPOCH : instantValue(rows.get(0).get("ASSEMBLED_AT"), rows.get(0).get("assembled_at"), Instant.EPOCH);
+    }
+
+    private Map<String, Object> createWritebackConflictConfirmation(AiApplicationResultState result, ResultWritebackRecordState record, Map<String, Object> request) {
+        Map<String, Object> confirmationRequest = new LinkedHashMap<>();
+        confirmationRequest.put("source_task_id", result.agentTaskId());
+        confirmationRequest.put("source_result_id", result.agentResultId());
+        confirmationRequest.put("confirmation_type", "RESULT_WRITEBACK_CONFLICT");
+        confirmationRequest.put("business_module", "intelligent-applications");
+        confirmationRequest.put("object_type", record.targetType());
+        confirmationRequest.put("object_id", record.targetId());
+        confirmationRequest.put("requested_by", text(request, "operator_id", "system"));
+        String traceId = text(request, "trace_id", null);
+        if (traceId != null) {
+            confirmationRequest.put("trace_id", traceId);
+        }
+        return agentOsGateway.createHumanConfirmation(confirmationRequest);
+    }
+
+    private ResultWritebackRecordState persistResultWriteback(String resultId, String targetType, String targetId, Map<String, Object> request, Map<String, Object> payload,
+                                                             CandidateWritebackGateState gate, String status, String conflictCode, String failureReason, int retryCount) {
+        String recordId = "writeback-" + UUID.randomUUID();
+        int snapshotVersion = intValue(request, "target_snapshot_version", 0);
+        String traceId = text(request, "trace_id", null);
+        String operatorId = text(request, "operator_id", "system");
+        Instant now = Instant.now();
+        jdbcTemplate.update("""
+                insert into ia_writeback_record
+                (writeback_record_id, result_id, target_type, target_id, writeback_action, writeback_status, target_snapshot_version,
+                 conflict_code, failure_reason, retry_count, ranking_snapshot_id, quality_evaluation_id, operator_type, operator_id,
+                 payload_json, trace_id, created_at, updated_at, completed_at)
+                values (?, ?, ?, ?, 'UPSERT_REFERENCE', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, recordId, resultId, targetType, targetId, status, snapshotVersion, conflictCode == null ? "NO_CONFLICT" : conflictCode,
+                failureReason, retryCount, gate.rankingSnapshotId(), gate.qualityEvaluationId(), "SYSTEM", operatorId, json(payload), traceId,
+                Timestamp.from(now), Timestamp.from(now), terminalWritebackStatus(status) ? Timestamp.from(now) : null);
+        ResultWritebackRecordState record = new ResultWritebackRecordState(recordId, resultId, targetType, targetId, "UPSERT_REFERENCE", status,
+                snapshotVersion, conflictCode == null ? "NO_CONFLICT" : conflictCode, failureReason, retryCount, gate.rankingSnapshotId(),
+                gate.qualityEvaluationId(), "SYSTEM", operatorId, payload, traceId, now.toString(), now.toString(), terminalWritebackStatus(status) ? now.toString() : null);
+        resultWritebackRecords.put(resultId + ":" + targetType + ":" + targetId, record);
+        return record;
+    }
+
+    private ResultWritebackRecordState writeTargetView(ResultWritebackRecordState record, AiApplicationResultState result, Map<String, Object> payload) {
+        return switch (record.targetType()) {
+            case "CONTRACT_SUMMARY" -> writeContractSummaryView(record, result, payload);
+            case "CONTRACT_RISK_VIEW" -> writeContractRiskView(record, result, payload);
+            case "CONTRACT_EXTRACTION_VIEW" -> writeContractExtractionView(record, result, payload);
+            default -> throw new IllegalArgumentException("不支持的回写目标: " + record.targetType());
+        };
+    }
+
+    private ResultWritebackRecordState writeContractSummaryView(ResultWritebackRecordState record, AiApplicationResultState result, Map<String, Object> payload) {
+        jdbcTemplate.update("update contract_ai_summary_view set view_status = 'SUPERSEDED' where contract_id = ? and view_status = 'CURRENT'", record.targetId());
+        int nextVersion = currentTargetVersion(record.targetType(), record.targetId()) + 1;
+        String summaryText = text(payload, "summary_text", "");
+        if ("PARTIAL_PUBLISH".equals(text(result.structuredPayload(), "release_decision", null)) && !summaryText.startsWith("[缺口说明]")) {
+            summaryText = "[缺口说明] " + text(payload, "partial_publish_reason", text(payload, "gap_reason", "未说明")) + "\n" + summaryText;
+        }
+        jdbcTemplate.update("""
+                insert into contract_ai_summary_view
+                (summary_view_id, contract_id, summary_reference_id, summary_text, summary_scope, section_list_json, citation_reference_json,
+                  display_language, summary_digest, ranking_snapshot_id, quality_evaluation_id, guardrail_decision, confidence_score,
+                  source_count, assembled_at, target_version, view_status, written_at)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'CURRENT', ?)
+                """, "summary-view-" + UUID.randomUUID(), record.targetId(), record.writebackRecordId(), summaryText,
+                text(payload, "summary_scope", "FULL"), json(payload.getOrDefault("section_list", List.of())), json(payload.getOrDefault("citation_reference", List.of())),
+                text(payload, "display_language", "zh-CN"), text(payload, "summary_digest", "sha256:" + record.writebackRecordId()),
+                record.rankingSnapshotId(), record.qualityEvaluationId(), result.guardrailDecision(), payloadConfidence(payload), intValue(payload, "source_count", 0),
+                Timestamp.from(payloadAssembledAt(payload, Instant.now())), nextVersion, Timestamp.from(Instant.now()));
+        return record.withTerminal("WRITTEN", "NO_CONFLICT", null, 0);
+    }
+
+    private ResultWritebackRecordState writeContractRiskView(ResultWritebackRecordState record, AiApplicationResultState result, Map<String, Object> payload) {
+        int nextVersion = currentTargetVersion(record.targetType(), record.targetId()) + 1;
+        String contractId = targetContractId(record.targetId());
+        List<Map<String, Object>> publishableRiskItems = listMaps(payload.get("risk_item_list")).stream()
+                .filter(item -> !"WITHHELD".equals(text(item, "publish_status", null)))
+                .toList();
+        int updated = jdbcTemplate.update("""
+                update contract_ai_risk_view
+                set contract_id = ?, risk_reference_id = ?, risk_level = ?, risk_item_list_json = ?, clause_gap_summary_json = ?,
+                    recommendation_summary_json = ?, evidence_reference_json = ?, requires_manual_review = ?, ranking_snapshot_id = ?,
+                    quality_evaluation_id = ?, guardrail_decision = ?, confidence_score = ?, source_count = ?, assembled_at = ?,
+                    target_version = ?, view_status = 'CURRENT', written_at = ?
+                where risk_view_id = ?
+                """, contractId, record.writebackRecordId(), text(payload, "risk_level", "MEDIUM"),
+                json(publishableRiskItems), json(payload.getOrDefault("clause_gap_summary", Map.of())),
+                json(payload.getOrDefault("recommendation_summary", Map.of())), json(payload.getOrDefault("evidence_reference", List.of())),
+                false, record.rankingSnapshotId(), record.qualityEvaluationId(), result.guardrailDecision(), payloadConfidence(payload), intValue(payload, "source_count", 0),
+                Timestamp.from(payloadAssembledAt(payload, Instant.now())), nextVersion,
+                Timestamp.from(Instant.now()), record.targetId());
+        if (updated == 0) {
+            jdbcTemplate.update("""
+                    insert into contract_ai_risk_view
+                    (risk_view_id, contract_id, risk_reference_id, risk_level, risk_item_list_json, clause_gap_summary_json,
+                      recommendation_summary_json, evidence_reference_json, requires_manual_review, ranking_snapshot_id,
+                      quality_evaluation_id, guardrail_decision, confidence_score, source_count, assembled_at, target_version, view_status, written_at)
+                    values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'CURRENT', ?)
+                    """, record.targetId(), contractId, record.writebackRecordId(), text(payload, "risk_level", "MEDIUM"),
+                    json(publishableRiskItems), json(payload.getOrDefault("clause_gap_summary", Map.of())),
+                    json(payload.getOrDefault("recommendation_summary", Map.of())), json(payload.getOrDefault("evidence_reference", List.of())),
+                    false, record.rankingSnapshotId(), record.qualityEvaluationId(), result.guardrailDecision(), payloadConfidence(payload), intValue(payload, "source_count", 0),
+                    Timestamp.from(payloadAssembledAt(payload, Instant.now())), nextVersion, Timestamp.from(Instant.now()));
+        }
+        return record.withTerminal("WRITTEN", "NO_CONFLICT", null, 0);
+    }
+
+    private ResultWritebackRecordState writeContractExtractionView(ResultWritebackRecordState record, AiApplicationResultState result, Map<String, Object> payload) {
+        String contractId = targetContractId(record.targetId());
+        for (Map<String, Object> field : listMaps(payload.get("extracted_field_list"))) {
+            String fieldPath = text(field, "field_path", "unknown");
+            double confidence = doubleValue(field, "confidence", payloadConfidence(payload));
+            boolean lowConfidence = confidence < 0.6;
+            String fieldTargetId = "extraction-view-" + UUID.randomUUID();
+            int nextVersion = currentExtractionFieldVersion(contractId, fieldPath) + 1;
+            jdbcTemplate.update("update contract_ai_extraction_view set view_status = 'SUPERSEDED', default_display_flag = false where contract_id = ? and field_path = ? and view_status = 'CURRENT'", contractId, fieldPath);
+            jdbcTemplate.update("""
+                    insert into contract_ai_extraction_view
+                    (extraction_view_id, contract_id, extraction_reference_id, field_path, comparison_mode, extracted_field_list_json,
+                      clause_match_summary_json, diff_summary_json, confidence_summary_json, requires_manual_review, ranking_snapshot_id,
+                      quality_evaluation_id, guardrail_decision, confidence_score, source_count, assembled_at, confidence_status, default_display_flag, target_version, view_status, written_at)
+                    values (?, ?, ?, ?, ?, ?, ?, ?, ?, false, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'CURRENT', ?)
+                    """, fieldTargetId, contractId, record.writebackRecordId(), fieldPath, text(payload, "comparison_mode", "TEMPLATE_TO_CONTRACT"),
+                    json(List.of(field)), json(payload.getOrDefault("clause_match_summary", Map.of())),
+                    json(payload.getOrDefault("diff_summary", Map.of())), json(payload.getOrDefault("confidence_summary", Map.of())), record.rankingSnapshotId(),
+                    record.qualityEvaluationId(), result.guardrailDecision(), confidence, intValue(payload, "source_count", 0), Timestamp.from(payloadAssembledAt(payload, Instant.now())),
+                    lowConfidence ? "LOW_CONFIDENCE" : "NORMAL", !lowConfidence, nextVersion,
+                    Timestamp.from(Instant.now()));
+        }
+        return record.withTerminal("WRITTEN", "NO_CONFLICT", null, 0);
+    }
+
+    private void updateResultWritebackRecord(ResultWritebackRecordState record) {
+        jdbcTemplate.update("""
+                update ia_writeback_record
+                set writeback_status = ?, conflict_code = ?, failure_reason = ?, retry_count = ?, updated_at = ?, completed_at = ?
+                where writeback_record_id = ?
+                """, record.writebackStatus(), record.conflictCode(), record.failureReason(), record.retryCount(), Timestamp.from(Instant.now()),
+                record.completedAt() == null ? null : Timestamp.from(Instant.parse(record.completedAt())), record.writebackRecordId());
+        resultWritebackRecords.put(record.resultId() + ":" + record.targetType() + ":" + record.targetId(), record);
+    }
+
+    private void insertWritebackDeadLetter(ResultWritebackRecordState record, String traceId) {
+        jdbcTemplate.update("""
+                insert into ia_writeback_dead_letter
+                (dead_letter_id, writeback_record_id, result_id, target_type, target_id, failure_reason, retry_count, dead_letter_status, trace_id, created_at)
+                values (?, ?, ?, ?, ?, ?, ?, 'OPEN', ?, ?)
+                """, "writeback-dlq-" + UUID.randomUUID(), record.writebackRecordId(), record.resultId(), record.targetType(), record.targetId(),
+                record.failureReason(), record.retryCount(), traceId, Timestamp.from(Instant.now()));
+    }
+
+    private void updateAiResultWritebackAnchor(String resultId, ResultWritebackRecordState record) {
+        AiApplicationResultState result = aiApplicationResults.get(resultId);
+        Map<String, Object> payload;
+        if (result != null) {
+            payload = result.structuredPayload();
+        } else {
+            List<Map<String, Object>> rows = jdbcTemplate.queryForList("select structured_payload_json from ia_ai_application_result where result_id = ?", resultId);
+            payload = rows.isEmpty() ? new LinkedHashMap<>() : mapFromJson(text(rows.get(0), "STRUCTURED_PAYLOAD_JSON", text(rows.get(0), "structured_payload_json", "{}")));
+        }
+        Map<String, Object> anchor = new LinkedHashMap<>();
+        anchor.put("writeback_record_id", record.writebackRecordId());
+        anchor.put("writeback_status", record.writebackStatus());
+        anchor.put("target_type", record.targetType());
+        anchor.put("target_id", record.targetId());
+        anchor.put("conflict_code", record.conflictCode());
+        anchor.put("ranking_snapshot_id", record.rankingSnapshotId());
+        anchor.put("quality_evaluation_id", record.qualityEvaluationId());
+        payload.put("writeback_anchor", anchor);
+        payload.put("writeback_status", record.writebackStatus());
+        updateAiResultStructuredPayload(resultId, payload);
+    }
+
+    private ResultWritebackRecordState resultWritebackRecordFromRow(Map<String, Object> row) {
+        return new ResultWritebackRecordState(
+                text(row, "WRITEBACK_RECORD_ID", text(row, "writeback_record_id", null)),
+                text(row, "RESULT_ID", text(row, "result_id", null)),
+                text(row, "TARGET_TYPE", text(row, "target_type", null)),
+                text(row, "TARGET_ID", text(row, "target_id", null)),
+                text(row, "WRITEBACK_ACTION", text(row, "writeback_action", "UPSERT_REFERENCE")),
+                text(row, "WRITEBACK_STATUS", text(row, "writeback_status", null)),
+                intValue(row, "TARGET_SNAPSHOT_VERSION", intValue(row, "target_snapshot_version", 0)),
+                text(row, "CONFLICT_CODE", text(row, "conflict_code", "NO_CONFLICT")),
+                text(row, "FAILURE_REASON", text(row, "failure_reason", null)),
+                intValue(row, "RETRY_COUNT", intValue(row, "retry_count", 0)),
+                text(row, "RANKING_SNAPSHOT_ID", text(row, "ranking_snapshot_id", null)),
+                text(row, "QUALITY_EVALUATION_ID", text(row, "quality_evaluation_id", null)),
+                text(row, "OPERATOR_TYPE", text(row, "operator_type", "SYSTEM")),
+                text(row, "OPERATOR_ID", text(row, "operator_id", "system")),
+                mapFromJson(text(row, "PAYLOAD_JSON", text(row, "payload_json", "{}"))),
+                text(row, "TRACE_ID", text(row, "trace_id", null)),
+                text(row, "CREATED_AT", text(row, "created_at", Instant.now().toString())),
+                text(row, "UPDATED_AT", text(row, "updated_at", Instant.now().toString())),
+                text(row, "COMPLETED_AT", text(row, "completed_at", null)));
+    }
+
+    private Map<String, Object> resultWritebackBody(ResultWritebackRecordState record) {
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("writeback_record_id", record.writebackRecordId());
+        body.put("result_id", record.resultId());
+        body.put("target_type", record.targetType());
+        body.put("target_id", record.targetId());
+        body.put("writeback_action", record.writebackAction());
+        body.put("writeback_status", record.writebackStatus());
+        body.put("target_snapshot_version", record.targetSnapshotVersion());
+        body.put("conflict_code", record.conflictCode());
+        body.put("failure_reason", record.failureReason());
+        body.put("retry_count", record.retryCount());
+        body.put("ranking_snapshot_id", record.rankingSnapshotId());
+        body.put("quality_evaluation_id", record.qualityEvaluationId());
+        return body;
+    }
+
+    private boolean terminalWritebackStatus(String status) {
+        return List.of("WRITTEN", "SKIPPED", "FAILED").contains(status);
+    }
+
+    private String targetContractId(String targetId) {
+        int separator = targetId.indexOf(':');
+        return separator < 0 ? targetId : targetId.substring(0, separator);
+    }
+
+    private double payloadConfidence(Map<String, Object> payload) {
+        return doubleValue(payload, "confidence", 0.0);
+    }
+
+    private int currentTargetVersion(String targetType, String targetId) {
+        String table = targetViewTable(targetType);
+        if (table == null) {
+            return 0;
+        }
+        if ("CONTRACT_EXTRACTION_VIEW".equals(targetType)) {
+            return currentExtractionFieldVersion(targetContractId(targetId), extractionFieldPath(targetId));
+        }
+        Integer version = jdbcTemplate.queryForObject("select coalesce(max(target_version), 0) from " + table + " where " + targetKeyColumn(targetType) + " = ?", Integer.class, targetId);
+        return version == null ? 0 : version;
+    }
+
+    private boolean hasCurrentTarget(String targetType, String targetId) {
+        String table = targetViewTable(targetType);
+        if (table == null) {
+            return false;
+        }
+        if ("CONTRACT_EXTRACTION_VIEW".equals(targetType)) {
+            Integer count = jdbcTemplate.queryForObject("select count(*) from contract_ai_extraction_view where contract_id = ? and field_path = ? and view_status = 'CURRENT'", Integer.class,
+                    targetContractId(targetId), extractionFieldPath(targetId));
+            return count != null && count > 0;
+        }
+        Integer count = jdbcTemplate.queryForObject("select count(*) from " + table + " where " + targetKeyColumn(targetType) + " = ? and view_status = 'CURRENT'", Integer.class, targetId);
+        return count != null && count > 0;
+    }
+
+    private double currentTargetConfidence(String targetType, String targetId) {
+        String table = targetViewTable(targetType);
+        if (table == null || !hasCurrentTarget(targetType, targetId)) {
+            return 0.0;
+        }
+        if ("CONTRACT_EXTRACTION_VIEW".equals(targetType)) {
+            Double confidence = jdbcTemplate.queryForObject("select max(confidence_score) from contract_ai_extraction_view where contract_id = ? and field_path = ? and view_status = 'CURRENT'", Double.class,
+                    targetContractId(targetId), extractionFieldPath(targetId));
+            return confidence == null ? 0.0 : confidence;
+        }
+        Double confidence = jdbcTemplate.queryForObject("select max(confidence_score) from " + table + " where " + targetKeyColumn(targetType) + " = ? and view_status = 'CURRENT'", Double.class, targetId);
+        return confidence == null ? 0.0 : confidence;
+    }
+
+    private int currentExtractionFieldVersion(String contractId, String fieldPath) {
+        Integer version = jdbcTemplate.queryForObject("select coalesce(max(target_version), 0) from contract_ai_extraction_view where contract_id = ? and field_path = ?", Integer.class, contractId, fieldPath);
+        return version == null ? 0 : version;
+    }
+
+    private String extractionFieldPath(String targetId) {
+        String marker = ":field:";
+        int markerIndex = targetId.indexOf(marker);
+        if (markerIndex >= 0) {
+            return targetId.substring(markerIndex + marker.length());
+        }
+        int separator = targetId.lastIndexOf(':');
+        return separator < 0 ? targetId : targetId.substring(separator + 1);
+    }
+
+    private String extractionTargetId(String contractId, String fieldPath) {
+        return contractId + ":field:" + fieldPath;
+    }
+
+    private String targetViewTable(String targetType) {
+        return switch (targetType) {
+            case "CONTRACT_SUMMARY" -> "contract_ai_summary_view";
+            case "CONTRACT_RISK_VIEW" -> "contract_ai_risk_view";
+            case "CONTRACT_EXTRACTION_VIEW" -> "contract_ai_extraction_view";
+            default -> null;
+        };
+    }
+
+    private String targetKeyColumn(String targetType) {
+        return switch (targetType) {
+            case "CONTRACT_SUMMARY" -> "contract_id";
+            case "CONTRACT_RISK_VIEW" -> "risk_view_id";
+            case "CONTRACT_EXTRACTION_VIEW" -> "extraction_view_id";
+            default -> "contract_id";
+        };
+    }
+
+    private String firstForbiddenWritebackField(Map<String, Object> payload) {
+        for (String field : List.of("contract_no", "contract_name", "counterparty", "contract_amount", "start_date", "end_date",
+                "business_status", "contract_status", "approval_status", "signature_status", "archive_status", "document_version_id",
+                "document_category", "document_permission", "document_encryption_status", "clause_body", "template_body", "clause_status",
+                "template_status", "model_private_info", "model_id", "provider_id", "prompt_version", "debug_info")) {
+            if (containsFieldRecursive(payload, field)) {
+                return field;
+            }
+        }
+        return null;
+    }
+
+    private boolean containsFieldRecursive(Object value, String field) {
+        if (value instanceof Map<?, ?> source) {
+            for (Map.Entry<?, ?> entry : source.entrySet()) {
+                if (field.equals(String.valueOf(entry.getKey())) || containsFieldRecursive(entry.getValue(), field)) {
+                    return true;
+                }
+            }
+        }
+        if (value instanceof List<?> source) {
+            for (Object item : source) {
+                if (containsFieldRecursive(item, field)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private String validateTargetPayloadWhitelist(String targetType, Map<String, Object> payload) {
+        Set<String> allowed = switch (targetType) {
+            case "CONTRACT_SUMMARY" -> Set.of("summary_text", "summary_scope", "section_list", "section", "text", "citation_reference", "citation_ref", "display_language", "summary_digest", "partial_publish_reason", "gap_reason", "confidence", "source_count", "assembled_at", "human_confirmation_required");
+            case "CONTRACT_RISK_VIEW" -> Set.of("risk_level", "risk_item_list", "risk_item_id", "publish_status", "clause_gap_summary", "missing", "recommendation_summary", "action", "evidence_reference", "citation_ref", "confidence", "source_count", "assembled_at", "human_confirmation_required");
+            case "CONTRACT_EXTRACTION_VIEW" -> Set.of("comparison_mode", "extracted_field_list", "field_path", "field_value", "confidence", "missing_status", "confidence_summary", "amount", "delivery_date", "clause_match_summary", "diff_summary", "source_count", "assembled_at", "human_confirmation_required");
+            default -> Set.of();
+        };
+        return firstFieldOutsideWhitelist(payload, allowed);
+    }
+
+    private String firstFieldOutsideWhitelist(Object value, Set<String> allowed) {
+        if (value instanceof Map<?, ?> source) {
+            for (Map.Entry<?, ?> entry : source.entrySet()) {
+                String key = String.valueOf(entry.getKey());
+                if (!allowed.contains(key)) {
+                    return key;
+                }
+                String nested = firstFieldOutsideWhitelist(entry.getValue(), allowed);
+                if (nested != null) {
+                    return nested;
+                }
+            }
+        }
+        if (value instanceof List<?> source) {
+            for (Object item : source) {
+                String nested = firstFieldOutsideWhitelist(item, allowed);
+                if (nested != null) {
+                    return nested;
+                }
+            }
+        }
+        return null;
+    }
+
+    private boolean partialExtractionGapsExplicit(AiApplicationResultState result, Map<String, Object> payload) {
+        if (!"PARTIAL_PUBLISH".equals(text(result.structuredPayload(), "release_decision", null))) {
+            return true;
+        }
+        List<Map<String, Object>> fields = listMaps(payload.get("extracted_field_list"));
+        if (fields.isEmpty()) {
+            return false;
+        }
+        for (Map<String, Object> field : fields) {
+            if (text(field, "field_value", "").isBlank() && !List.of("EXTRACTION_FAILED", "OUT_OF_SCOPE").contains(text(field, "missing_status", null))) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean partialSummaryGapReasonExplicit(AiApplicationResultState result, Map<String, Object> payload) {
+        if (!"PARTIAL_PUBLISH".equals(text(result.structuredPayload(), "release_decision", null))) {
+            return true;
+        }
+        return text(payload, "partial_publish_reason", null) != null || text(payload, "gap_reason", null) != null;
+    }
+
+    private boolean partialSummaryStructureValid(AiApplicationResultState result, Map<String, Object> payload) {
+        if (!"PARTIAL_PUBLISH".equals(text(result.structuredPayload(), "release_decision", null))) {
+            return true;
+        }
+        List<Map<String, Object>> sections = listMaps(payload.get("section_list"));
+        List<Map<String, Object>> citations = listMaps(payload.get("citation_reference"));
+        return !text(payload, "summary_text", "").isBlank()
+                && sections.stream().anyMatch(section -> text(section, "section", null) != null && text(section, "text", null) != null)
+                && citations.stream().anyMatch(citation -> text(citation, "citation_ref", null) != null);
+    }
+
+    private boolean partialRiskPublishStatusesValid(AiApplicationResultState result, Map<String, Object> payload) {
+        if (!"PARTIAL_PUBLISH".equals(text(result.structuredPayload(), "release_decision", null))) {
+            return true;
+        }
+        List<Map<String, Object>> riskItems = listMaps(payload.get("risk_item_list"));
+        if (riskItems.isEmpty()) {
+            return false;
+        }
+        for (Map<String, Object> item : riskItems) {
+            String publishStatus = text(item, "publish_status", null);
+            if (publishStatus == null || !List.of("FULL", "PARTIAL", "WITHHELD").contains(publishStatus)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean partialRiskHasVisibleItems(AiApplicationResultState result, Map<String, Object> payload) {
+        if (!"PARTIAL_PUBLISH".equals(text(result.structuredPayload(), "release_decision", null))) {
+            return true;
+        }
+        return listMaps(payload.get("risk_item_list")).stream()
+                .anyMatch(item -> List.of("FULL", "PARTIAL").contains(text(item, "publish_status", null)));
+    }
+
     private List<Map<String, Object>> buildSemanticCandidates(String applicationType, ContractState contract, String documentVersionId,
                                                               List<SearchDocumentState> evidenceDocs, List<Map<String, Object>> evidenceSegments,
                                                               String sourceDigest, Map<String, Object> request) {
@@ -1534,6 +2396,11 @@ class CoreChainService {
         boolean unresolvedConflict = candidates.stream().anyMatch(candidate -> "CONFLICTED".equals(candidate.get("elimination_status")));
         if (lowQuality) {
             return new QualityDecision("TIER_D", "REJECT", List.of("LOW_QUALITY_REJECTED", "ANCHOR_OR_CITATION_INSUFFICIENT"), 0.20, 0.20, 0.15, 0.20, 0.10);
+        }
+        String forcedReleaseDecision = text(qualityInputs, "force_release_decision", null);
+        if (forcedReleaseDecision != null && List.of("PUBLISH", "PARTIAL_PUBLISH").contains(forcedReleaseDecision)) {
+            String tier = "PUBLISH".equals(forcedReleaseDecision) ? "TIER_A" : "TIER_B";
+            return new QualityDecision(tier, forcedReleaseDecision, List.of("QUALITY_PROFILE_RELEASE_OVERRIDE"), 0.82, 0.86, 0.80, 0.78, 0.80);
         }
         if (unresolvedConflict || "RISK_ANALYSIS".equals(applicationType)) {
             return new QualityDecision("TIER_C", "ESCALATE_TO_HUMAN", List.of("UNRESOLVED_CONFLICT", "HUMAN_REVIEW_REQUIRED"), 0.72, 0.82, 0.45, 0.70, 0.50);
@@ -6624,6 +7491,29 @@ class CoreChainService {
         return value == null || value.toString().isBlank() ? defaultValue : value.toString();
     }
 
+    private Instant payloadAssembledAt(Map<String, Object> payload, Instant defaultValue) {
+        return instantValue(payload.get("assembled_at"), null, defaultValue);
+    }
+
+    private Instant instantValue(Object primary, Object fallback, Instant defaultValue) {
+        Object value = primary != null ? primary : fallback;
+        if (value == null || value.toString().isBlank()) {
+            return defaultValue;
+        }
+        if (value instanceof Timestamp timestamp) {
+            return timestamp.toInstant();
+        }
+        if (value instanceof java.util.Date date) {
+            return date.toInstant();
+        }
+        String text = value.toString();
+        try {
+            return Instant.parse(text);
+        } catch (RuntimeException ignored) {
+            return Timestamp.valueOf(text.replace('T', ' ').replace("Z", "")).toInstant();
+        }
+    }
+
     private String summaryJson(Object value) {
         if (value == null) {
             return null;
@@ -6654,6 +7544,17 @@ class CoreChainService {
             return objectMapper.readValue(value, List.class);
         } catch (JsonProcessingException exception) {
             throw new IllegalArgumentException("JSON 列表无法反序列化", exception);
+        }
+    }
+
+    private List<String> listStringsFromJson(String value) {
+        if (value == null || value.isBlank()) {
+            return List.of();
+        }
+        try {
+            return objectMapper.readValue(value, List.class).stream().map(Object::toString).toList();
+        } catch (JsonProcessingException exception) {
+            throw new IllegalArgumentException("JSON 字符串列表无法反序列化", exception);
         }
     }
 
@@ -6804,6 +7705,26 @@ class CoreChainService {
     private record CandidateWritebackGateState(String resultId, String rankingSnapshotId, String qualityEvaluationId,
                                                String releaseDecision, String writebackGateStatus, boolean writebackAllowed,
                                                String traceId, String createdAt) {
+    }
+
+    private record ResultWritebackRecordState(String writebackRecordId, String resultId, String targetType, String targetId,
+                                              String writebackAction, String writebackStatus, int targetSnapshotVersion,
+                                              String conflictCode, String failureReason, int retryCount, String rankingSnapshotId,
+                                              String qualityEvaluationId, String operatorType, String operatorId,
+                                              Map<String, Object> payload, String traceId, String createdAt, String updatedAt,
+                                              String completedAt) {
+        ResultWritebackRecordState withStatus(String status, String conflictCode, String failureReason, int retryCount) {
+            return new ResultWritebackRecordState(writebackRecordId, resultId, targetType, targetId, writebackAction, status,
+                    targetSnapshotVersion, conflictCode, failureReason, retryCount, rankingSnapshotId, qualityEvaluationId,
+                    operatorType, operatorId, payload, traceId, createdAt, Instant.now().toString(), null);
+        }
+
+        ResultWritebackRecordState withTerminal(String status, String conflictCode, String failureReason, int retryCount) {
+            String now = Instant.now().toString();
+            return new ResultWritebackRecordState(writebackRecordId, resultId, targetType, targetId, writebackAction, status,
+                    targetSnapshotVersion, conflictCode, failureReason, retryCount, rankingSnapshotId, qualityEvaluationId,
+                    operatorType, operatorId, payload, traceId, createdAt, now, now);
+        }
     }
 
     private record QualityDecision(String qualityTier, String releaseDecision, List<String> reasonCodes, double coverage,
