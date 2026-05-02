@@ -2083,6 +2083,13 @@ class CoreChainService {
         body.put("retry_count", record.retryCount());
         body.put("ranking_snapshot_id", record.rankingSnapshotId());
         body.put("quality_evaluation_id", record.qualityEvaluationId());
+        String i18nContextId = candidateResultI18nContexts.get(record.resultId());
+        if (i18nContextId != null) {
+            Map<String, Object> context = i18nContext(i18nContextId);
+            body.put("i18n_context_id", i18nContextId);
+            body.put("terminology_profile_code", text(context, "terminology_profile_code", null));
+            body.put("profile_version", context.get("profile_version"));
+        }
         return body;
     }
 

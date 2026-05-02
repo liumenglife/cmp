@@ -494,6 +494,9 @@ class OpsGovernorController {
                         "quality", orderedMap("writeback_version_conflict_rate", count("ia_writeback_record", "conflict_code = 'VERSION_CONFLICT'"), "writeback_unresolved_equal_rate", count("ia_writeback_record", "conflict_code = 'UNRESOLVED_EQUAL'")),
                         "health", orderedMap("writeback_pending_timeout_count", count("ia_writeback_record", "writeback_status = 'PENDING'"), "writeback_lock_contention_count", count("ia_writeback_lock", "lock_status = 'LOCKED'")),
                         "recovery", orderedMap("writeback_dead_letter_depth", count("ia_writeback_dead_letter", "dead_letter_status = 'OPEN'"))
+                ),
+                "OPERATIONS", orderedMap(
+                        "latency", orderedMap("monitoring_refresh_delay_ms", missingMetric())
                 )
         );
         applyMetricSnapshots(matrix);
