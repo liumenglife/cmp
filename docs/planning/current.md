@@ -4,12 +4,12 @@
 
 - 第四批目标是完成智能与增强能力的一期实现基准，围绕智能应用主线交付文字识别、全文检索、智能辅助、智能推荐、多语言知识治理、结果回写与运维验收闭环。
 - 本批必须以合同主档为业务真相源、文档中心为文件真相源、`Agent OS` 为智能运行时底座，智能应用只承接受控派生结果域。
-- 当前分支为 `feature/batch-4-result-writeback-conflict-resolution`，隔离工作区为 `.worktrees/feature/batch-4-result-writeback-conflict-resolution`。
+- 当前分支为 `feature/batch-4-ops-monitoring-recovery-acceptance`，隔离工作区为 `.worktrees/feature/batch-4-ops-monitoring-recovery-acceptance`。
 
 ## 成功定义
 
 - 已完成智能推荐、候选排序与质量评估、多语言知识治理的分支合并和清理。
-- 已基于最新 `main` 创建结果回写与冲突处理隔离工作区，基线验证 `./scripts/verify-all.sh` 通过。
+- 已基于最新 `main` 创建第四批完全收口隔离工作区，基线验证 `./scripts/verify-all.sh` 通过。
 - 文字识别可基于文档中心受控版本创建作业，完成权限校验、幂等、引擎适配、结果归一、失败重试、版本失效与搜索补索引事件。
 - 全文检索可消费合同、文档、条款与文字识别派生结果，支持权限裁剪、稳定快照、导出二次校验、索引重建与降级。
 - 智能辅助通过 `Agent OS` 和模型抽象层运行，输出具备来源引用、护栏决策、人工确认挂点与审计链路。
@@ -25,9 +25,9 @@
 
 ## 当前阶段
 
-- 阶段：结果回写与冲突处理已完成测试驱动实现、规格终审、代码质量复审与完整验证；下一步提交、推送并创建面向 `main` 的拉取请求，不合并。
-- 分支：`feature/batch-4-result-writeback-conflict-resolution`。
-- 隔离工作区：`.worktrees/feature/batch-4-result-writeback-conflict-resolution`。
+- 阶段：运维监控、恢复与上线验收已完成测试驱动实现、规格复审、代码质量复审与完整验证；下一步启动第四批跨能力综合验证。
+- 分支：`feature/batch-4-ops-monitoring-recovery-acceptance`。
+- 隔离工作区：`.worktrees/feature/batch-4-ops-monitoring-recovery-acceptance`。
 - 规格：[`102-cmp-implementation-execution-spec.md`](../superpowers/specs/102-cmp-implementation-execution-spec.md)。
 - 当前批次计划：[`102-04-batch-4-intelligent-applications-implementation-plan.md`](../superpowers/plans/102-04-batch-4-intelligent-applications-implementation-plan.md)。
 
@@ -46,9 +46,10 @@
 - [✓] 拉取请求十一合并与分支清理：已合并到 `main`，本地 `main` 已同步，多语言知识治理本地分支、远端分支和工作树均已删除。
 - [✓] 结果回写与冲突处理分支与工作树创建：基于最新 `main` 创建 `feature/batch-4-result-writeback-conflict-resolution`，基线验证 `./scripts/verify-all.sh` 通过。
 - [✓] 结果回写与冲突处理：已完成测试驱动实现、规格终审、代码质量复审与完整验证。
-- [•] 结果回写与冲突处理提交、推送与拉取请求创建。
-- [ ] 运维监控、恢复与上线验收。
-- [ ] 第四批跨能力综合验证。
+- [✓] 拉取请求十三合并与分支清理：已合并到 `main`，本地 `main` 已同步，结果回写与冲突处理本地分支、远端分支和工作树均已删除。
+- [✓] 第四批完全收口分支与工作树创建：基于最新 `main` 创建 `feature/batch-4-ops-monitoring-recovery-acceptance`，基线验证 `./scripts/verify-all.sh` 通过。
+- [✓] 运维监控、恢复与上线验收：已完成测试驱动实现、规格复审、代码质量复审与完整验证。
+- [•] 第四批跨能力综合验证。
 - [ ] 第四批整体质量收口。
 
 ## 子代理执行协议
@@ -76,7 +77,16 @@
 - [✓] 首轮代码质量审查问题已修复，定向测试和第四批相关回归通过。
 - [✓] 结果回写与冲突处理代码质量复审通过，没问题。
 - [✓] 结果回写与冲突处理完整验证已通过：`./scripts/verify-all.sh`，后端 `202` 个测试通过，前端依赖检查、lint、vitest、build、Docker Compose 配置、镜像构建、编排启动、healthcheck / smoke 与清理均通过。
-- [•] 准备提交当前全绿变更、推送分支到 `origin`，并创建面向 `main` 的拉取请求；本轮不合并。
+- [✓] 拉取请求十三已合并到 `main`，合并提交为 `ba93443`。
+- [✓] 本地 `main` 已同步到 `origin/main`。
+- [✓] 结果回写与冲突处理分支和工作树已清理。
+- [✓] 已按用户选择创建第四批完全收口分支与工作树：`feature/batch-4-ops-monitoring-recovery-acceptance`。
+- [✓] 新工作树基线验证已通过：`./scripts/verify-all.sh`，后端 `202` 个测试通过，前端依赖检查、lint、vitest、build、Docker Compose 配置、镜像构建、编排启动、healthcheck / smoke 与清理均通过。
+- [✓] 运维监控、恢复与上线验收已完成测试驱动实现，覆盖监控面板、告警阈值、静默维护窗口、恢复脚本、回滚手册、运维权限、双人复核、审计日志和健康检查。
+- [✓] 运维监控、恢复与上线验收规格复审通过，没问题。
+- [✓] 运维监控、恢复与上线验收代码质量复审通过，没问题。
+- [✓] 运维监控、恢复与上线验收完整验证已通过：`./scripts/verify-all.sh`，后端 `210` 个测试通过，前端依赖检查、lint、vitest、build、Docker Compose 配置、镜像构建、编排启动、healthcheck / smoke 与清理均通过。
+- [•] 准备提交运维监控、恢复与上线验收全绿变更，然后启动第四批跨能力综合验证。
 
 ## 已完成里程碑
 
@@ -87,6 +97,7 @@
 - [✓] 第四批前半段阶段性交付已合并。
 - [✓] 第四批智能推荐、候选排序与质量评估已合并。
 - [✓] 第四批多语言知识治理已合并。
+- [✓] 第四批结果回写与冲突处理已合并。
 
 ## 当前阻塞
 
@@ -95,15 +106,15 @@
 
 ## 活跃支线
 
-- [•] 结果回写与冲突处理提交、推送与拉取请求创建。
+- [•] 第四批完全收口：跨能力综合验证。
 
 ## 下一步唯一动作
 
-- 提交当前全绿变更，推送 `feature/batch-4-result-writeback-conflict-resolution` 到 `origin`，并创建面向 `main` 的拉取请求；创建后返回链接，不合并。
+- 提交运维监控、恢复与上线验收全绿变更，然后派发实现子代理按测试驱动开发完成第四批跨能力综合验证。
 
 ## 恢复提示
 
 - 恢复时先读本文件、[`history.md`](./history.md)、[`decisions.md`](./decisions.md)。
 - 已完成批次只读取 [`history.md`](./history.md)，不要把已完成批次长列表写回 `current.md`。
 - 第四批正式执行依据为 [`102-cmp-implementation-execution-spec.md`](../superpowers/specs/102-cmp-implementation-execution-spec.md) 与 [`102-04-batch-4-intelligent-applications-implementation-plan.md`](../superpowers/plans/102-04-batch-4-intelligent-applications-implementation-plan.md)。
-- 当前结果回写与冲突处理工作树为 `.worktrees/feature/batch-4-result-writeback-conflict-resolution`；实现必须在该隔离工作区内推进。
+- 当前第四批完全收口工作树为 `.worktrees/feature/batch-4-ops-monitoring-recovery-acceptance`；实现必须在该隔离工作区内推进。

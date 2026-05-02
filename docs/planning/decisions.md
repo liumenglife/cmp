@@ -239,3 +239,9 @@
 - 决策：第四批“结果回写与冲突处理”编码使用 `feature/batch-4-result-writeback-conflict-resolution` 分支和 `.worktrees/feature/batch-4-result-writeback-conflict-resolution` 隔离工作区推进。
 - 原因：多语言知识治理已经通过拉取请求十一合并到 `main`，规划真相同步已经通过拉取请求十二进入 `main`；下一功能点需要基于最新 `main` 启动，聚焦受控结果回写、目标视图投影、冲突裁决、死信恢复和审计追溯，避免继续沿用已完成多语言治理分支。
 - 影响：结果回写与冲突处理的编码、验证、独立质量审查与提交均在该工作树内完成；主工作区保持 `main` 同步入口，不直接承载生产代码修改。
+
+### 决策 39：第四批完全收口使用独立工作树分支推进
+
+- 决策：第四批完全收口编码使用 `feature/batch-4-ops-monitoring-recovery-acceptance` 分支和 `.worktrees/feature/batch-4-ops-monitoring-recovery-acceptance` 隔离工作区推进。
+- 原因：结果回写与冲突处理已经通过拉取请求十三合并到 `main` 并完成分支与工作树清理；第四批仍剩余运维监控、恢复与上线验收、跨能力综合验证和整体质量收口，必须先完成第四批全部收口后才能进入第五批。
+- 影响：本分支不启动第五批综合联调验收与上线准备；只完成第四批计划内的智能应用运维治理、恢复演练、健康检查、跨能力综合验证和整体质量门禁。
